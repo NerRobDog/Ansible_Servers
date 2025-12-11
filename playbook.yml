@@ -167,10 +167,10 @@
       ansible.builtin.command: "pipx install {{ item }}"
       args:
         creates: "{{ new_user_home_resolved }}/.local/pipx/venvs/{{ item }}"
-      loop: "{{ (pipx_packages | default([]) | reject('equalto', 'thefuck') | list) + (enable_thefuck | default(false) | ternary(['thefuck'], [])) }}"
+      loop: "{{ pipx_packages | default([]) }}"
       when:
         - create_user | bool
-        - (pipx_packages | default([]) | length > 0) or (enable_thefuck | default(false))
+        - pipx_packages | default([]) | length > 0
       tags: [base, pipx]
 
     # Пользователь и SSH
