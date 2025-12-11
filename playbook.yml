@@ -1,0 +1,355 @@
+---
+- name: Подготовка сервера для деплоя
+  hosts: all
+  become: true
+
+  vars_files:
+    - vars/default.yml
+    - vars/ernestsh.yml
+
+  # Локальные vars для удобства и дефолтов
+  vars:
+    # Универсальный путь к домашней директории пользователя
+    new_user_home_resolved: "{{ new_user_home | default((new_user == 'root') | ternary('/root', '/home/' ~ new_user)) }}"
+
+  pre_tasks:
+    # Плагины dnf (для config-manager)
+    - name: Установить dnf-plugins-core
+      ansible.builtin.dnf:
+        name: dnf-plugins-core
+        state: present
+      when: ansible_os_family == "RedHat"
+      tags: [base]
+
+    # EPEL для RHEL-совместимых
+    - name: Установить EPEL
+      ansible.builtin.dnf:
+        name: epel-release
+        state: present
+      when:
+        - ansible_os_family == "RedHat"
+        - ansible_distribution != "Fedora"
+      tags: [base]
+
+    # Включить CRB (Rocky/CentOS Stream 9)
+    - name: Включить репозиторий CRB
+      ansible.builtin.command: dnf config-manager --set-enabled crb
+      register: crb_enable
+      changed_when: "'enabled' in crb_enable.stdout or crb_enable.rc == 0"
+      failed_when: crb_enable.rc not in [0]
+      when:
+        - ansible_os_family == "RedHat"
+        - ansible_distribution_major_version | int >= 9
+      tags: [base]
+
+    - name: Обновить метаданные dnf
+      ansible.builtin.dnf:
+        update_cache: true
+      changed_when: false
+      when: ansible_os_family == "RedHat"
+      tags: [base]
+
+    - name: Добавить официальный репозиторий Docker CE
+      ansible.builtin.yum_repository:
+        name: docker-ce
+        description: Docker CE Stable - $basearch
+        baseurl: https://download.docker.com/linux/centos/$releasever/$basearch/stable
+        gpgcheck: yes
+        gpgkey: https://download.docker.com/linux/centos/gpg
+        enabled: yes
+      when: ansible_os_family == "RedHat"
+      tags: [docker]
+
+    - name: Установить Docker CE и плагины
+      ansible.builtin.dnf:
+        name: "{{ docker_packages }}"
+        state: present
+      notify: стартовать docker
+      when: ansible_os_family == "RedHat"
+      tags: [docker]
+
+
+    - name: Удалить старый Docker-репозиторий (Debian/Ubuntu, без signed-by)
+      ansible.builtin.file:
+        path: /etc/apt/sources.list.d/download_docker_com_linux_ubuntu.list
+        state: absent
+      when: ansible_os_family == "Debian"
+      tags: [docker]
+
+    - name: Установить зависимости для Docker (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: true
+      when: ansible_os_family == "Debian"
+      tags: [base]
+
+    - name: Добавить GPG-ключ Docker (Debian/Ubuntu)
+      ansible.builtin.apt_key:
+        url: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
+        state: present
+      when: ansible_os_family == "Debian"
+      tags: [docker]
+
+    - name: Проверить наличие Docker-репозитория (Debian/Ubuntu)
+      ansible.builtin.stat:
+        path: /etc/apt/sources.list.d/docker.list
+      register: docker_repo_file
+      when: ansible_os_family == "Debian"
+      tags: [docker]
+
+    - name: Добавить репозиторий Docker (Debian/Ubuntu)
+      ansible.builtin.apt_repository:
+        repo: "deb [arch={{ ansible_architecture }}] https://download.docker.com/linux/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable"
+        state: present
+      when:
+        - ansible_os_family == "Debian"
+        - not docker_repo_file.stat.exists
+      tags: [docker]
+
+    - name: Установить Docker CE и плагины (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: "{{ docker_packages }}"
+        state: present
+        update_cache: true
+      notify: стартовать docker
+      when: ansible_os_family == "Debian"
+      tags: [docker]
+
+  handlers:
+    - name: стартовать docker
+      ansible.builtin.service:
+        name: docker
+        state: started
+        enabled: true
+
+  tasks:
+    - name: Установить базовые пакеты
+      ansible.builtin.package:
+        name: "{{ base_packages }}"
+        state: present
+      tags: [base]
+
+    - name: Установить pipx (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: pipx
+        state: present
+        update_cache: true
+      when: ansible_os_family == "Debian"
+      tags: [base, pipx]
+
+    - name: Установить pipx (RedHat)
+      ansible.builtin.dnf:
+        name: pipx
+        state: present
+      when: ansible_os_family == "RedHat"
+      tags: [base, pipx]
+
+    - name: Выполнить pipx ensurepath для пользователя
+      become_user: "{{ new_user }}"
+      ansible.builtin.command: pipx ensurepath
+      when:
+        - create_user | bool
+      tags: [base, pipx]
+
+    - name: Выполнить pipx ensurepath для root
+      become_user: root
+      ansible.builtin.command: pipx ensurepath
+      when: configure_root_zsh | default(false)
+      tags: [root, pipx]
+
+    - name: Установить пакеты через pipx для пользователя
+      become_user: "{{ new_user }}"
+      ansible.builtin.command: "pipx install {{ item }}"
+      args:
+        creates: "{{ new_user_home_resolved }}/.local/pipx/venvs/{{ item }}"
+      loop: "{{ (pipx_packages | default([]) | reject('equalto', 'thefuck') | list) + (enable_thefuck | default(false) | ternary(['thefuck'], [])) }}"
+      when:
+        - create_user | bool
+        - (pipx_packages | default([]) | length > 0) or (enable_thefuck | default(false))
+      tags: [base, pipx]
+
+    # Пользователь и SSH
+    - name: Создать пользователя
+      ansible.builtin.user:
+        name: "{{ new_user }}"
+        comment: "{{ new_user_comment | default(new_user) }}"
+        groups: "{{ new_user_groups
+                    | map('regex_replace', '^wheel$', (ansible_os_family == 'Debian') | ternary('sudo', 'wheel'))
+                    | list
+                    | join(',') }}"
+        append: true
+        shell: /bin/bash
+        create_home: true
+        password: "{{ new_user_password_hash | default(omit) }}"
+        state: present
+      when: create_user | bool
+      tags: [user]
+
+    - name: Создать ~/.ssh
+      ansible.builtin.file:
+        path: "{{ new_user_home_resolved }}/.ssh"
+        state: directory
+        owner: "{{ new_user }}"
+        group: "{{ new_user }}"
+        mode: "0700"
+      when: create_user | bool
+      tags: [user, ssh]
+
+    - name: Добавить fallback-переход в zsh в .bashrc пользователя
+      ansible.builtin.blockinfile:
+        path: "{{ new_user_home_resolved }}/.bashrc"
+        block: |
+          if [ -t 1 ] && command -v zsh >/dev/null 2>&1; then
+            export SHELL=/bin/zsh
+            exec zsh -l
+          fi
+        owner: "{{ new_user }}"
+        group: "{{ new_user }}"
+        mode: '0644'
+        create: true
+        marker: "# {mark} ANSIBLE MANAGED ZSH FALLBACK"
+      when: create_user | bool
+      tags: [user, ssh]
+
+    - name: Добавить authorized_keys
+      ansible.builtin.copy:
+        dest: "{{ new_user_home_resolved }}/.ssh/authorized_keys"
+        content: "{{ new_user_authorized_keys | join('\n') }}"
+        owner: "{{ new_user }}"
+        group: "{{ new_user }}"
+        mode: "0600"
+      when:
+        - create_user | bool
+        - (new_user_authorized_keys | default([], true)) | length > 0
+      tags: [user, ssh]
+
+    - name: Включить passwordless sudo (NOPASSWD)
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/{{ new_user }}"
+        content: "{{ new_user }} ALL=(ALL) NOPASSWD:ALL"
+        mode: "0440"
+      when:
+        - create_user | bool
+        - new_user_passwordless_sudo | default(false)
+      tags: [user, sudo]
+
+    # Oh My Zsh и окружение разработчика
+    - name: Установить Oh My Zsh
+      become_user: "{{ new_user }}"
+      ansible.builtin.shell: |
+        set -o errexit -o nounset -o pipefail
+        export RUNZSH=no
+        export CHSH=no
+        export KEEP_ZSHRC=yes
+        sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+      args:
+        executable: /bin/bash
+        creates: "{{ new_user_home_resolved }}/.oh-my-zsh/oh-my-zsh.sh"
+      when: create_user | bool
+      tags: [user, zsh]
+
+    - name: Проверить наличие директории плагинов Oh My Zsh
+      ansible.builtin.file:
+        path: "{{ new_user_home_resolved }}/.oh-my-zsh/custom/plugins"
+        state: directory
+        owner: "{{ new_user }}"
+        group: "{{ new_user }}"
+        mode: '0755'
+      when: create_user | bool
+      tags: [user, zsh]
+
+    - name: Установить кастомные плагины Oh My Zsh
+      become_user: "{{ new_user }}"
+      ansible.builtin.git:
+        repo: "{{ item.repo }}"
+        dest: "{{ new_user_home_resolved }}/.oh-my-zsh/custom/plugins/{{ item.name }}"
+        version: "{{ item.version | default('master') }}"
+        update: true
+        force: true
+      loop: "{{ zsh_custom_plugins | default([]) }}"
+      when:
+        - create_user | bool
+        - zsh_custom_plugins is defined
+        - zsh_custom_plugins | length > 0
+      tags: [user, zsh]
+
+    - name: Установить кастомные плагины Oh My Zsh для root
+      become_user: root
+      ansible.builtin.git:
+        repo: "{{ item.repo }}"
+        dest: "/root/.oh-my-zsh/custom/plugins/{{ item.name }}"
+        version: "{{ item.version | default('master') }}"
+        update: true
+        force: true
+      loop: "{{ zsh_custom_plugins | default([]) }}"
+      when:
+        - configure_root_zsh | default(false)
+        - zsh_custom_plugins is defined
+        - zsh_custom_plugins | length > 0
+      tags: [root, zsh]
+
+    - name: Развернуть .zshrc
+      become_user: "{{ new_user }}"
+      ansible.builtin.template:
+        src: templates/zshrc.j2
+        dest: "{{ new_user_home_resolved }}/.zshrc"
+        mode: '0644'
+      when: create_user | bool
+      tags: [user, zsh]
+
+    - name: Проверить наличие корректной установки Oh My Zsh для root
+      ansible.builtin.stat:
+        path: "/root/.oh-my-zsh/oh-my-zsh.sh"
+      register: omz_root_file
+      when: configure_root_zsh | default(false)
+      tags: [root, zsh]
+
+    - name: Удалить некорректную установку Oh My Zsh для root
+      ansible.builtin.file:
+        path: "/root/.oh-my-zsh"
+        state: absent
+      when:
+        - configure_root_zsh | default(false)
+        - omz_root_file.stat.exists is defined
+        - not omz_root_file.stat.exists
+      tags: [root, zsh]
+
+    - name: Установить Oh My Zsh для root
+      become_user: root
+      ansible.builtin.shell: |
+        set -o errexit -o nounset -o pipefail
+        export RUNZSH=no
+        export CHSH=no
+        export KEEP_ZSHRC=yes
+        sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+      args:
+        executable: /bin/bash
+        creates: "/root/.oh-my-zsh/oh-my-zsh.sh"
+      when: configure_root_zsh | default(false)
+      tags: [root, zsh]
+
+    - name: Развернуть .zshrc для root
+      become_user: root
+      ansible.builtin.template:
+        src: templates/zshrc.j2
+        dest: "/root/.zshrc"
+        mode: '0644'
+      when: configure_root_zsh | default(false)
+      tags: [root, zsh]
+
+    - name: Добавить fallback-переход в zsh в .bashrc root
+      ansible.builtin.blockinfile:
+        path: "/root/.bashrc"
+        block: |
+          if [ -t 1 ] && command -v zsh >/dev/null 2>&1; then
+            export SHELL=/bin/zsh
+            exec zsh -l
+          fi
+        marker: "# {mark} ANSIBLE MANAGED ZSH FALLBACK"
+      when: configure_root_zsh | default(false)
+      tags: [root, zsh]
