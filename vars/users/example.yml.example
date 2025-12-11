@@ -1,0 +1,26 @@
+# Скопируйте этот файл в vars/users/<имя_пользователя>.yml (удалив расширение .example)
+# и заполните значения под себя. Все переменные используются при создании пользователя
+# и настройке окружения.
+---
+new_user: example
+create_user: true
+new_user_comment: "Example User"
+new_user_groups:
+  - wheel
+new_user_authorized_keys:
+  - "ssh-ed25519 AAAAB3NzaC1yc2EAAAADAQABAAACAQDnExampleKeyGoesHere комментарий"
+# Хеш пароля в формате, поддерживаемом useradd. Оставьте пустым, если не нужен.
+new_user_password_hash: ""
+# Разрешить sudo без пароля.
+new_user_passwordless_sudo: true
+# Явно задать домашнюю директорию (по умолчанию /home/<new_user> или /root).
+# new_user_home: /home/example
+
+# Дополнительные настройки окружения
+zsh_custom_plugins:
+  - name: zsh-autosuggestions
+    repo: https://github.com/zsh-users/zsh-autosuggestions.git
+    version: master
+pipx_packages:
+  - httpie
+enable_thefuck: false

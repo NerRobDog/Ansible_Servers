@@ -3,16 +3,32 @@
   hosts: all
   become: true
 
-  vars_files:
-    - vars/default.yml
-    - vars/ernestsh.yml
-
   # Локальные vars для удобства и дефолтов
   vars:
     # Универсальный путь к домашней директории пользователя
     new_user_home_resolved: "{{ new_user_home | default((new_user == 'root') | ternary('/root', '/home/' ~ new_user)) }}"
 
   pre_tasks:
+    # Скопируйте vars/users/example.yml.example -> vars/users/<имя>.yml, чтобы добавить свои переменные.
+    - name: Загрузить общие значения по умолчанию
+      ansible.builtin.include_vars:
+        file: vars/default.yml
+      tags: [always]
+
+    - name: Собрать пользовательские файлы переменных
+      ansible.builtin.set_fact:
+        user_var_files: "{{ lookup('ansible.builtin.fileglob', 'vars/users/*.yml', wantlist=True) }}"
+      tags: [always]
+
+    - name: Подключить пользовательские переменные
+      ansible.builtin.include_vars:
+        file: "{{ item }}"
+      loop: "{{ user_var_files }}"
+      loop_control:
+        label: "{{ item | basename }}"
+      when: user_var_files | length > 0
+      tags: [always]
+
     # Плагины dnf (для config-manager)
     - name: Установить dnf-plugins-core
       ansible.builtin.dnf:
