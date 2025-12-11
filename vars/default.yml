@@ -2,7 +2,7 @@
 zsh_theme: afowler
 configure_root_zsh: true
 
-omz_plugins:
+omz_plugins_base:
   - git
   - history
   - zsh-autosuggestions
@@ -14,10 +14,22 @@ omz_plugins:
   - docker-compose
   - z
   - fzf
-  - thefuck
   - colored-man-pages
   - aliases
   - ansible
+
+pip_packages_base:
+  - httpie
+
+pipx_packages_base: []
+
+# При true добавляет thefuck к плагинам Oh My Zsh и устанавливает его через pip/pipx
+enable_thefuck: false
+
+omz_plugins: "{{ omz_plugins_base + (enable_thefuck | bool | ternary(['thefuck'], [])) }}"
+pip_packages: "{{ pip_packages_base + (enable_thefuck | bool | ternary(['thefuck'], [])) }}"
+pipx_packages: "{{ pipx_packages_base + (enable_thefuck | bool | ternary(['thefuck'], [])) }}"
+
 base_packages:
   - git
   - curl
@@ -33,17 +45,14 @@ base_packages:
   - ansible-core
   - htop
   - net-tools
+
 docker_packages:
   - docker-ce
   - docker-ce-cli
   - containerd.io
   - docker-buildx-plugin
   - docker-compose-plugin
-pip_packages:
-  - thefuck
-  - httpie
-pipx_packages:
-  - thefuck
+
 # будут скачаны из репозиториев
 zsh_custom_plugins:
   - name: zsh-autosuggestions
@@ -53,5 +62,3 @@ zsh_custom_plugins:
   - name: zsh-syntax-highlighting
     repo: https://github.com/zsh-users/zsh-syntax-highlighting.git
     version: master
-
-enable_thefuck: false
