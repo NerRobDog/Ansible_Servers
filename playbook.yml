@@ -3,16 +3,64 @@
   hosts: all
   become: true
 
-  vars_files:
-    - vars/default.yml
-    - vars/ernestsh.yml
-
   # Локальные vars для удобства и дефолтов
   vars:
     # Универсальный путь к домашней директории пользователя
     new_user_home_resolved: "{{ new_user_home | default((new_user == 'root') | ternary('/root', '/home/' ~ new_user)) }}"
 
   pre_tasks:
+    # Скопируйте vars/users/example.yml.example -> vars/users/<имя>.yml, чтобы добавить свои переменные.
+    # Если файлов несколько, выберите один через -e "user_vars_file=vars/users/<имя>.yml" или в inventory.
+    - name: Загрузить общие значения по умолчанию
+      ansible.builtin.include_vars:
+        file: vars/default.yml
+      tags: [always]
+
+    - name: Собрать пользовательские файлы переменных
+      ansible.builtin.set_fact:
+        user_var_files: "{{ lookup('ansible.builtin.fileglob', 'vars/users/*.yml', wantlist=True) }}"
+      tags: [always]
+
+    - name: Проверить указанный файл переменных пользователя
+      ansible.builtin.stat:
+        path: "{{ user_vars_file }}"
+      register: user_vars_file_stat
+      when: user_vars_file is defined
+      tags: [always]
+
+    - name: Убедиться, что файл переменных пользователя существует
+      ansible.builtin.assert:
+        that:
+          - user_vars_file_stat is defined
+          - user_vars_file_stat.stat.exists
+        fail_msg: "Файл user_vars_file={{ user_vars_file }} не найден"
+      when: user_vars_file is defined
+      tags: [always]
+
+    - name: Определить выбранный файл переменных пользователя
+      ansible.builtin.set_fact:
+        selected_user_vars_file: >-
+          {{ user_vars_file
+             if (user_vars_file is defined)
+             else (user_var_files[0] if user_var_files | length == 1 else '') }}
+      tags: [always]
+
+    - name: Проверить, что выбран ровно один профиль пользователя
+      ansible.builtin.assert:
+        that:
+          - selected_user_vars_file | length > 0
+        fail_msg: >-
+          Найдено {{ user_var_files | length }} файлов vars/users/*.yml.
+          Укажите user_vars_file=vars/users/<имя>.yml или удалите лишние.
+      when: user_var_files | length > 0
+      tags: [always]
+
+    - name: Подключить пользовательские переменные
+      ansible.builtin.include_vars:
+        file: "{{ selected_user_vars_file }}"
+      when: selected_user_vars_file is defined and selected_user_vars_file | length > 0
+      tags: [always]
+
     # Плагины dnf (для config-manager)
     - name: Установить dnf-plugins-core
       ansible.builtin.dnf:
