@@ -1,0 +1,14 @@
+---
+- name: Подготовка сервера для деплоя
+  hosts: all
+  become: true
+  roles:
+    - role: base
+      tags: [base]
+
+    - role: docker
+      tags: [docker]
+
+    - role: user_shell
+      when: (create_user | default(false) | bool) or (configure_root_zsh | default(false) | bool)
+      tags: [user, ssh, sudo, zsh, pipx]

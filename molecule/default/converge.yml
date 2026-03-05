@@ -1,0 +1,35 @@
+---
+- name: Converge
+  hosts: all
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Ensure prerequisites for user_shell role are installed
+      ansible.builtin.apt:
+        name:
+          - git
+          - zsh
+          - sudo
+        state: present
+        update_cache: true
+
+  roles:
+    - role: user_shell
+      vars:
+        create_user: true
+        new_user: molecule
+        new_user_comment: molecule
+        new_user_home: "/home/molecule"
+        new_user_groups:
+          - sudo
+        new_user_authorized_keys:
+          - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMoleculeTestKeyOnlyDontUseInProd molecule@test"
+        new_user_authorized_keys_exclusive: true
+        new_user_passwordless_sudo: true
+        configure_root_zsh: false
+        pipx_packages: []
+        enable_thefuck: false
+        omz_plugins:
+          - git
+        zsh_custom_plugins: []
