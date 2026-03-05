@@ -3,3 +3,4 @@
 .ansible/
 __pycache__/
 *.pyc
+hosts.plain.ini

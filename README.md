@@ -8,6 +8,8 @@
 ## Структура
 
 - `playbook.yml` — orchestration playbook.
+- `hosts.ini` — зашифрованный inventory (Ansible Vault, `vault-id secrets`).
+- `hosts.example.ini` — пример inventory без секретов.
 - `group_vars/all.yml` — общие дефолты для всех хостов.
 - `host_vars/<host>.yml` — хостовые профили (например, пользователь `ernestsh`).
 - `roles/` — реализации ролей.
@@ -27,12 +29,23 @@
    ```bash
    mkdir -p .ansible/tmp
    ANSIBLE_LOCAL_TEMP=.ansible/tmp ANSIBLE_REMOTE_TEMP=.ansible/tmp \
-     ansible-playbook -i hosts.ini playbook.yml --syntax-check
+     ansible-playbook -i hosts.ini playbook.yml --syntax-check \
+     --vault-id secrets@.ansible/secrets/vault_secrets_pass.txt
    ```
 4. Запуск:
    ```bash
-   ansible-playbook -i hosts.ini playbook.yml
+   ansible-playbook -i hosts.ini playbook.yml \
+     --vault-id secrets@.ansible/secrets/vault_secrets_pass.txt
    ```
+
+### Vault inventory
+
+- `hosts.ini` зашифрован через Ansible Vault (`vault-id: secrets`).
+- Пароль хранится локально в `.ansible/secrets/vault_secrets_pass.txt` и не попадает в git.
+- Для редактирования:
+  ```bash
+  ansible-vault edit --vault-id secrets@.ansible/secrets/vault_secrets_pass.txt hosts.ini
+  ```
 
 ## Molecule и CI
 
