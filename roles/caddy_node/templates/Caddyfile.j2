@@ -1,15 +1,19 @@
 {
-{% if remnawave_caddy_email_effective | trim | length > 0 %}
-    email {{ remnawave_caddy_email_effective }}
-{% endif %}
+    # Self-steal mode: do not bind :80/:443 implicitly.
+    auto_https off
 }
 
-http://{{ remnawave_caddy_domain_effective }} {
-    redir https://{{ remnawave_caddy_domain_effective }}:{{ remnawave_caddy_monitor_port_effective }}{uri} permanent
-}
+http://{{ remnawave_caddy_domain_effective }}:{{ remnawave_caddy_monitor_port_effective }} {
+    @local {
+        remote_ip 127.0.0.1 ::1
+    }
 
-https://{{ remnawave_caddy_domain_effective }}:{{ remnawave_caddy_monitor_port_effective }} {
-    encode zstd gzip
-    respond /healthz "ok" 200
-    respond "remnawave-node" 200
+    handle @local {
+        respond /healthz "ok" 200
+        respond "remnawave-node" 200
+    }
+
+    handle {
+        abort
+    }
 }
