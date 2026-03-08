@@ -106,6 +106,26 @@
           'remnawave_ipv6_state': (
             remnawave_api_response.json.remnawave_ipv6_state
             | default(remnawave_api_response.json.ipv6_state, true)
+          ),
+          'remnawave_caddy_tls_mode': (
+            remnawave_api_response.json.remnawave_caddy_tls_mode
+            | default(remnawave_api_response.json.caddy_tls_mode, true)
+          ),
+          'remnawave_caddy_tls_cert_file': (
+            remnawave_api_response.json.remnawave_caddy_tls_cert_file
+            | default(remnawave_api_response.json.caddy_tls_cert_file, true)
+          ),
+          'remnawave_caddy_tls_key_file': (
+            remnawave_api_response.json.remnawave_caddy_tls_key_file
+            | default(remnawave_api_response.json.caddy_tls_key_file, true)
+          ),
+          'remnawave_caddy_local_only': (
+            remnawave_api_response.json.remnawave_caddy_local_only
+            | default(remnawave_api_response.json.caddy_local_only, true)
+          ),
+          'remnawave_caddy_acme_ca': (
+            remnawave_api_response.json.remnawave_caddy_acme_ca
+            | default(remnawave_api_response.json.caddy_acme_ca, true)
           )
         }
         | dict2items
@@ -138,7 +158,12 @@
           'remnawave_node_port': remnawave_node_port,
           'remnawave_caddy_domain': remnawave_caddy_domain,
           'remnawave_caddy_monitor_port': remnawave_caddy_monitor_port,
-          'remnawave_ipv6_state': remnawave_ipv6_state
+          'remnawave_ipv6_state': remnawave_ipv6_state,
+          'remnawave_caddy_tls_mode': remnawave_caddy_tls_mode,
+          'remnawave_caddy_tls_cert_file': remnawave_caddy_tls_cert_file,
+          'remnawave_caddy_tls_key_file': remnawave_caddy_tls_key_file,
+          'remnawave_caddy_local_only': remnawave_caddy_local_only,
+          'remnawave_caddy_acme_ca': remnawave_caddy_acme_ca
         }
         | combine(remnawave_fallback_host_vars, recursive=True)
         | combine(remnawave_runtime_host_specific, recursive=True)
@@ -154,6 +179,13 @@
     remnawave_caddy_domain_effective: "{{ remnawave_effective_vars.remnawave_caddy_domain | default(remnawave_caddy_domain, true) | string }}"
     remnawave_caddy_monitor_port_effective: "{{ remnawave_effective_vars.remnawave_caddy_monitor_port | default(remnawave_caddy_monitor_port, true) | int }}"
     remnawave_ipv6_state_effective: "{{ remnawave_effective_vars.remnawave_ipv6_state | default(remnawave_ipv6_state, true) | string }}"
+    remnawave_caddy_tls_mode_effective: "{{ remnawave_effective_vars.remnawave_caddy_tls_mode | default(remnawave_caddy_tls_mode, true) | string | lower }}"
+    remnawave_caddy_tls_cert_file_effective: >-
+      {{ remnawave_effective_vars.remnawave_caddy_tls_cert_file | default(remnawave_caddy_tls_cert_file, true) | string }}
+    remnawave_caddy_tls_key_file_effective: >-
+      {{ remnawave_effective_vars.remnawave_caddy_tls_key_file | default(remnawave_caddy_tls_key_file, true) | string }}
+    remnawave_caddy_local_only_effective: "{{ remnawave_effective_vars.remnawave_caddy_local_only | default(remnawave_caddy_local_only, true) | bool }}"
+    remnawave_caddy_acme_ca_effective: "{{ remnawave_effective_vars.remnawave_caddy_acme_ca | default(remnawave_caddy_acme_ca, true) | string }}"
   changed_when: false
   tags: [remnawave, node]
 
@@ -171,8 +203,8 @@
   ansible.builtin.assert:
     that:
       - remnawave_missing_required_vars | length == 0
-      - remnawave_node_port_effective > 0
-      - remnawave_node_port_effective < 65536
+      - (remnawave_node_port_effective | int) > 0
+      - (remnawave_node_port_effective | int) < 65536
     fail_msg: "Missing or invalid vars after API/fallback merge: {{ remnawave_missing_required_vars | join(', ') }}"
   tags: [remnawave, node]
 
@@ -182,6 +214,11 @@
     remnawave_caddy_domain_resolved: "{{ remnawave_caddy_domain_effective }}"
     remnawave_caddy_monitor_port_resolved: "{{ remnawave_caddy_monitor_port_effective }}"
     remnawave_ipv6_state_resolved: "{{ remnawave_ipv6_state_effective }}"
+    remnawave_caddy_tls_mode_resolved: "{{ remnawave_caddy_tls_mode_effective }}"
+    remnawave_caddy_tls_cert_file_resolved: "{{ remnawave_caddy_tls_cert_file_effective }}"
+    remnawave_caddy_tls_key_file_resolved: "{{ remnawave_caddy_tls_key_file_effective }}"
+    remnawave_caddy_local_only_resolved: "{{ remnawave_caddy_local_only_effective }}"
+    remnawave_caddy_acme_ca_resolved: "{{ remnawave_caddy_acme_ca_effective }}"
   changed_when: false
   tags: [remnawave, node]
 

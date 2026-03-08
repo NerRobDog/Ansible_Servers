@@ -62,6 +62,7 @@
 Перед merge помощник обязан выполнить:
 
 ```bash
+python .github/scripts/test-render-fleet-runtime.py
 ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
 ansible-lint playbook.yml roles
 yamllint .

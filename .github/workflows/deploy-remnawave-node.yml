@@ -29,6 +29,14 @@ on:
         options:
           - "false"
           - "true"
+      run_smoke:
+        description: Run post-deploy smoke checks
+        required: true
+        type: choice
+        default: "true"
+        options:
+          - "true"
+          - "false"
       tags:
         description: Optional ansible tags filter
         required: false
@@ -220,6 +228,16 @@ jobs:
             cmd+=(--vault-id "secrets@.ansible/runtime/vault_pass.txt")
           fi
           "${cmd[@]}"
+
+      - name: Run post-deploy smoke checks
+        if: ${{ inputs.mode == 'deploy' && inputs.check_mode == 'false' && inputs.run_smoke == 'true' }}
+        env:
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          .github/scripts/smoke-remnawave.sh \
+            --inventory .ansible/runtime/hosts.ini \
+            --runtime-vars .ansible/runtime/runtime_vars.json \
+            --limit "${LIMIT}"
 
       - name: Verify deploy-user key access after bootstrap
         if: ${{ inputs.mode == 'bootstrap' }}

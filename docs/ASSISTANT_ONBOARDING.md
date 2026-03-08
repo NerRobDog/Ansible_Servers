@@ -39,6 +39,7 @@
 
 ## 5) Checklist перед релизом
 
+- [ ] `python .github/scripts/test-render-fleet-runtime.py` проходит
 - [ ] `ansible-playbook --syntax-check` проходит
 - [ ] `ansible-lint` проходит
 - [ ] `yamllint` проходит

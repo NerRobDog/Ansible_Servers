@@ -67,6 +67,11 @@ hosts:
       caddy_domain: "node1.example.com"
       caddy_monitor_port: 8443
       ipv6_state: enabled
+      caddy_tls_mode: public
+      caddy_local_only: true
+      caddy_tls_cert_file: ""
+      caddy_tls_key_file: ""
+      caddy_acme_ca: ""
     custom_roles:
       - test_stack
 
@@ -82,6 +87,15 @@ hosts:
     custom_roles:
       - test_stack
 ```
+
+### Важно для Reality self-steal
+
+Для рабочего трафика:
+- `dest` на хосте в панели RemnaWave должен быть `127.0.0.1:<caddy_monitor_port>`;
+- `sni/serverNames` должны совпадать с `caddy_domain`;
+- `flow` клиента и сервера должен совпадать (`xtls-rprx-vision`).
+
+Нельзя использовать `dest=<ваш_домен>:443`, если Reality inbound уже слушает `:443` — это вызывает петлю соединений.
 
 ## 5) Как обновить `RW_FLEET_CONFIG_B64`
 
@@ -106,29 +120,50 @@ base64 -i fleet.yaml | tr -d '\n' | gh secret set RW_FLEET_CONFIG_B64 --env prod
    - `environment` (например `production`);
    - `mode`: `bootstrap`, `deploy` или `lockdown`;
    - `limit`: `all` или `host1,host2`;
-   - `check_mode`: сначала `true`, потом `false`.
+   - `check_mode`: сначала `true`, потом `false`;
+   - `run_smoke`: `true` для автоматических пост-деплой проверок.
 
 ## 7) Рекомендуемая последовательность для нового хоста
 
 1. Добавить хост в fleet-конфиг и обновить `RW_FLEET_CONFIG_B64`.
 2. Запустить `mode=bootstrap` c `limit=<новый-host>`.
 3. Запустить `mode=lockdown` c `limit=<новый-host>`.
-4. Затем обычный `mode=deploy` для всех.
+4. Затем обычный `mode=deploy` для всех с `run_smoke=true`.
 
-## 8) Частые ошибки
+## 8) Smoke-проверки после deploy
+
+Автоматически (`run_smoke=true`) выполняются:
+- SSH-доступ по ключу (`ansible ping`);
+- `systemctl is-active docker` (если `feature_docker=true`);
+- контейнер `remnanode` в host network + `NET_ADMIN` (если `feature_remnawave_node=true`);
+- `caddy validate` + `https://<domain>:<monitor_port>/healthz` (если `feature_caddy_node=true`);
+- sysctl BBR/IPv6 (если `feature_node_tuning=true`).
+
+Ручной запуск того же набора:
+
+```bash
+.github/scripts/smoke-remnawave.sh \
+  --inventory .ansible/runtime/hosts.ini \
+  --runtime-vars .ansible/runtime/runtime_vars.json \
+  --limit de_node,nl_node
+```
+
+## 9) Частые ошибки
 
 - `Host alias not found`: в `limit` указан alias, которого нет в fleet-конфиге.
 - `Bootstrap password is missing`: для bootstrap режима не задан пароль.
 - `Custom role not found`: роль указана в `custom_roles`, но каталога `roles/<name>` нет.
 - `Missing remnawave_node_secret_key`: включена node-роль, но не передан секрет ноды.
+- Нет интернета у клиентов при активной подписке: часто `dest` в панели указывает на `:443` этой же ноды вместо локального decoy.
 
-## 9) Что делать помощнику при изменениях
+## 10) Что делать помощнику при изменениях
 
 1. Прочитать:
    - `docs/ROLE_CATALOG.md`
    - `docs/DOCUMENTATION_RULES.md`
 2. Внести правки.
 3. Прогнать:
+   - `python .github/scripts/test-render-fleet-runtime.py`
    - `ansible-playbook -i hosts.example.ini playbook.yml --syntax-check`
    - `ansible-lint playbook.yml roles`
    - `yamllint .`

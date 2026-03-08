@@ -33,6 +33,9 @@ jobs:
       - name: Prepare Ansible local temp
         run: mkdir -p .ansible/tmp
 
+      - name: Fleet renderer contract tests
+        run: python .github/scripts/test-render-fleet-runtime.py
+
       - name: Syntax check
         run: ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
 

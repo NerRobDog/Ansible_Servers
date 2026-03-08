@@ -1,3 +1,4 @@
+---
 # Two-server fleet template: Germany + Netherlands.
 # Stack: base + docker + remnawave_node + caddy_node + node_tuning + user_shell.
 #
@@ -25,6 +26,11 @@ defaults:
     caddy_domain: ""
     caddy_monitor_port: 8443
     ipv6_state: enabled
+    caddy_tls_mode: public
+    caddy_local_only: true
+    caddy_tls_cert_file: ""
+    caddy_tls_key_file: ""
+    caddy_acme_ca: ""
   custom_roles: []
 
 hosts:
@@ -39,6 +45,8 @@ hosts:
       caddy_domain: "de-node.example.com"
       caddy_monitor_port: 8443
       ipv6_state: enabled
+      caddy_tls_mode: public
+      caddy_local_only: true
     custom_roles: []
 
   nl_node:
@@ -52,4 +60,6 @@ hosts:
       caddy_domain: "nl-node.example.com"
       caddy_monitor_port: 8443
       ipv6_state: enabled
+      caddy_tls_mode: public
+      caddy_local_only: true
     custom_roles: []

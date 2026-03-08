@@ -1,9 +1,19 @@
 {
-    # Self-steal mode: do not bind :80/:443 implicitly.
-    auto_https off
+{% if remnawave_caddy_email_effective | trim | length > 0 %}
+    email {{ remnawave_caddy_email_effective }}
+{% endif %}
+{% if remnawave_caddy_acme_ca_effective | trim | length > 0 %}
+    acme_ca {{ remnawave_caddy_acme_ca_effective }}
+{% endif %}
 }
 
-http://{{ remnawave_caddy_domain_effective }}:{{ remnawave_caddy_monitor_port_effective }} {
+https://{{ remnawave_caddy_domain_effective }}:{{ remnawave_caddy_monitor_port_effective }} {
+{% if remnawave_caddy_tls_mode_effective == "internal" %}
+    tls internal
+{% elif remnawave_caddy_tls_mode_effective == "files" %}
+    tls {{ remnawave_caddy_tls_cert_file_effective }} {{ remnawave_caddy_tls_key_file_effective }}
+{% endif %}
+{% if remnawave_caddy_local_only_effective %}
     @local {
         remote_ip 127.0.0.1 ::1
     }
@@ -16,4 +26,8 @@ http://{{ remnawave_caddy_domain_effective }}:{{ remnawave_caddy_monitor_port_ef
     handle {
         abort
     }
+{% else %}
+    respond /healthz "ok" 200
+    respond "remnawave-node" 200
+{% endif %}
 }

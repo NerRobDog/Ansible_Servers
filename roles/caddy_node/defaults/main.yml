@@ -3,3 +3,8 @@ remnawave_caddy_enabled: true
 remnawave_caddy_domain: ""
 remnawave_caddy_monitor_port: 8443
 remnawave_caddy_email: ""
+remnawave_caddy_tls_mode: public
+remnawave_caddy_tls_cert_file: ""
+remnawave_caddy_tls_key_file: ""
+remnawave_caddy_local_only: true
+remnawave_caddy_acme_ca: ""

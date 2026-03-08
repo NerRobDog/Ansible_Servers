@@ -25,6 +25,11 @@ REMNAWAVE_DEFAULTS = {
     "caddy_domain": "",
     "caddy_monitor_port": 8443,
     "ipv6_state": "enabled",
+    "caddy_tls_mode": "public",
+    "caddy_tls_cert_file": "",
+    "caddy_tls_key_file": "",
+    "caddy_local_only": True,
+    "caddy_acme_ca": "",
 }
 
 
@@ -144,6 +149,16 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
         fail(f"Host '{alias}' remnawave ports must be numbers.")
     if remnawave_cfg["ipv6_state"] not in {"enabled", "disabled"}:
         fail(f"Host '{alias}' remnawave.ipv6_state must be enabled|disabled.")
+    remnawave_cfg["caddy_tls_mode"] = str(remnawave_cfg.get("caddy_tls_mode", "public")).strip().lower()
+    if remnawave_cfg["caddy_tls_mode"] not in {"public", "internal", "files"}:
+        fail(f"Host '{alias}' remnawave.caddy_tls_mode must be public|internal|files.")
+    remnawave_cfg["caddy_local_only"] = parse_bool(remnawave_cfg.get("caddy_local_only", True))
+    remnawave_cfg["caddy_tls_cert_file"] = str(remnawave_cfg.get("caddy_tls_cert_file", "") or "")
+    remnawave_cfg["caddy_tls_key_file"] = str(remnawave_cfg.get("caddy_tls_key_file", "") or "")
+    remnawave_cfg["caddy_acme_ca"] = str(remnawave_cfg.get("caddy_acme_ca", "") or "")
+    if remnawave_cfg["caddy_tls_mode"] == "files":
+        if not remnawave_cfg["caddy_tls_cert_file"].strip() or not remnawave_cfg["caddy_tls_key_file"].strip():
+            fail(f"Host '{alias}' remnawave.caddy_tls_mode=files requires caddy_tls_cert_file and caddy_tls_key_file.")
 
     custom_roles = host_cfg.get("custom_roles", defaults.get("custom_roles", []))
     if custom_roles is None:
@@ -212,6 +227,11 @@ def main() -> None:
                 "remnawave_caddy_domain": cfg["remnawave"]["caddy_domain"],
                 "remnawave_caddy_monitor_port": cfg["remnawave"]["caddy_monitor_port"],
                 "remnawave_ipv6_state": cfg["remnawave"]["ipv6_state"],
+                "remnawave_caddy_tls_mode": cfg["remnawave"]["caddy_tls_mode"],
+                "remnawave_caddy_tls_cert_file": cfg["remnawave"]["caddy_tls_cert_file"],
+                "remnawave_caddy_tls_key_file": cfg["remnawave"]["caddy_tls_key_file"],
+                "remnawave_caddy_local_only": cfg["remnawave"]["caddy_local_only"],
+                "remnawave_caddy_acme_ca": cfg["remnawave"]["caddy_acme_ca"],
             }
             for alias, cfg in normalized_hosts.items()
         },

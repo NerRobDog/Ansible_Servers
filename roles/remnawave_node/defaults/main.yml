@@ -15,3 +15,9 @@ remnawave_api_enabled: true
 remnawave_api_endpoint_template: ""
 remnawave_fallback_json_env: RW_NODE_FALLBACK_JSON
 remnawave_runtime_host_vars: {}
+
+remnawave_caddy_tls_mode: public
+remnawave_caddy_tls_cert_file: ""
+remnawave_caddy_tls_key_file: ""
+remnawave_caddy_local_only: true
+remnawave_caddy_acme_ca: ""

@@ -11,7 +11,12 @@
   ansible.builtin.set_fact:
     remnawave_caddy_domain_effective: "{{ remnawave_caddy_domain_resolved | default(remnawave_caddy_domain, true) | string }}"
     remnawave_caddy_monitor_port_effective: "{{ remnawave_caddy_monitor_port_resolved | default(remnawave_caddy_monitor_port, true) | int }}"
-    remnawave_caddy_email_effective: "{{ remnawave_caddy_email | default('', true) | string }}"
+    remnawave_caddy_email_effective: "{{ remnawave_caddy_email_resolved | default(remnawave_caddy_email, true) | string }}"
+    remnawave_caddy_tls_mode_effective: "{{ remnawave_caddy_tls_mode_resolved | default(remnawave_caddy_tls_mode, true) | string | lower }}"
+    remnawave_caddy_tls_cert_file_effective: "{{ remnawave_caddy_tls_cert_file_resolved | default(remnawave_caddy_tls_cert_file, true) | string }}"
+    remnawave_caddy_tls_key_file_effective: "{{ remnawave_caddy_tls_key_file_resolved | default(remnawave_caddy_tls_key_file, true) | string }}"
+    remnawave_caddy_local_only_effective: "{{ remnawave_caddy_local_only_resolved | default(remnawave_caddy_local_only, true) | bool }}"
+    remnawave_caddy_acme_ca_effective: "{{ remnawave_caddy_acme_ca_resolved | default(remnawave_caddy_acme_ca, true) | string }}"
   changed_when: false
   tags: [remnawave, caddy]
 
@@ -19,9 +24,24 @@
   ansible.builtin.assert:
     that:
       - remnawave_caddy_domain_effective | trim | length > 0
-      - remnawave_caddy_monitor_port_effective > 0
-      - remnawave_caddy_monitor_port_effective < 65536
-    fail_msg: "Set remnawave_caddy_domain and a valid remnawave_caddy_monitor_port."
+      - (remnawave_caddy_monitor_port_effective | int) > 0
+      - (remnawave_caddy_monitor_port_effective | int) < 65536
+      - (remnawave_caddy_monitor_port_effective | int) != 443
+      - remnawave_caddy_tls_mode_effective in ["public", "internal", "files"]
+      - remnawave_caddy_tls_mode_effective != "files" or (remnawave_caddy_tls_cert_file_effective | trim | length > 0)
+      - remnawave_caddy_tls_mode_effective != "files" or (remnawave_caddy_tls_key_file_effective | trim | length > 0)
+    fail_msg: >-
+      Invalid Caddy config. Ensure domain is set, monitor port is valid and not 443,
+      tls_mode is one of public|internal|files, and files mode has cert/key paths.
+  tags: [remnawave, caddy]
+
+- name: Validate Caddy public domain has DNS record
+  ansible.builtin.command:
+    cmd: "getent ahosts {{ remnawave_caddy_domain_effective }}"
+  register: remnawave_caddy_domain_dns
+  changed_when: false
+  failed_when: remnawave_caddy_domain_dns.rc != 0
+  when: remnawave_caddy_tls_mode_effective == "public"
   tags: [remnawave, caddy]
 
 - name: Install Caddy prerequisites
@@ -45,7 +65,10 @@
   ansible.builtin.get_url:
     url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
     dest: /etc/apt/keyrings/caddy-stable.asc
+    owner: root
+    group: root
     mode: "0644"
+    force: false
   tags: [remnawave, caddy]
 
 - name: Resolve Caddy apt architecture
@@ -71,13 +94,14 @@
     update_cache: true
   tags: [remnawave, caddy]
 
-- name: Render Caddyfile for RemaWave node
+- name: Render Caddyfile for RemaWave self-steal decoy
   ansible.builtin.template:
     src: Caddyfile.j2
     dest: /etc/caddy/Caddyfile
     owner: root
     group: root
     mode: "0644"
+    validate: "caddy validate --config %s --adapter caddyfile"
   notify: Restart caddy
   tags: [remnawave, caddy]
 

@@ -20,7 +20,7 @@
 - `base` — базовые пакеты.
 - `docker` — установка Docker CE.
 - `remnawave_node` — deploy RemaWave node.
-- `caddy_node` — Caddy для node-monitor endpoint.
+- `caddy_node` — TLS decoy для self-steal Reality + локальный health endpoint.
 - `node_tuning` — BBR + IPv6.
 - `user_shell` — пользователь/sudo/SSH shell.
 - `ssh_lockdown` — отключение password auth и root SSH login.
@@ -35,7 +35,21 @@ Inputs:
 - `mode` — `bootstrap | deploy | lockdown`.
 - `limit` — `all` или alias-хостов через запятую.
 - `check_mode` — dry-run.
+- `run_smoke` — post-deploy smoke-проверки (`true|false`).
 - `tags` — опциональный фильтр ansible tags.
+
+## Reality Self-Steal (важно)
+
+Для рабочей схемы Reality на ноде:
+- `dest` в inbound должен быть локальным decoy: `127.0.0.1:<remnawave.caddy_monitor_port>`;
+- `sni/serverNames` должны совпадать с `remnawave.caddy_domain`;
+- `flow` клиента и сервера должны совпадать (`xtls-rprx-vision`);
+- `:443` занят `rw-core`, поэтому Caddy decoy должен быть на отдельном порту (по умолчанию `8443`).
+
+Параметры Caddy в fleet-конфиге:
+- `remnawave.caddy_tls_mode`: `public|internal|files` (по умолчанию `public`);
+- `remnawave.caddy_local_only`: `true|false` (по умолчанию `true`);
+- `remnawave.caddy_tls_cert_file`/`remnawave.caddy_tls_key_file`: только для `files`.
 
 ## Обязательные Secrets (per environment)
 
@@ -52,9 +66,19 @@ Inputs:
 ansible-galaxy collection install -r requirements.yml
 python3 -m pip install -r requirements.txt
 mkdir -p .ansible/tmp
+python .github/scripts/test-render-fleet-runtime.py
 ANSIBLE_LOCAL_TEMP=.ansible/tmp ANSIBLE_REMOTE_TEMP=.ansible/tmp ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
 ansible-lint playbook.yml roles
 yamllint .
+```
+
+## Локальный smoke-run после deploy
+
+```bash
+.github/scripts/smoke-remnawave.sh \
+  --inventory .ansible/runtime/hosts.ini \
+  --runtime-vars .ansible/runtime/runtime_vars.json \
+  --limit de_node,nl_node
 ```
 
 ## Быстрый operational flow
@@ -62,4 +86,4 @@ yamllint .
 1. Обновить `RW_FLEET_CONFIG_B64` в нужном Environment.
 2. Запустить `mode=bootstrap` для новых хостов.
 3. Запустить `mode=lockdown` для этих же хостов.
-4. Запускать регулярный `mode=deploy`.
+4. Запускать регулярный `mode=deploy` с `run_smoke=true`.

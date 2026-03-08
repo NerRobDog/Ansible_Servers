@@ -11,6 +11,8 @@ remnawave_node_install_path: /opt/remnanode
 remnawave_node_log_dir: /var/log/remnanode
 
 remnawave_caddy_monitor_port: 8443
+remnawave_caddy_tls_mode: public
+remnawave_caddy_local_only: true
 remnawave_api_enabled: true
 
 remnawave_bbr_enabled: true

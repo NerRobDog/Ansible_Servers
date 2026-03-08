@@ -24,13 +24,22 @@
   - `remnawave.node_secret_key`
 
 ### `caddy_node`
-- Назначение: HTTPS endpoint для мониторинга/health.
+- Назначение: TLS decoy для Reality self-steal + health endpoint.
 - Требует:
   - `feature_caddy_node=true`
   - `remnawave.caddy_domain`
 - Основные параметры:
   - `remnawave.caddy_monitor_port`
   - `remnawave.caddy_domain`
+  - `remnawave.caddy_tls_mode` (`public|internal|files`)
+  - `remnawave.caddy_local_only` (`true|false`)
+  - `remnawave.caddy_tls_cert_file`/`remnawave.caddy_tls_key_file` (для `files`)
+
+Правило для Reality:
+- `dest` должен указывать на локальный decoy, например `127.0.0.1:8443`.
+- Не используйте `dest=<node-domain>:443`, если inbound Reality слушает `:443` (это вызывает петлю).
+- `sni/serverNames` должны совпадать с `remnawave.caddy_domain`.
+- `flow` на клиенте и сервере должен совпадать (`xtls-rprx-vision`).
 
 ### `node_tuning`
 - Назначение: BBR + IPv6 sysctl-политика.
