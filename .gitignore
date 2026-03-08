@@ -5,3 +5,8 @@ __pycache__/
 *.pyc
 hosts.plain.ini
 .env
+
+# Local/operator-only files
+fleet.yml
+VLESS_TCP.txt
+VLESS_with_nginx.txt
