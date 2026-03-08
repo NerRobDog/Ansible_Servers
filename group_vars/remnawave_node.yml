@@ -1,0 +1,18 @@
+---
+feature_base: true
+feature_docker: true
+feature_remnawave_node: true
+feature_caddy_node: true
+feature_node_tuning: true
+feature_user_shell: false
+
+remnawave_node_port: 3001
+remnawave_node_install_path: /opt/remnanode
+remnawave_node_log_dir: /var/log/remnanode
+
+remnawave_caddy_monitor_port: 8443
+remnawave_api_enabled: true
+
+remnawave_bbr_enabled: true
+remnawave_ipv6_state: enabled
+remnawave_warp_enabled: false

@@ -2,13 +2,133 @@
 - name: Подготовка сервера для деплоя
   hosts: all
   become: true
+  pre_tasks:
+    - name: Resolve fleet mode and host config
+      ansible.builtin.set_fact:
+        fleet_mode_effective: "{{ fleet_mode | default('deploy') }}"
+        fleet_host_cfg: "{{ (fleet_hosts | default({})).get(inventory_hostname, {}) }}"
+      changed_when: false
+      tags: [always]
+
+    - name: Validate fleet host config when provided
+      ansible.builtin.assert:
+        that:
+          - fleet_host_cfg is mapping
+      when: (fleet_hosts | default({})) | length > 0
+      tags: [always]
+
+    - name: Resolve effective feature flags
+      ansible.builtin.set_fact:
+        effective_feature_base: "{{ fleet_host_cfg.get('features', {}).get('feature_base', feature_base) | bool }}"
+        effective_feature_docker: "{{ fleet_host_cfg.get('features', {}).get('feature_docker', feature_docker) | bool }}"
+        effective_feature_remnawave_node: "{{ fleet_host_cfg.get('features', {}).get('feature_remnawave_node', feature_remnawave_node) | bool }}"
+        effective_feature_caddy_node: "{{ fleet_host_cfg.get('features', {}).get('feature_caddy_node', feature_caddy_node) | bool }}"
+        effective_feature_node_tuning: "{{ fleet_host_cfg.get('features', {}).get('feature_node_tuning', feature_node_tuning) | bool }}"
+        effective_feature_user_shell: >-
+          {{
+            (fleet_mode_effective == 'bootstrap')
+            or (fleet_host_cfg.get('features', {}).get('feature_user_shell', feature_user_shell) | bool)
+          }}
+        effective_custom_roles: "{{ fleet_host_cfg.custom_roles | default(custom_roles, true) }}"
+        effective_deploy_user: "{{ fleet_host_cfg.deploy_user | default('deploy', true) | string }}"
+        effective_ssh_lockdown_enabled: "{{ (fleet_mode_effective == 'lockdown') or (ssh_lockdown_enabled | bool) }}"
+      changed_when: false
+      tags: [always]
+
+    - name: Validate custom roles type
+      ansible.builtin.assert:
+        that:
+          - effective_custom_roles is iterable
+          - effective_custom_roles is not string
+        fail_msg: "custom_roles must be a list of local role names."
+      tags: [always]
+
+    - name: Resolve host-level remnawave variables from fleet config
+      ansible.builtin.set_fact:
+        remnawave_node_secret_key: "{{ fleet_host_cfg.get('remnawave', {}).get('node_secret_key', remnawave_node_secret_key) }}"
+        remnawave_node_port: "{{ fleet_host_cfg.get('remnawave', {}).get('node_port', remnawave_node_port) }}"
+        remnawave_caddy_domain: "{{ fleet_host_cfg.get('remnawave', {}).get('caddy_domain', remnawave_caddy_domain) }}"
+        remnawave_caddy_monitor_port: "{{ fleet_host_cfg.get('remnawave', {}).get('caddy_monitor_port', remnawave_caddy_monitor_port) }}"
+        remnawave_ipv6_state: "{{ fleet_host_cfg.get('remnawave', {}).get('ipv6_state', remnawave_ipv6_state) }}"
+      changed_when: false
+      tags: [always]
+
+    - name: Ensure CI public key is available in bootstrap mode
+      ansible.builtin.assert:
+        that:
+          - (lookup('env', 'CI_DEPLOY_PUBLIC_KEY') | trim | length) > 0
+        fail_msg: "CI_DEPLOY_PUBLIC_KEY environment variable is required for fleet bootstrap mode."
+      when: fleet_mode_effective == "bootstrap"
+      tags: [always]
+
+    - name: Prepare bootstrap user variables for CI bootstrap mode
+      ansible.builtin.set_fact:
+        create_user: true
+        configure_root_zsh: false
+        new_user: "{{ effective_deploy_user }}"
+        new_user_comment: "{{ effective_deploy_user }}"
+        new_user_home: "/home/{{ effective_deploy_user }}"
+        new_user_groups:
+          - wheel
+          - docker
+        new_user_password_hash: null
+        new_user_authorized_keys:
+          - "{{ lookup('env', 'CI_DEPLOY_PUBLIC_KEY') }}"
+        new_user_authorized_keys_exclusive: true
+        new_user_passwordless_sudo: true
+      when: fleet_mode_effective == "bootstrap"
+      tags: [always]
+
   roles:
     - role: base
+      when: effective_feature_base | bool
       tags: [base]
 
     - role: docker
+      when: effective_feature_docker | bool
       tags: [docker]
 
+    - role: remnawave_node
+      when: effective_feature_remnawave_node | bool
+      tags: [remnawave, node]
+
+    - role: caddy_node
+      when: effective_feature_caddy_node | bool
+      tags: [remnawave, caddy]
+
+    - role: node_tuning
+      when: effective_feature_node_tuning | bool
+      tags: [remnawave, bbr, ipv6]
+
     - role: user_shell
-      when: (create_user | default(false) | bool) or (configure_root_zsh | default(false) | bool)
+      when: effective_feature_user_shell | bool
       tags: [user, ssh, sudo, zsh, pipx]
+
+    - role: ssh_lockdown
+      when: effective_ssh_lockdown_enabled | bool
+      tags: [ssh, lockdown]
+
+  tasks:
+    - name: Validate custom role paths exist locally
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/roles/{{ item }}"
+      loop: "{{ effective_custom_roles }}"
+      register: custom_roles_stats
+      delegate_to: localhost
+      become: false
+      tags: [custom]
+
+    - name: Assert all custom roles exist
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isdir
+        fail_msg: "Custom role '{{ item.item }}' not found under roles/."
+      loop: "{{ custom_roles_stats.results | default([]) }}"
+      tags: [custom]
+
+    - name: Run custom local roles
+      ansible.builtin.include_role:
+        name: "{{ item }}"
+      loop: "{{ effective_custom_roles }}"
+      tags: [custom]

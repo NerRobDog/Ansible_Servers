@@ -65,3 +65,41 @@ docker_packages:
   - docker-buildx-plugin
   - docker-compose-plugin
 pipx_packages: []
+
+# RemaWave node defaults (safe global defaults)
+remnawave_node_enabled: false
+remnawave_node_image: remnawave/node:latest
+remnawave_node_port: 3001
+remnawave_node_secret_key: ""
+remnawave_node_install_path: /opt/remnanode
+remnawave_node_log_dir: /var/log/remnanode
+remnawave_node_network_mode: host
+remnawave_node_cap_add:
+  - NET_ADMIN
+remnawave_node_manage_runtime: true
+
+remnawave_api_enabled: true
+remnawave_api_endpoint_template: ""
+remnawave_fallback_json_env: RW_NODE_FALLBACK_JSON
+remnawave_runtime_host_vars: {}
+
+remnawave_caddy_enabled: true
+remnawave_caddy_domain: ""
+remnawave_caddy_monitor_port: 8443
+remnawave_caddy_email: ""
+
+remnawave_bbr_enabled: true
+remnawave_ipv6_state: enabled
+remnawave_warp_enabled: false
+
+# Fleet-driven feature flags
+feature_base: true
+feature_docker: true
+feature_remnawave_node: false
+feature_caddy_node: false
+feature_node_tuning: false
+feature_user_shell: false
+custom_roles: []
+ssh_lockdown_enabled: false
+fleet_mode: deploy
+fleet_hosts: {}

@@ -1,0 +1,22 @@
+services:
+  remnanode:
+    container_name: remnanode
+    hostname: remnanode
+    image: {{ remnawave_node_image }}
+    network_mode: {{ remnawave_node_network_mode }}
+    restart: always
+{% if remnawave_node_cap_add | length > 0 %}
+    cap_add:
+{% for capability in remnawave_node_cap_add %}
+      - {{ capability }}
+{% endfor %}
+{% endif %}
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+    environment:
+      NODE_PORT: "{{ remnawave_node_port_effective }}"
+      SECRET_KEY: "{{ remnawave_node_secret_key_effective }}"
+    volumes:
+      - "{{ remnawave_node_log_dir }}:/var/log/remnanode"

@@ -1,0 +1,6 @@
+---
+- name: Restart remnawave node stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ remnawave_node_install_path }}"
+    state: restarted
+  when: remnawave_node_manage_runtime | bool

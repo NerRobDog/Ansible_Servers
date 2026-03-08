@@ -1,104 +1,64 @@
 # Ansible_Servers
 
-Подготовка серверов для деплоя через Ansible с разделением по ролям:
-- `base`: базовые системные пакеты.
-- `docker`: установка Docker CE для Debian/Ubuntu и RHEL-compatible.
-- `user_shell`: опциональное создание пользователя, SSH, sudo, pipx, zsh/oh-my-zsh.
+Универсальный Ansible-проект для раскатки одинаковой базы и опциональных ролей на 1..N серверов.
 
-## Структура
+Главная модель:
+- серверы описываются только в GitHub Environment Secret `RW_FLEET_CONFIG_B64`;
+- workflow запускается вручную в режимах `bootstrap`, `deploy`, `lockdown`;
+- push в репозиторий для добавления новых серверов не нужен.
 
-- `playbook.yml` — orchestration playbook.
-- `hosts.ini` — зашифрованный inventory (Ansible Vault, `vault-id secrets`).
-- `hosts.example.ini` — пример inventory без секретов.
-- `group_vars/all.yml` — общие дефолты для всех хостов.
-- `host_vars/<host>.yml` — хостовые профили (например, пользователь `ernestsh`).
-- `roles/` — реализации ролей.
-- `requirements.yml` — Ansible collections (включая `ansible.posix`).
+## Основные документы
 
-## Быстрый старт
+- Подробная инструкция для операторов: [`docs/OPERATIONS_GUIDE.md`](docs/OPERATIONS_GUIDE.md)
+- Описание ролей и feature flags: [`docs/ROLE_CATALOG.md`](docs/ROLE_CATALOG.md)
+- Правила документирования для помощников: [`docs/DOCUMENTATION_RULES.md`](docs/DOCUMENTATION_RULES.md)
+- Onboarding нового помощника: [`docs/ASSISTANT_ONBOARDING.md`](docs/ASSISTANT_ONBOARDING.md)
 
-1. Установить коллекции:
-   ```bash
-   ansible-galaxy collection install -r requirements.yml
-   ```
-2. Установить python-инструменты (опционально, для lint):
-   ```bash
-   python3 -m pip install -r requirements.txt
-   ```
-3. Проверить синтаксис:
-   ```bash
-   mkdir -p .ansible/tmp
-   ANSIBLE_LOCAL_TEMP=.ansible/tmp ANSIBLE_REMOTE_TEMP=.ansible/tmp \
-     ansible-playbook -i hosts.ini playbook.yml --syntax-check \
-     --vault-id secrets@.ansible/secrets/vault_secrets_pass.txt
-   ```
-4. Запуск:
-   ```bash
-   ansible-playbook -i hosts.ini playbook.yml \
-     --vault-id secrets@.ansible/secrets/vault_secrets_pass.txt
-   ```
+## Роли
 
-### Vault inventory
+- `base` — базовые пакеты.
+- `docker` — установка Docker CE.
+- `remnawave_node` — deploy RemaWave node.
+- `caddy_node` — Caddy для node-monitor endpoint.
+- `node_tuning` — BBR + IPv6.
+- `user_shell` — пользователь/sudo/SSH shell.
+- `ssh_lockdown` — отключение password auth и root SSH login.
+- `custom_roles` — дополнительные локальные роли из `roles/`, задаются по хостам.
 
-- `hosts.ini` зашифрован через Ansible Vault (`vault-id: secrets`).
-- Пароль хранится локально в `.ansible/secrets/vault_secrets_pass.txt` и не попадает в git.
-- Для редактирования:
-  ```bash
-  ansible-vault edit --vault-id secrets@.ansible/secrets/vault_secrets_pass.txt hosts.ini
-  ```
+## Workflow
 
-## Molecule и CI
+Файл: `.github/workflows/deploy-remnawave-node.yml`
 
-В репозитории добавлен сценарий Molecule: `molecule/default`.
+Inputs:
+- `environment` — GitHub Environment c секретами флота.
+- `mode` — `bootstrap | deploy | lockdown`.
+- `limit` — `all` или alias-хостов через запятую.
+- `check_mode` — dry-run.
+- `tags` — опциональный фильтр ansible tags.
 
-Локальный запуск полного теста роли `user_shell`:
+## Обязательные Secrets (per environment)
+
+- `RW_FLEET_CONFIG_B64` — base64 от JSON/YAML fleet config.
+- `ANSIBLE_SSH_PRIVATE_KEY` — приватный SSH-ключ для key-based доступа.
+
+Опциональные:
+- `RW_PANEL_API_TOKEN`
+- `ANSIBLE_VAULT_PASSWORD`
+
+## Локальные проверки
 
 ```bash
-molecule test -s default
+ansible-galaxy collection install -r requirements.yml
+python3 -m pip install -r requirements.txt
+mkdir -p .ansible/tmp
+ANSIBLE_LOCAL_TEMP=.ansible/tmp ANSIBLE_REMOTE_TEMP=.ansible/tmp ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
+ansible-lint playbook.yml roles
+yamllint .
 ```
 
-Требуется запущенный Docker daemon.
+## Быстрый operational flow
 
-Что проверяется:
-- создание тестового пользователя;
-- установка `.zshrc` и Oh My Zsh;
-- создание sudoers-файла;
-- идемпотентность (через шаг `idempotence` в Molecule).
-
-CI находится в [`.github/workflows/ansible-ci.yml`](./.github/workflows/ansible-ci.yml) и запускает:
-- `ansible-playbook --syntax-check`;
-- `ansible-lint`;
-- `yamllint`;
-- `molecule test -s default`.
-
-## Модель переменных
-
-По умолчанию создание пользователя отключено:
-- `create_user: false` в `group_vars/all.yml`.
-
-Чтобы включить пользователя только на конкретном хосте, используйте `host_vars/<host>.yml`.
-
-Пример профиля:
-
-```yaml
----
-create_user: true
-new_user: ernestsh
-new_user_comment: ernestsh
-new_user_home: "/home/{{ new_user }}"
-new_user_groups:
-  - wheel
-  - docker
-new_user_password_hash: null
-new_user_authorized_keys:
-  - "ssh-ed25519 AAAA..."
-new_user_passwordless_sudo: true
-```
-
-## Важные флаги
-
-- `new_user_authorized_keys_exclusive` (default: `true`):
-  - `true` — Ansible управляет `authorized_keys` эксклюзивно.
-  - `false` — добавляет ключи без очистки посторонних.
-- `configure_root_zsh` (default: `true`) — настраивать ли zsh/oh-my-zsh для `root`.
-- `enable_thefuck` (default: `false`) — добавить `thefuck` в pipx и список zsh-плагинов.
+1. Обновить `RW_FLEET_CONFIG_B64` в нужном Environment.
+2. Запустить `mode=bootstrap` для новых хостов.
+3. Запустить `mode=lockdown` для этих же хостов.
+4. Запускать регулярный `mode=deploy`.

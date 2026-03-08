@@ -1,0 +1,11 @@
+---
+- name: Validate sshd config
+  ansible.builtin.command: "{{ sshd_binary_path.stdout }} -t"
+  changed_when: false
+  listen: Apply SSH lockdown configuration
+
+- name: Restart SSH service
+  ansible.builtin.service:
+    name: "{{ ssh_lockdown_service_name }}"
+    state: restarted
+  listen: Apply SSH lockdown configuration

@@ -34,7 +34,7 @@ jobs:
         run: mkdir -p .ansible/tmp
 
       - name: Syntax check
-        run: ansible-playbook -i hosts.ini playbook.yml --syntax-check
+        run: ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
 
       - name: ansible-lint
         run: ansible-lint playbook.yml roles
