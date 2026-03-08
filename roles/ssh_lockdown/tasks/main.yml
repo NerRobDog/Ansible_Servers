@@ -1,0 +1,31 @@
+---
+- name: Resolve SSH service name by OS family
+  ansible.builtin.set_fact:
+    ssh_lockdown_service_name: "{{ (ansible_os_family == 'Debian') | ternary('ssh', 'sshd') }}"
+  changed_when: false
+  tags: [ssh, lockdown]
+
+- name: Resolve sshd binary path
+  ansible.builtin.command: sh -c "command -v sshd"
+  register: sshd_binary_path
+  changed_when: false
+  tags: [ssh, lockdown]
+
+- name: Ensure sshd drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags: [ssh, lockdown]
+
+- name: Deploy SSH hardening drop-in config
+  ansible.builtin.template:
+    src: 99-ansible-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/99-ansible-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Apply SSH lockdown configuration
+  tags: [ssh, lockdown]

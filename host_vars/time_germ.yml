@@ -1,0 +1,12 @@
+---
+create_user: true
+new_user: ernestsh
+new_user_comment: ernestsh
+new_user_home: "/home/{{ new_user }}"
+new_user_groups:
+  - wheel
+  - docker
+new_user_password_hash: null
+new_user_authorized_keys: []
+new_user_passwordless_sudo: true
+zsh_theme: afowler

@@ -1,0 +1,46 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Verify molecule user exists
+      ansible.builtin.command: id molecule
+      register: molecule_user_id
+      changed_when: false
+
+    - name: Assert user command succeeded
+      ansible.builtin.assert:
+        that:
+          - molecule_user_id.rc == 0
+
+    - name: Check molecule .zshrc exists
+      ansible.builtin.stat:
+        path: /home/molecule/.zshrc
+      register: molecule_zshrc
+
+    - name: Assert molecule .zshrc exists
+      ansible.builtin.assert:
+        that:
+          - molecule_zshrc.stat.exists
+
+    - name: Check Oh My Zsh install for molecule user
+      ansible.builtin.stat:
+        path: /home/molecule/.oh-my-zsh/oh-my-zsh.sh
+      register: molecule_omz
+
+    - name: Assert Oh My Zsh install exists
+      ansible.builtin.assert:
+        that:
+          - molecule_omz.stat.exists
+
+    - name: Check sudoers file for molecule user
+      ansible.builtin.stat:
+        path: /etc/sudoers.d/molecule
+      register: molecule_sudoers
+
+    - name: Assert sudoers file exists
+      ansible.builtin.assert:
+        that:
+          - molecule_sudoers.stat.exists

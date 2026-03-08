@@ -1,0 +1,5 @@
+---
+remnawave_caddy_enabled: true
+remnawave_caddy_domain: ""
+remnawave_caddy_monitor_port: 8443
+remnawave_caddy_email: ""

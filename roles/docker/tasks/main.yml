@@ -1,0 +1,116 @@
+---
+- name: Install Docker prerequisites on Debian/Ubuntu
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - lsb-release
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
+  tags: [docker]
+
+- name: Remove legacy Docker repository file on Debian/Ubuntu
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/download_docker_com_linux_ubuntu.list
+    state: absent
+  when: ansible_os_family == "Debian"
+  tags: [docker]
+
+- name: Ensure apt keyrings directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+  when: ansible_os_family == "Debian"
+  tags: [docker]
+
+- name: Download Docker apt GPG key
+  ansible.builtin.get_url:
+    url: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+  when: ansible_os_family == "Debian"
+  tags: [docker]
+
+- name: Resolve Docker apt architecture
+  ansible.builtin.set_fact:
+    docker_apt_arch: "{{ docker_apt_arch_map.get(ansible_architecture, ansible_architecture) }}"
+  when: ansible_os_family == "Debian"
+  tags: [docker]
+
+- name: Configure Docker apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ docker_apt_arch }} signed-by=/etc/apt/keyrings/docker.asc]
+      https://download.docker.com/linux/{{ ansible_distribution | lower }}
+      {{ ansible_distribution_release }} stable
+    filename: docker
+    state: present
+  when: ansible_os_family == "Debian"
+  tags: [docker]
+
+- name: Install Docker CE and plugins on Debian/Ubuntu
+  ansible.builtin.apt:
+    name: "{{ docker_packages }}"
+    state: present
+    update_cache: true
+  notify: Start docker service
+  when: ansible_os_family == "Debian"
+  tags: [docker]
+
+- name: Install dnf-plugins-core on RHEL-compatible systems
+  ansible.builtin.dnf:
+    name: dnf-plugins-core
+    state: present
+  when: ansible_os_family == "RedHat"
+  tags: [docker]
+
+- name: Install EPEL on RHEL-compatible systems
+  ansible.builtin.dnf:
+    name: epel-release
+    state: present
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution != "Fedora"
+  tags: [docker]
+
+- name: Check CRB repository state on RHEL 9 compatible systems
+  ansible.builtin.command: dnf config-manager --dump crb
+  register: docker_crb_repo
+  changed_when: false
+  failed_when: false
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 9
+  tags: [docker]
+
+- name: Enable CRB repository when disabled
+  ansible.builtin.command: dnf config-manager --set-enabled crb
+  changed_when: true
+  when:
+    - ansible_os_family == "RedHat"
+    - ansible_distribution_major_version | int >= 9
+    - docker_crb_repo.rc == 0
+    - "'enabled = 1' not in docker_crb_repo.stdout"
+  tags: [docker]
+
+- name: Add Docker CE yum repository
+  ansible.builtin.yum_repository:
+    name: docker-ce
+    description: Docker CE Stable - $basearch
+    baseurl: https://download.docker.com/linux/centos/$releasever/$basearch/stable
+    gpgcheck: true
+    gpgkey: https://download.docker.com/linux/centos/gpg
+    enabled: true
+  when: ansible_os_family == "RedHat"
+  tags: [docker]
+
+- name: Install Docker CE and plugins on RHEL-compatible systems
+  ansible.builtin.dnf:
+    name: "{{ docker_packages }}"
+    state: present
+  notify: Start docker service
+  when: ansible_os_family == "RedHat"
+  tags: [docker]

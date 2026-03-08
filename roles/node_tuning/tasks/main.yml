@@ -1,0 +1,76 @@
+---
+- name: Validate supported OS for node tuning role
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+      - ansible_distribution in ["Debian", "Ubuntu"]
+    fail_msg: "Role node_tuning supports Debian/Ubuntu only."
+  tags: [remnawave, bbr, ipv6]
+
+- name: Resolve effective IPv6 state
+  ansible.builtin.set_fact:
+    remnawave_ipv6_state_effective: "{{ remnawave_ipv6_state_resolved | default(remnawave_ipv6_state, true) | string }}"
+  changed_when: false
+  tags: [remnawave, bbr, ipv6]
+
+- name: Validate supported tuning values
+  ansible.builtin.assert:
+    that:
+      - remnawave_ipv6_state_effective in ["enabled", "disabled"]
+      - not (remnawave_warp_enabled | bool)
+    fail_msg: "remnawave_ipv6_state must be enabled|disabled and WARP is intentionally unsupported in v1."
+  tags: [remnawave, bbr, ipv6]
+
+- name: Enable BBR default qdisc
+  ansible.posix.sysctl:
+    name: net.core.default_qdisc
+    value: fq
+    state: present
+    reload: true
+    sysctl_file: /etc/sysctl.d/99-remnawave-bbr.conf
+  when: remnawave_bbr_enabled | bool
+  tags: [remnawave, bbr]
+
+- name: Enable BBR congestion control
+  ansible.posix.sysctl:
+    name: net.ipv4.tcp_congestion_control
+    value: bbr
+    state: present
+    reload: true
+    sysctl_file: /etc/sysctl.d/99-remnawave-bbr.conf
+  when: remnawave_bbr_enabled | bool
+  tags: [remnawave, bbr]
+
+- name: Remove BBR sysctl file when BBR is disabled
+  ansible.builtin.file:
+    path: /etc/sysctl.d/99-remnawave-bbr.conf
+    state: absent
+  when: not (remnawave_bbr_enabled | bool)
+  tags: [remnawave, bbr]
+
+- name: Configure IPv6 all interfaces state
+  ansible.posix.sysctl:
+    name: net.ipv6.conf.all.disable_ipv6
+    value: "{{ (remnawave_ipv6_state_effective == 'disabled') | ternary('1', '0') }}"
+    state: present
+    reload: true
+    sysctl_file: /etc/sysctl.d/99-remnawave-ipv6.conf
+  tags: [remnawave, ipv6]
+
+- name: Configure IPv6 default interfaces state
+  ansible.posix.sysctl:
+    name: net.ipv6.conf.default.disable_ipv6
+    value: "{{ (remnawave_ipv6_state_effective == 'disabled') | ternary('1', '0') }}"
+    state: present
+    reload: true
+    sysctl_file: /etc/sysctl.d/99-remnawave-ipv6.conf
+  tags: [remnawave, ipv6]
+
+- name: Configure IPv6 loopback state
+  ansible.posix.sysctl:
+    name: net.ipv6.conf.lo.disable_ipv6
+    value: "{{ (remnawave_ipv6_state_effective == 'disabled') | ternary('1', '0') }}"
+    state: present
+    reload: true
+    sysctl_file: /etc/sysctl.d/99-remnawave-ipv6.conf
+  tags: [remnawave, ipv6]

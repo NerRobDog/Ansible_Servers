@@ -1,0 +1,223 @@
+---
+- name: Validate supported OS for RemaWave node role
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+      - ansible_distribution in ["Debian", "Ubuntu"]
+    fail_msg: "Role remnawave_node supports Debian/Ubuntu only."
+  tags: [remnawave, node]
+
+- name: Read API token from environment
+  ansible.builtin.set_fact:
+    remnawave_api_token: "{{ lookup('env', 'RW_PANEL_API_TOKEN') | default('', true) }}"
+  changed_when: false
+  tags: [remnawave, node]
+
+- name: Read fallback JSON from environment
+  ansible.builtin.set_fact:
+    remnawave_fallback_json_raw: "{{ lookup('env', remnawave_fallback_json_env) | default('', true) }}"
+  changed_when: false
+  tags: [remnawave, node]
+
+- name: Parse fallback JSON map
+  ansible.builtin.set_fact:
+    remnawave_fallback_map: >-
+      {{
+        (remnawave_fallback_json_raw | trim | length > 0)
+        | ternary(remnawave_fallback_json_raw | from_json, {})
+      }}
+  changed_when: false
+  tags: [remnawave, node]
+
+- name: Validate fallback and runtime maps
+  ansible.builtin.assert:
+    that:
+      - remnawave_fallback_map is mapping
+      - remnawave_runtime_host_vars is mapping
+    fail_msg: "Fallback/runtime host vars must be JSON/YAML objects keyed by inventory hostname."
+  tags: [remnawave, node]
+
+- name: Extract per-host fallback/runtime vars
+  ansible.builtin.set_fact:
+    remnawave_fallback_host_vars: "{{ remnawave_fallback_map.get(inventory_hostname, {}) }}"
+    remnawave_runtime_host_specific: "{{ remnawave_runtime_host_vars.get(inventory_hostname, {}) }}"
+  changed_when: false
+  tags: [remnawave, node]
+
+- name: Build per-host API endpoint URL
+  ansible.builtin.set_fact:
+    remnawave_api_endpoint_url: >-
+      {{
+        remnawave_api_endpoint_template
+        | replace('{inventory_hostname}', inventory_hostname)
+        | replace('{host}', inventory_hostname)
+      }}
+    remnawave_api_headers: >-
+      {{
+        {'Accept': 'application/json'}
+        | combine(
+            (remnawave_api_token | length > 0)
+            | ternary({'Authorization': 'Bearer ' ~ remnawave_api_token}, {})
+          )
+      }}
+  changed_when: false
+  when:
+    - remnawave_api_enabled | bool
+    - remnawave_api_endpoint_template | trim | length > 0
+  tags: [remnawave, node]
+
+- name: Fetch host config from API endpoint
+  ansible.builtin.uri:
+    url: "{{ remnawave_api_endpoint_url }}"
+    method: GET
+    headers: "{{ remnawave_api_headers }}"
+    return_content: true
+    status_code: [200]
+    timeout: 15
+  register: remnawave_api_response
+  changed_when: false
+  failed_when: false
+  when:
+    - remnawave_api_enabled | bool
+    - remnawave_api_endpoint_template | trim | length > 0
+  tags: [remnawave, node]
+
+- name: Normalize host vars from API response
+  ansible.builtin.set_fact:
+    remnawave_api_host_vars: >-
+      {{
+        {
+          'remnawave_node_secret_key': (
+            remnawave_api_response.json.remnawave_node_secret_key
+            | default(remnawave_api_response.json.secret_key, true)
+          ),
+          'remnawave_node_port': (
+            remnawave_api_response.json.remnawave_node_port
+            | default(remnawave_api_response.json.node_port, true)
+          ),
+          'remnawave_caddy_domain': (
+            remnawave_api_response.json.remnawave_caddy_domain
+            | default(remnawave_api_response.json.caddy_domain, true)
+          ),
+          'remnawave_caddy_monitor_port': (
+            remnawave_api_response.json.remnawave_caddy_monitor_port
+            | default(remnawave_api_response.json.caddy_monitor_port, true)
+          ),
+          'remnawave_ipv6_state': (
+            remnawave_api_response.json.remnawave_ipv6_state
+            | default(remnawave_api_response.json.ipv6_state, true)
+          )
+        }
+        | dict2items
+        | rejectattr('value', 'equalto', none)
+        | rejectattr('value', 'equalto', '')
+        | list
+        | items2dict
+      }}
+  changed_when: false
+  when:
+    - remnawave_api_response is defined
+    - remnawave_api_response.status | default(0) == 200
+    - remnawave_api_response.json is defined
+    - remnawave_api_response.json is mapping
+  tags: [remnawave, node]
+
+- name: Default API vars to empty map when API has no usable data
+  ansible.builtin.set_fact:
+    remnawave_api_host_vars: {}
+  changed_when: false
+  when: remnawave_api_host_vars is not defined
+  tags: [remnawave, node]
+
+- name: Merge RemaWave vars by precedence static < fallback < runtime < API
+  ansible.builtin.set_fact:
+    remnawave_effective_vars: >-
+      {{
+        {
+          'remnawave_node_secret_key': remnawave_node_secret_key,
+          'remnawave_node_port': remnawave_node_port,
+          'remnawave_caddy_domain': remnawave_caddy_domain,
+          'remnawave_caddy_monitor_port': remnawave_caddy_monitor_port,
+          'remnawave_ipv6_state': remnawave_ipv6_state
+        }
+        | combine(remnawave_fallback_host_vars, recursive=True)
+        | combine(remnawave_runtime_host_specific, recursive=True)
+        | combine(remnawave_api_host_vars, recursive=True)
+      }}
+  changed_when: false
+  tags: [remnawave, node]
+
+- name: Resolve effective RemaWave values
+  ansible.builtin.set_fact:
+    remnawave_node_secret_key_effective: "{{ remnawave_effective_vars.remnawave_node_secret_key | default('', true) | string }}"
+    remnawave_node_port_effective: "{{ remnawave_effective_vars.remnawave_node_port | default(remnawave_node_port, true) | int }}"
+    remnawave_caddy_domain_effective: "{{ remnawave_effective_vars.remnawave_caddy_domain | default(remnawave_caddy_domain, true) | string }}"
+    remnawave_caddy_monitor_port_effective: "{{ remnawave_effective_vars.remnawave_caddy_monitor_port | default(remnawave_caddy_monitor_port, true) | int }}"
+    remnawave_ipv6_state_effective: "{{ remnawave_effective_vars.remnawave_ipv6_state | default(remnawave_ipv6_state, true) | string }}"
+  changed_when: false
+  tags: [remnawave, node]
+
+- name: Build list of missing required RemaWave vars
+  ansible.builtin.set_fact:
+    remnawave_missing_required_vars: >-
+      {{
+        []
+        + ((remnawave_node_secret_key_effective | trim | length == 0) | ternary(['remnawave_node_secret_key'], []))
+      }}
+  changed_when: false
+  tags: [remnawave, node]
+
+- name: Validate required RemaWave vars after merge
+  ansible.builtin.assert:
+    that:
+      - remnawave_missing_required_vars | length == 0
+      - remnawave_node_port_effective > 0
+      - remnawave_node_port_effective < 65536
+    fail_msg: "Missing or invalid vars after API/fallback merge: {{ remnawave_missing_required_vars | join(', ') }}"
+  tags: [remnawave, node]
+
+- name: Share resolved vars for downstream roles
+  ansible.builtin.set_fact:
+    remnawave_node_port_resolved: "{{ remnawave_node_port_effective }}"
+    remnawave_caddy_domain_resolved: "{{ remnawave_caddy_domain_effective }}"
+    remnawave_caddy_monitor_port_resolved: "{{ remnawave_caddy_monitor_port_effective }}"
+    remnawave_ipv6_state_resolved: "{{ remnawave_ipv6_state_effective }}"
+  changed_when: false
+  tags: [remnawave, node]
+
+- name: Ensure RemaWave node install directory exists
+  ansible.builtin.file:
+    path: "{{ remnawave_node_install_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  tags: [remnawave, node]
+
+- name: Ensure RemaWave node log directory exists
+  ansible.builtin.file:
+    path: "{{ remnawave_node_log_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags: [remnawave, node]
+
+- name: Render RemaWave node docker-compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ remnawave_node_install_path }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart remnawave node stack
+  tags: [remnawave, node]
+
+- name: Ensure RemaWave node stack is running
+  community.docker.docker_compose_v2:
+    project_src: "{{ remnawave_node_install_path }}"
+    state: present
+    pull: "{{ remnawave_node_compose_pull }}"
+    remove_orphans: "{{ remnawave_node_compose_remove_orphans }}"
+  when: remnawave_node_manage_runtime | bool
+  tags: [remnawave, node]

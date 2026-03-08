@@ -1,0 +1,6 @@
+# Managed by Ansible (ssh_lockdown role)
+PasswordAuthentication {{ ssh_lockdown_password_authentication }}
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+PermitRootLogin {{ ssh_lockdown_permit_root_login }}
+PubkeyAuthentication yes

@@ -1,0 +1,228 @@
+---
+- name: Validate required user vars when create_user is enabled
+  ansible.builtin.assert:
+    that:
+      - not (create_user | bool) or (new_user | string | length > 0)
+    fail_msg: "Variable new_user must be set when create_user=true."
+  tags: [user]
+
+- name: Install pipx on Debian/Ubuntu
+  ansible.builtin.apt:
+    name: pipx
+    state: present
+    update_cache: true
+  when: ansible_os_family == "Debian"
+  tags: [pipx]
+
+- name: Install pipx on RHEL-compatible systems
+  ansible.builtin.dnf:
+    name: pipx
+    state: present
+  when: ansible_os_family == "RedHat"
+  tags: [pipx]
+
+- name: Create deployment user
+  ansible.builtin.user:
+    name: "{{ new_user }}"
+    comment: "{{ new_user_comment | default(new_user, true) }}"
+    groups: >-
+      {{
+        new_user_groups
+        | map('regex_replace', '^wheel$', (ansible_os_family == 'Debian') | ternary('sudo', 'wheel'))
+        | list
+        | join(',')
+      }}
+    append: true
+    shell: "{{ new_user_shell }}"
+    create_home: true
+    password: "{{ new_user_password_hash | default(omit, true) }}"
+    state: present
+  when: create_user | bool
+  tags: [user]
+
+- name: Ensure ~/.ssh exists for deployment user
+  ansible.builtin.file:
+    path: "{{ new_user_home_resolved }}/.ssh"
+    state: directory
+    owner: "{{ new_user }}"
+    group: "{{ new_user }}"
+    mode: "0700"
+  when: create_user | bool
+  tags: [user, ssh]
+
+- name: Manage deployment user authorized_keys
+  ansible.posix.authorized_key:
+    user: "{{ new_user }}"
+    key: "{{ new_user_authorized_keys | join('\n') }}"
+    exclusive: "{{ new_user_authorized_keys_exclusive | bool }}"
+    state: present
+  when:
+    - create_user | bool
+    - (new_user_authorized_keys | default([], true)) | length > 0
+  tags: [user, ssh]
+
+- name: Add fallback to zsh in deployment user .bashrc
+  ansible.builtin.blockinfile:
+    path: "{{ new_user_home_resolved }}/.bashrc"
+    block: |
+      if [ -t 1 ] && command -v zsh >/dev/null 2>&1; then
+        export SHELL=/bin/zsh
+        exec zsh -l
+      fi
+    owner: "{{ new_user }}"
+    group: "{{ new_user }}"
+    mode: "0644"
+    create: true
+    marker: "# {mark} ANSIBLE MANAGED ZSH FALLBACK"
+  when: create_user | bool
+  tags: [user, zsh]
+
+- name: Enable passwordless sudo for deployment user
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/{{ new_user }}"
+    content: "{{ new_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    mode: "0440"
+    validate: "visudo -cf %s"
+  when:
+    - create_user | bool
+    - new_user_passwordless_sudo | bool
+  tags: [user, sudo]
+
+- name: Remove passwordless sudo file for deployment user when disabled
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/{{ new_user }}"
+    state: absent
+  when:
+    - create_user | bool
+    - not (new_user_passwordless_sudo | bool)
+  tags: [user, sudo]
+
+- name: Run pipx ensurepath for deployment user
+  become: true
+  become_user: "{{ new_user }}"
+  ansible.builtin.command: pipx ensurepath
+  changed_when: false
+  when: create_user | bool
+  tags: [pipx]
+
+- name: Run pipx ensurepath for root
+  become: true
+  become_user: root
+  ansible.builtin.command: pipx ensurepath
+  changed_when: false
+  when: configure_root_zsh | bool
+  tags: [pipx]
+
+- name: Install pipx packages for deployment user
+  become: true
+  become_user: "{{ new_user }}"
+  ansible.builtin.command: "pipx install {{ item }}"
+  args:
+    creates: "{{ new_user_home_resolved }}/.local/pipx/venvs/{{ item }}"
+  loop: "{{ pipx_packages_effective }}"
+  when:
+    - create_user | bool
+    - pipx_packages_effective | length > 0
+  tags: [pipx]
+
+- name: Install Oh My Zsh for deployment user from git
+  become: true
+  become_user: "{{ new_user }}"
+  ansible.builtin.git:
+    repo: https://github.com/ohmyzsh/ohmyzsh.git
+    dest: "{{ new_user_home_resolved }}/.oh-my-zsh"
+    version: master
+    update: true
+    force: false
+  when: create_user | bool
+  tags: [user, zsh]
+
+- name: Ensure custom plugin directory exists for deployment user
+  ansible.builtin.file:
+    path: "{{ new_user_home_resolved }}/.oh-my-zsh/custom/plugins"
+    state: directory
+    owner: "{{ new_user }}"
+    group: "{{ new_user }}"
+    mode: "0755"
+  when: create_user | bool
+  tags: [user, zsh]
+
+- name: Install custom Oh My Zsh plugins for deployment user
+  become: true
+  become_user: "{{ new_user }}"
+  ansible.builtin.git:
+    repo: "{{ item.repo }}"
+    dest: "{{ new_user_home_resolved }}/.oh-my-zsh/custom/plugins/{{ item.name }}"
+    version: "{{ item.version | default('master') }}"
+    update: true
+    force: false
+  loop: "{{ zsh_custom_plugins | default([]) }}"
+  when:
+    - create_user | bool
+    - (zsh_custom_plugins | default([])) | length > 0
+  tags: [user, zsh]
+
+- name: Deploy .zshrc for deployment user
+  ansible.builtin.template:
+    src: zshrc.j2
+    dest: "{{ new_user_home_resolved }}/.zshrc"
+    owner: "{{ new_user }}"
+    group: "{{ new_user }}"
+    mode: "0644"
+  when: create_user | bool
+  tags: [user, zsh]
+
+- name: Install Oh My Zsh for root from git
+  ansible.builtin.git:
+    repo: https://github.com/ohmyzsh/ohmyzsh.git
+    dest: /root/.oh-my-zsh
+    version: master
+    update: true
+    force: false
+  when: configure_root_zsh | bool
+  tags: [zsh]
+
+- name: Ensure custom plugin directory exists for root
+  ansible.builtin.file:
+    path: /root/.oh-my-zsh/custom/plugins
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: configure_root_zsh | bool
+  tags: [zsh]
+
+- name: Install custom Oh My Zsh plugins for root
+  ansible.builtin.git:
+    repo: "{{ item.repo }}"
+    dest: "/root/.oh-my-zsh/custom/plugins/{{ item.name }}"
+    version: "{{ item.version | default('master') }}"
+    update: true
+    force: false
+  loop: "{{ zsh_custom_plugins | default([]) }}"
+  when:
+    - configure_root_zsh | bool
+    - (zsh_custom_plugins | default([])) | length > 0
+  tags: [zsh]
+
+- name: Deploy .zshrc for root
+  ansible.builtin.template:
+    src: zshrc.j2
+    dest: /root/.zshrc
+    owner: root
+    group: root
+    mode: "0644"
+  when: configure_root_zsh | bool
+  tags: [zsh]
+
+- name: Add fallback to zsh in root .bashrc
+  ansible.builtin.blockinfile:
+    path: /root/.bashrc
+    block: |
+      if [ -t 1 ] && command -v zsh >/dev/null 2>&1; then
+        export SHELL=/bin/zsh
+        exec zsh -l
+      fi
+    marker: "# {mark} ANSIBLE MANAGED ZSH FALLBACK"
+  when: configure_root_zsh | bool
+  tags: [zsh]

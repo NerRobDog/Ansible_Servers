@@ -1,0 +1,245 @@
+---
+name: deploy-remnawave-node
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub Environment containing fleet secrets
+        required: true
+        default: production
+      mode:
+        description: Deployment mode
+        required: true
+        type: choice
+        default: deploy
+        options:
+          - bootstrap
+          - deploy
+          - lockdown
+      limit:
+        description: Host aliases list (comma-separated) or all
+        required: false
+        default: all
+      check_mode:
+        description: Run in check mode
+        required: true
+        type: choice
+        default: "false"
+        options:
+          - "false"
+          - "true"
+      tags:
+        description: Optional ansible tags filter
+        required: false
+        default: ""
+
+env:
+  ANSIBLE_LOCAL_TEMP: .ansible/tmp
+  ANSIBLE_REMOTE_TEMP: .ansible/tmp
+  ANSIBLE_HOST_KEY_CHECKING: "True"
+  PY_COLORS: "1"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install OS tools for bootstrap/runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends jq sshpass openssh-client
+
+      - name: Install Ansible collections
+        run: ansible-galaxy collection install -r requirements.yml
+
+      - name: Prepare runtime directories
+        run: mkdir -p .ansible/tmp .ansible/runtime
+
+      - name: Decode fleet config from secret
+        env:
+          RW_FLEET_CONFIG_B64: ${{ secrets.RW_FLEET_CONFIG_B64 }}
+        run: |
+          if [[ -z "${RW_FLEET_CONFIG_B64}" ]]; then
+            echo "Secret RW_FLEET_CONFIG_B64 is required." >&2
+            exit 1
+          fi
+          echo "${RW_FLEET_CONFIG_B64}" | base64 --decode > .ansible/runtime/fleet_config.yaml
+
+      - name: Render runtime inventory and vars
+        env:
+          MODE: ${{ inputs.mode }}
+          REMNAWAVE_API_ENDPOINT_TEMPLATE: ${{ vars.REMNAWAVE_API_ENDPOINT_TEMPLATE }}
+        run: |
+          .github/scripts/render-fleet-runtime.py \
+            --fleet-config .ansible/runtime/fleet_config.yaml \
+            --mode "${MODE}" \
+            --inventory-out .ansible/runtime/hosts.ini \
+            --vars-out .ansible/runtime/runtime_vars.json \
+            --bootstrap-out .ansible/runtime/bootstrap_map.json
+          if [[ -n "${REMNAWAVE_API_ENDPOINT_TEMPLATE}" ]]; then
+            jq \
+              --arg endpoint "${REMNAWAVE_API_ENDPOINT_TEMPLATE}" \
+              '. + {remnawave_api_endpoint_template: $endpoint}' \
+              .ansible/runtime/runtime_vars.json > .ansible/runtime/runtime_vars.tmp.json
+            mv .ansible/runtime/runtime_vars.tmp.json .ansible/runtime/runtime_vars.json
+          fi
+
+      - name: Create vault password file when provided
+        env:
+          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+        run: |
+          if [[ -n "${ANSIBLE_VAULT_PASSWORD}" ]]; then
+            printf '%s' "${ANSIBLE_VAULT_PASSWORD}" > .ansible/runtime/vault_pass.txt
+            chmod 600 .ansible/runtime/vault_pass.txt
+          fi
+
+      - name: Setup SSH private key
+        id: ssh_key
+        env:
+          ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
+        run: |
+          if [[ -z "${ANSIBLE_SSH_PRIVATE_KEY}" ]]; then
+            echo "Secret ANSIBLE_SSH_PRIVATE_KEY is required." >&2
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${ANSIBLE_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 > ~/.ssh/id_ed25519.pub
+          chmod 644 ~/.ssh/id_ed25519.pub
+          echo "public_key=$(tr -d '\n' < ~/.ssh/id_ed25519.pub)" >> "${GITHUB_OUTPUT}"
+
+      - name: Build known_hosts via ssh-keyscan
+        run: |
+          : > ~/.ssh/known_hosts
+          awk '
+            /^[^[]/ {
+              host="";
+              port="22";
+              for (i=1; i<=NF; i++) {
+                if ($i ~ /^ansible_host=/) { split($i, a, "="); host=a[2]; }
+                if ($i ~ /^ansible_port=/) { split($i, a, "="); port=a[2]; }
+              }
+              if (host != "") { print host " " port; }
+            }
+          ' .ansible/runtime/hosts.ini | sort -u > .ansible/runtime/host_ports.txt
+          if [[ ! -s .ansible/runtime/host_ports.txt ]]; then
+            echo "No hosts were generated from fleet config." >&2
+            exit 1
+          fi
+          while read -r host port; do
+            ssh-keyscan -p "${port}" -H "${host}" >> ~/.ssh/known_hosts 2>/dev/null
+          done < .ansible/runtime/host_ports.txt
+          sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Bootstrap hosts by password and copy SSH key
+        if: ${{ inputs.mode == 'bootstrap' }}
+        env:
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          if [[ "${LIMIT}" == "all" || -z "${LIMIT}" ]]; then
+            targets="$(jq -r 'keys[]' .ansible/runtime/bootstrap_map.json)"
+          else
+            targets="$(echo "${LIMIT}" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | sed '/^$/d')"
+          fi
+
+          for alias in ${targets}; do
+            if ! jq -e --arg alias "${alias}" '.[$alias]' .ansible/runtime/bootstrap_map.json >/dev/null; then
+              echo "Host alias '${alias}' not found in fleet config." >&2
+              exit 1
+            fi
+
+            host="$(jq -r --arg alias "${alias}" '.[$alias].ansible_host' .ansible/runtime/bootstrap_map.json)"
+            port="$(jq -r --arg alias "${alias}" '.[$alias].ansible_port' .ansible/runtime/bootstrap_map.json)"
+            username="$(jq -r --arg alias "${alias}" '.[$alias].bootstrap_username' .ansible/runtime/bootstrap_map.json)"
+            password="$(jq -r --arg alias "${alias}" '.[$alias].bootstrap_password // ""' .ansible/runtime/bootstrap_map.json)"
+
+            if [[ -z "${password}" ]]; then
+              echo "Bootstrap password is missing for host '${alias}'." >&2
+              exit 1
+            fi
+
+            SSHPASS="${password}" sshpass -e ssh-copy-id \
+              -f \
+              -i ~/.ssh/id_ed25519.pub \
+              -o StrictHostKeyChecking=yes \
+              -p "${port}" \
+              "${username}@${host}"
+
+            ssh -i ~/.ssh/id_ed25519 \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -p "${port}" \
+              "${username}@${host}" "echo bootstrap-key-ok"
+          done
+
+      - name: Syntax check
+        run: |
+          cmd=(ansible-playbook -i .ansible/runtime/hosts.ini playbook.yml --syntax-check --extra-vars @.ansible/runtime/runtime_vars.json)
+          if [[ -f .ansible/runtime/vault_pass.txt ]]; then
+            cmd+=(--vault-id "secrets@.ansible/runtime/vault_pass.txt")
+          fi
+          "${cmd[@]}"
+
+      - name: Run playbook
+        env:
+          LIMIT: ${{ inputs.limit }}
+          CHECK_MODE: ${{ inputs.check_mode }}
+          TAGS: ${{ inputs.tags }}
+          CI_DEPLOY_PUBLIC_KEY: ${{ steps.ssh_key.outputs.public_key }}
+          MODE: ${{ inputs.mode }}
+          RW_PANEL_API_TOKEN: ${{ secrets.RW_PANEL_API_TOKEN }}
+          REMNAWAVE_API_ENDPOINT_TEMPLATE: ${{ vars.REMNAWAVE_API_ENDPOINT_TEMPLATE }}
+        run: |
+          cmd=(ansible-playbook -i .ansible/runtime/hosts.ini playbook.yml --limit "${LIMIT}" --extra-vars @.ansible/runtime/runtime_vars.json)
+          if [[ -n "${TAGS}" ]]; then
+            cmd+=(--tags "${TAGS}")
+          fi
+          if [[ "${CHECK_MODE}" == "true" ]]; then
+            cmd+=(--check --diff)
+          fi
+          if [[ -f .ansible/runtime/vault_pass.txt ]]; then
+            cmd+=(--vault-id "secrets@.ansible/runtime/vault_pass.txt")
+          fi
+          "${cmd[@]}"
+
+      - name: Verify deploy-user key access after bootstrap
+        if: ${{ inputs.mode == 'bootstrap' }}
+        env:
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          if [[ "${LIMIT}" == "all" || -z "${LIMIT}" ]]; then
+            targets="$(jq -r 'keys[]' .ansible/runtime/bootstrap_map.json)"
+          else
+            targets="$(echo "${LIMIT}" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | sed '/^$/d')"
+          fi
+
+          for alias in ${targets}; do
+            host="$(jq -r --arg alias "${alias}" '.[$alias].ansible_host' .ansible/runtime/bootstrap_map.json)"
+            port="$(jq -r --arg alias "${alias}" '.[$alias].ansible_port' .ansible/runtime/bootstrap_map.json)"
+            deploy_user="$(jq -r --arg alias "${alias}" '.[$alias].deploy_user' .ansible/runtime/bootstrap_map.json)"
+
+            ssh -i ~/.ssh/id_ed25519 \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -p "${port}" \
+              "${deploy_user}@${host}" "echo deploy-user-key-ok"
+          done
