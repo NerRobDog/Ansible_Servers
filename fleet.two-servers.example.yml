@@ -1,0 +1,55 @@
+# Two-server fleet template: Germany + Netherlands.
+# Stack: base + docker + remnawave_node + caddy_node + node_tuning + user_shell.
+#
+# Usage:
+# 1) Fill placeholders below.
+# 2) Base64-encode this YAML.
+# 3) Save encoded string into GitHub Environment Secret RW_FLEET_CONFIG_B64.
+
+defaults:
+  ansible_port: 22
+  deploy_user: deploy
+  bootstrap:
+    username: root
+    password: "CHANGE_ME"
+  features:
+    feature_base: true
+    feature_docker: true
+    feature_remnawave_node: true
+    feature_caddy_node: true
+    feature_node_tuning: true
+    feature_user_shell: true
+  remnawave:
+    node_secret_key: ""
+    node_port: 3001
+    caddy_domain: ""
+    caddy_monitor_port: 8443
+    ipv6_state: enabled
+  custom_roles: []
+
+hosts:
+  de_node:
+    ansible_host: "GERMANY_PUBLIC_IP"
+    bootstrap:
+      username: root
+      password: "GERMANY_SERVER_PASSWORD"
+    remnawave:
+      node_secret_key: "GERMANY_REMNAWAVE_NODE_SECRET"
+      node_port: 3001
+      caddy_domain: "de-node.example.com"
+      caddy_monitor_port: 8443
+      ipv6_state: enabled
+    custom_roles: []
+
+  nl_node:
+    ansible_host: "NETHERLANDS_PUBLIC_IP"
+    bootstrap:
+      username: root
+      password: "NETHERLANDS_SERVER_PASSWORD"
+    remnawave:
+      node_secret_key: "NETHERLANDS_REMNAWAVE_NODE_SECRET"
+      node_port: 3001
+      caddy_domain: "nl-node.example.com"
+      caddy_monitor_port: 8443
+      ipv6_state: enabled
+    custom_roles: []

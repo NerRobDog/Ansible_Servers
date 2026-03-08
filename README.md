@@ -10,6 +10,7 @@
 ## Основные документы
 
 - Подробная инструкция для операторов: [`docs/OPERATIONS_GUIDE.md`](docs/OPERATIONS_GUIDE.md)
+- Настройка секретов (RU, пошагово): [`docs/SECRETS_SETUP_RU.md`](docs/SECRETS_SETUP_RU.md)
 - Описание ролей и feature flags: [`docs/ROLE_CATALOG.md`](docs/ROLE_CATALOG.md)
 - Правила документирования для помощников: [`docs/DOCUMENTATION_RULES.md`](docs/DOCUMENTATION_RULES.md)
 - Onboarding нового помощника: [`docs/ASSISTANT_ONBOARDING.md`](docs/ASSISTANT_ONBOARDING.md)

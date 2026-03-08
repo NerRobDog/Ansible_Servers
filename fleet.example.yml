@@ -1,0 +1,80 @@
+# Fleet config template for RW_FLEET_CONFIG_B64 (GitHub Environment Secret).
+# This YAML is designed for multi-server usage:
+# 1) Put common settings into defaults
+# 2) In each host block set only differences
+# 3) Add new servers by copying one host block
+#
+# Then base64-encode and save into GitHub Environment Secret RW_FLEET_CONFIG_B64.
+
+defaults:
+  ansible_port: 22
+  deploy_user: deploy
+  bootstrap:
+    username: root
+    password: "CHANGE_ME"
+  features:
+    feature_base: true
+    feature_docker: true
+    feature_remnawave_node: true
+    feature_caddy_node: true
+    feature_node_tuning: true
+    feature_user_shell: true
+  remnawave:
+    node_secret_key: ""
+    node_port: 3001
+    caddy_domain: ""
+    caddy_monitor_port: 8443
+    ipv6_state: enabled
+  custom_roles: []
+
+hosts:
+  # Node server: full stack from defaults
+  fra_node_1:
+    ansible_host: 203.0.113.10
+    bootstrap:
+      username: root
+      password: "CHANGE_ME_FRA_1"
+    features:
+      feature_remnawave_node: true
+    remnawave:
+      node_secret_key: "CHANGE_ME_NODE_SECRET_FRA_1"
+      node_port: 3001
+      caddy_domain: "node1.example.com"
+      caddy_monitor_port: 8443
+      ipv6_state: enabled
+    custom_roles: []
+
+  # Node server with host-specific overrides
+  fra_node_2:
+    ansible_host: 203.0.113.11
+    bootstrap:
+      username: root
+      password: "CHANGE_ME_FRA_2"
+    remnawave:
+      node_secret_key: "CHANGE_ME_NODE_SECRET_FRA_2"
+      node_port: 3002
+      caddy_domain: "node2.example.com"
+      caddy_monitor_port: 8443
+      ipv6_state: enabled
+    custom_roles: []
+
+  # Non-node sandbox server with selective features
+  test_sandbox_1:
+    ansible_host: 203.0.113.20
+    bootstrap:
+      username: ubuntu
+      password: "CHANGE_ME_SANDBOX"
+    features:
+      feature_remnawave_node: false
+      feature_caddy_node: false
+      feature_node_tuning: false
+      feature_user_shell: true
+    # Example of local role in roles/<name>
+    custom_roles:
+      - user_shell
+      # - my_test_stack
+
+# Tips:
+# - If all servers share same bootstrap username, keep it only in defaults.bootstrap.username.
+# - Set per-host bootstrap.password even when username is inherited.
+# - In deploy/lockdown mode bootstrap.password is not used, but may stay in secret config.

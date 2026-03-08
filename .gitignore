@@ -4,3 +4,4 @@
 __pycache__/
 *.pyc
 hosts.plain.ini
+.env
