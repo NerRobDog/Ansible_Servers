@@ -1,0 +1,87 @@
+---
+- name: Validate monitoring stack settings
+  ansible.builtin.assert:
+    that:
+      - (monitoring_stack_retention_days | int) >= 1
+      - (monitoring_stack_prometheus_port | int) > 0
+      - (monitoring_stack_prometheus_port | int) < 65536
+      - (monitoring_stack_alertmanager_port | int) > 0
+      - (monitoring_stack_alertmanager_port | int) < 65536
+      - (monitoring_stack_grafana_port | int) > 0
+      - (monitoring_stack_grafana_port | int) < 65536
+      - (monitoring_stack_loki_port | int) > 0
+      - (monitoring_stack_loki_port | int) < 65536
+      - monitoring_stack_grafana_admin_user | trim | length > 0
+      - monitoring_stack_grafana_admin_password | trim | length > 0
+    fail_msg: "Invalid monitoring_stack settings. Check ports, retention and grafana credentials."
+  tags: [monitoring, metrics, grafana, prometheus, loki]
+
+- name: Ensure monitoring stack directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ monitoring_stack_install_path }}"
+    - "{{ monitoring_stack_install_path }}/prometheus"
+    - "{{ monitoring_stack_install_path }}/alertmanager"
+    - "{{ monitoring_stack_install_path }}/loki"
+    - "{{ monitoring_stack_install_path }}/promtail"
+  tags: [monitoring, metrics, grafana, prometheus, loki]
+
+- name: Build monitoring scrape host list from fleet config
+  ansible.builtin.set_fact:
+    monitoring_stack_scrape_hosts: >-
+      {{
+        (fleet_hosts | default({}) | dict2items)
+        | selectattr('value.features.feature_monitoring_agent', 'defined')
+        | selectattr('value.features.feature_monitoring_agent')
+        | list
+      }}
+  when: monitoring_stack_scrape_fleet_agents | bool
+  changed_when: false
+  tags: [monitoring, metrics, prometheus]
+
+- name: Default monitoring scrape host list to empty
+  ansible.builtin.set_fact:
+    monitoring_stack_scrape_hosts: []
+  when: monitoring_stack_scrape_hosts is not defined
+  changed_when: false
+  tags: [monitoring, metrics, prometheus]
+
+- name: Render monitoring stack config files
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - src: prometheus.yml.j2
+      dest: "{{ monitoring_stack_install_path }}/prometheus/prometheus.yml"
+      mode: "0644"
+    - src: alertmanager.yml.j2
+      dest: "{{ monitoring_stack_install_path }}/alertmanager/alertmanager.yml"
+      mode: "0644"
+    - src: loki.yml.j2
+      dest: "{{ monitoring_stack_install_path }}/loki/config.yml"
+      mode: "0644"
+    - src: promtail.yml.j2
+      dest: "{{ monitoring_stack_install_path }}/promtail/config.yml"
+      mode: "0644"
+    - src: docker-compose.yml.j2
+      dest: "{{ monitoring_stack_install_path }}/docker-compose.yml"
+      mode: "0644"
+  notify: Restart monitoring stack
+  tags: [monitoring, metrics, grafana, prometheus, loki]
+
+- name: Ensure monitoring stack is running
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_stack_install_path }}"
+    state: present
+    pull: missing
+    remove_orphans: true
+  when: monitoring_stack_manage_runtime | bool
+  tags: [monitoring, metrics, grafana, prometheus, loki]

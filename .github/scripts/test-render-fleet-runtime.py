@@ -326,6 +326,21 @@ def test_yusic_worker_invalid_workdir_rejected() -> None:
     assert_true("workdir" in (proc.stderr + proc.stdout), "Error should mention workdir")
 
 
+def test_invalid_monitoring_port() -> None:
+    config = {
+        "hosts": {
+            "bad": {
+                "ansible_host": "203.0.113.50",
+                "monitoring": {"agent_node_exporter_port": 70000},
+            }
+        }
+    }
+
+    proc, _, _, _ = run_renderer(json.dumps(config), "deploy", suffix=".json")
+    assert_true(proc.returncode != 0, "Renderer should fail for invalid monitoring port")
+    assert_true("monitoring" in (proc.stderr + proc.stdout), "Error should mention monitoring")
+
+
 def main() -> int:
     tests = [
         test_valid_yaml_modes,
@@ -339,6 +354,7 @@ def main() -> int:
         test_remnawave_target_ignores_invalid_yusic_contract,
         test_yusic_worker_invalid_alias_rejected,
         test_yusic_worker_invalid_workdir_rejected,
+        test_invalid_monitoring_port,
     ]
 
     for test in tests:

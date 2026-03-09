@@ -104,8 +104,30 @@ feature_docker: true
 feature_remnawave_node: false
 feature_caddy_node: false
 feature_node_tuning: false
+feature_monitoring_agent: false
+feature_monitoring_stack: false
 feature_user_shell: false
 custom_roles: []
 ssh_lockdown_enabled: false
 fleet_mode: deploy
 fleet_hosts: {}
+
+# Monitoring defaults
+monitoring_agent_bind_address: "0.0.0.0"
+monitoring_agent_node_exporter_port: 9100
+monitoring_agent_cadvisor_port: 8080
+monitoring_agent_enable_node_exporter: true
+monitoring_agent_enable_cadvisor: true
+monitoring_agent_manage_runtime: true
+monitoring_agent_install_path: /opt/monitoring-agent
+
+monitoring_stack_install_path: /opt/monitoring-stack
+monitoring_stack_manage_runtime: true
+monitoring_stack_retention_days: 7
+monitoring_stack_grafana_admin_user: admin
+monitoring_stack_grafana_admin_password: change_me
+monitoring_stack_prometheus_port: 9090
+monitoring_stack_alertmanager_port: 9093
+monitoring_stack_grafana_port: 3000
+monitoring_stack_loki_port: 3100
+monitoring_stack_scrape_fleet_agents: true
