@@ -1,0 +1,41 @@
+---
+- name: Validate monitoring agent config
+  ansible.builtin.assert:
+    that:
+      - monitoring_agent_bind_address | trim | length > 0
+      - (monitoring_agent_node_exporter_port | int) > 0
+      - (monitoring_agent_node_exporter_port | int) < 65536
+      - (monitoring_agent_cadvisor_port | int) > 0
+      - (monitoring_agent_cadvisor_port | int) < 65536
+      - monitoring_agent_enable_node_exporter | bool or monitoring_agent_enable_cadvisor | bool
+    fail_msg: >-
+      Invalid monitoring_agent settings. Check bind_address, ports and at least one enabled exporter.
+  tags: [monitoring, metrics, agent]
+
+- name: Ensure monitoring agent install directory exists
+  ansible.builtin.file:
+    path: "{{ monitoring_agent_install_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags: [monitoring, metrics, agent]
+
+- name: Render monitoring agent docker-compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ monitoring_agent_install_path }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart monitoring agent stack
+  tags: [monitoring, metrics, agent]
+
+- name: Ensure monitoring agent stack is running
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_agent_install_path }}"
+    state: present
+    pull: missing
+    remove_orphans: true
+  when: monitoring_agent_manage_runtime | bool
+  tags: [monitoring, metrics, agent]

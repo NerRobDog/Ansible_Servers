@@ -6,6 +6,7 @@
 - серверы описываются только в GitHub Environment Secret `RW_FLEET_CONFIG_B64`;
 - профили RemaWave хранятся в git-шаблонах `remnawave/profiles/*.json` и синкаются в панель pre-step'ом;
 - workflow запускается вручную в режимах `bootstrap`, `deploy`, `lockdown`;
+- health-мониторинг можно запускать вручную или по расписанию через отдельный workflow;
 - push в репозиторий для добавления новых серверов не нужен.
 
 ## Основные документы
@@ -24,11 +25,15 @@
 - `remnawave_node` — deploy RemaWave node.
 - `caddy_node` — TLS decoy для self-steal Reality + локальный health endpoint.
 - `node_tuning` — BBR + IPv6.
+- `monitoring_agent` — node_exporter + cadvisor на нодах.
+- `monitoring_stack` — Prometheus + Alertmanager + Grafana + Loki + Promtail.
 - `user_shell` — пользователь/sudo/SSH shell.
 - `ssh_lockdown` — отключение password auth и root SSH login.
 - `custom_roles` — дополнительные локальные роли из `roles/`, задаются по хостам.
 
 ## Workflow
+
+### Deploy workflow
 
 Файл: `.github/workflows/deploy-remnawave-node.yml`
 
@@ -45,6 +50,19 @@ Pre-step перед Ansible:
 - `.github/scripts/remnawave-api-sync.py`
 - манифест: `remnawave/profile-sync.yml`
 - шаблоны: `remnawave/profiles/*.json`
+
+### Monitoring workflow
+
+Файл: `.github/workflows/monitor-remnawave-node.yml`
+
+Назначение:
+- периодический smoke-monitoring доступности и базового health;
+- отправка алертов в Telegram topic.
+
+Inputs (manual run):
+- `environment` — GitHub Environment c секретами флота и Telegram.
+- `limit` — `all` или alias-хостов через запятую.
+- `notify_on_success` — отправлять ли сообщения об успешных проверках.
 
 ## Reality Self-Steal (важно)
 
@@ -68,6 +86,9 @@ Pre-step перед Ansible:
 Опциональные:
 - `RW_PROFILE_VARS_B64` — опциональный global placeholder map. Основные Reality-поля задаются per-host в fleet; `reality_short_id/private_key` можно не задавать (будут сгенерированы из `node_secret_key`).
 - `ANSIBLE_VAULT_PASSWORD`
+- `ALERT_TELEGRAM_BOT_TOKEN` — bot token для отправки оповещений.
+- `ALERT_TELEGRAM_CHAT_ID` — chat id группы/канала (для групп обычно начинается с `-100`).
+- `ALERT_TELEGRAM_TOPIC_ID` — topic id (message thread id) для форум-топика.
 
 Environment Variables:
 - `RW_PANEL_API_BASE_URL` — базовый URL панели (например, `https://panel.example.com`).
@@ -100,3 +121,4 @@ yamllint .
 2. Запустить `mode=bootstrap` для новых хостов.
 3. Запустить `mode=lockdown` для этих же хостов.
 4. Запускать регулярный `mode=deploy` с `run_smoke=true`.
+5. Включить/запускать `monitor-remnawave-node` для регулярных алертов в Telegram topic.

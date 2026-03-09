@@ -1,0 +1,30 @@
+services:
+{% if monitoring_agent_enable_node_exporter | bool %}
+  node_exporter:
+    image: {{ monitoring_agent_node_exporter_image }}
+    container_name: monitoring-node-exporter
+    restart: unless-stopped
+    command:
+      - --path.rootfs=/host
+    volumes:
+      - /:/host:ro,rslave
+    ports:
+      - "{{ monitoring_agent_bind_address }}:{{ monitoring_agent_node_exporter_port }}:9100"
+{% endif %}
+{% if monitoring_agent_enable_cadvisor | bool %}
+
+  cadvisor:
+    image: {{ monitoring_agent_cadvisor_image }}
+    container_name: monitoring-cadvisor
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    ports:
+      - "{{ monitoring_agent_bind_address }}:{{ monitoring_agent_cadvisor_port }}:8080"
+{% endif %}

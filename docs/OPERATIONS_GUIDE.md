@@ -23,6 +23,10 @@ Workflow: `.github/workflows/deploy-remnawave-node.yml`
 Перед `ansible-playbook` workflow выполняет panel pre-step:
 - upsert Config Profiles из `remnawave/profiles/*.json`;
 - назначение profile/inbounds существующим нодам в панели.
+Для мониторинга используется отдельный workflow:
+- `.github/workflows/monitor-remnawave-node.yml`
+- запускается вручную (`workflow_dispatch`) или по расписанию (`cron`);
+- выполняет smoke-checks и отправляет алерты в Telegram topic.
 
 ## 3) Что нужно хранить в GitHub
 
@@ -38,6 +42,9 @@ Workflow: `.github/workflows/deploy-remnawave-node.yml`
 
 - `RW_PROFILE_VARS_B64` — optional global placeholder values (обычно не нужен).
 - `ANSIBLE_VAULT_PASSWORD` — если используете vault-зашифрованные данные.
+- `ALERT_TELEGRAM_BOT_TOKEN` — bot token для уведомлений.
+- `ALERT_TELEGRAM_CHAT_ID` — chat id чата/группы Telegram.
+- `ALERT_TELEGRAM_TOPIC_ID` — topic id (message_thread_id), если отправка нужна в конкретный топик.
 
 ### Обязательная Environment Variable
 
@@ -58,6 +65,8 @@ defaults:
     feature_remnawave_node: false
     feature_caddy_node: false
     feature_node_tuning: false
+    feature_monitoring_agent: false
+    feature_monitoring_stack: false
     feature_user_shell: false
 
 hosts:
@@ -71,6 +80,7 @@ hosts:
       feature_remnawave_node: true
       feature_caddy_node: true
       feature_node_tuning: true
+      feature_monitoring_agent: true
     remnawave:
       node_secret_key: "SECRET_FROM_PANEL"
       node_port: 3001
@@ -94,6 +104,13 @@ hosts:
       reality_private_key: ""
       reality_server_name: "node1.example.com"
       target_inbound_tags: []
+    monitoring:
+      agent_bind_address: "0.0.0.0"
+      agent_node_exporter_port: 9100
+      agent_cadvisor_port: 8080
+      stack_retention_days: 7
+      stack_grafana_admin_user: "admin"
+      stack_grafana_admin_password: "CHANGE_ME_STRONG_PASSWORD"
     custom_roles:
       - test_stack
 
@@ -106,6 +123,8 @@ hosts:
       feature_remnawave_node: false
       feature_caddy_node: false
       feature_node_tuning: false
+      feature_monitoring_agent: false
+      feature_monitoring_stack: false
     custom_roles:
       - test_stack
 ```
@@ -169,6 +188,13 @@ base64 -i fleet.yaml | tr -d '\n' | gh secret set RW_FLEET_CONFIG_B64 --env prod
 }
 ```
 
+Мониторинг:
+1. Actions -> `monitor-remnawave-node` -> Run workflow.
+2. Выберите:
+   - `environment`;
+   - `limit`;
+   - `notify_on_success` (`false`, если нужны только алерты при проблемах).
+
 ## 7) Рекомендуемая последовательность для нового хоста
 
 1. Добавить хост в fleet-конфиг и обновить `RW_FLEET_CONFIG_B64`.
@@ -202,6 +228,7 @@ base64 -i fleet.yaml | tr -d '\n' | gh secret set RW_FLEET_CONFIG_B64 --env prod
 - `Missing remnawave_node_secret_key`: включена node-роль, но не передан секрет ноды.
 - `Profile ... not found`/`missing inbound tags`: mismatch манифеста sync и профилей в панели.
 - Нет интернета у клиентов при активной подписке: часто `dest` в панели указывает на `:443` этой же ноды вместо локального decoy.
+- `Telegram secrets are not configured`: не заданы `ALERT_TELEGRAM_BOT_TOKEN`/`ALERT_TELEGRAM_CHAT_ID` в выбранном Environment.
 
 ## 10) Что делать помощнику при изменениях
 
@@ -215,3 +242,24 @@ base64 -i fleet.yaml | tr -d '\n' | gh secret set RW_FLEET_CONFIG_B64 --env prod
    - `ansible-lint playbook.yml roles`
    - `yamllint .`
 4. Обновить документацию и примеры, если менялся контракт.
+
+## 11) Настройка Telegram topic для алертов
+
+1. Создайте бота через `@BotFather`, получите token.
+2. Добавьте бота в группу, где включены topics, и дайте право писать сообщения.
+3. Получите `chat_id`:
+   - отправьте любое сообщение в группу;
+   - выполните `https://api.telegram.org/bot<TOKEN>/getUpdates`;
+   - возьмите `message.chat.id` (для групп обычно начинается с `-100`).
+4. Получите `topic id`:
+   - отправьте сообщение в нужный топик;
+   - снова вызовите `getUpdates`;
+   - возьмите `message.message_thread_id`.
+5. Сохраните в GitHub Environment secrets:
+   - `ALERT_TELEGRAM_BOT_TOKEN`
+   - `ALERT_TELEGRAM_CHAT_ID`
+   - `ALERT_TELEGRAM_TOPIC_ID`
+
+Проверка:
+- запустите `monitor-remnawave-node` вручную c `notify_on_success=true`;
+- убедитесь, что сообщение пришло именно в нужный топик.

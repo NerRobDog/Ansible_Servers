@@ -97,6 +97,8 @@ for alias in "${targets[@]}"; do
   feature_remnawave_node="$(jq -r --arg alias "$alias" '.fleet_hosts[$alias].features.feature_remnawave_node // false' "$runtime_vars")"
   feature_caddy_node="$(jq -r --arg alias "$alias" '.fleet_hosts[$alias].features.feature_caddy_node // false' "$runtime_vars")"
   feature_node_tuning="$(jq -r --arg alias "$alias" '.fleet_hosts[$alias].features.feature_node_tuning // false' "$runtime_vars")"
+  feature_monitoring_agent="$(jq -r --arg alias "$alias" '.fleet_hosts[$alias].features.feature_monitoring_agent // false' "$runtime_vars")"
+  feature_monitoring_stack="$(jq -r --arg alias "$alias" '.fleet_hosts[$alias].features.feature_monitoring_stack // false' "$runtime_vars")"
 
   if [[ "$feature_docker" == "true" ]]; then
     echo "[smoke][$alias] Check Docker service"
@@ -138,6 +140,25 @@ for alias in "${targets[@]}"; do
     echo "[smoke][$alias] Check node tuning sysctl"
     run_ansible "$alias" -b -m ansible.builtin.shell -a "test \"\$(sysctl -n net.core.default_qdisc)\" = fq && test \"\$(sysctl -n net.ipv4.tcp_congestion_control)\" = bbr" >/dev/null
     run_ansible "$alias" -b -m ansible.builtin.shell -a "test \"\$(sysctl -n net.ipv6.conf.all.disable_ipv6)\" = '${expected_ipv6}' && test \"\$(sysctl -n net.ipv6.conf.default.disable_ipv6)\" = '${expected_ipv6}' && test \"\$(sysctl -n net.ipv6.conf.lo.disable_ipv6)\" = '${expected_ipv6}'" >/dev/null
+  fi
+
+  if [[ "$feature_monitoring_agent" == "true" ]]; then
+    node_exporter_port="$(jq -r --arg alias "$alias" '.remnawave_runtime_host_vars[$alias].monitoring_agent_node_exporter_port // 9100' "$runtime_vars")"
+    cadvisor_port="$(jq -r --arg alias "$alias" '.remnawave_runtime_host_vars[$alias].monitoring_agent_cadvisor_port // 8080' "$runtime_vars")"
+
+    echo "[smoke][$alias] Check monitoring_agent containers and ports"
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-node-exporter$ | grep -q monitoring-node-exporter" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-cadvisor$ | grep -q monitoring-cadvisor" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://127.0.0.1:${node_exporter_port}/metrics' >/dev/null" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://127.0.0.1:${cadvisor_port}/metrics' >/dev/null" >/dev/null
+  fi
+
+  if [[ "$feature_monitoring_stack" == "true" ]]; then
+    echo "[smoke][$alias] Check monitoring_stack services"
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-prometheus$ | grep -q monitoring-prometheus" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-grafana$ | grep -q monitoring-grafana" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://127.0.0.1:9090/-/ready' >/dev/null" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://127.0.0.1:3000/api/health' >/dev/null" >/dev/null
   fi
 
 done

@@ -161,6 +161,21 @@ def test_invalid_ipv6_state() -> None:
     assert_true("ipv6_state" in (proc.stderr + proc.stdout), "Error should mention ipv6_state")
 
 
+def test_invalid_monitoring_port() -> None:
+    config = {
+        "hosts": {
+            "bad": {
+                "ansible_host": "203.0.113.50",
+                "monitoring": {"agent_node_exporter_port": 70000},
+            }
+        }
+    }
+
+    proc, _, _, _ = run_renderer(json.dumps(config), "deploy", suffix=".json")
+    assert_true(proc.returncode != 0, "Renderer should fail for invalid monitoring port")
+    assert_true("monitoring" in (proc.stderr + proc.stdout), "Error should mention monitoring")
+
+
 def main() -> int:
     tests = [
         test_valid_yaml_modes,
@@ -168,6 +183,7 @@ def main() -> int:
         test_invalid_missing_ansible_host,
         test_invalid_custom_roles_item,
         test_invalid_ipv6_state,
+        test_invalid_monitoring_port,
     ]
 
     for test in tests:

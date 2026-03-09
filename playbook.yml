@@ -25,6 +25,10 @@
         effective_feature_remnawave_node: "{{ fleet_host_cfg.get('features', {}).get('feature_remnawave_node', feature_remnawave_node) | bool }}"
         effective_feature_caddy_node: "{{ fleet_host_cfg.get('features', {}).get('feature_caddy_node', feature_caddy_node) | bool }}"
         effective_feature_node_tuning: "{{ fleet_host_cfg.get('features', {}).get('feature_node_tuning', feature_node_tuning) | bool }}"
+        effective_feature_monitoring_agent: >-
+          {{ fleet_host_cfg.get('features', {}).get('feature_monitoring_agent', feature_monitoring_agent) | bool }}
+        effective_feature_monitoring_stack: >-
+          {{ fleet_host_cfg.get('features', {}).get('feature_monitoring_stack', feature_monitoring_stack) | bool }}
         effective_feature_user_shell: >-
           {{
             (fleet_mode_effective == 'bootstrap')
@@ -51,6 +55,14 @@
         remnawave_caddy_domain: "{{ fleet_host_cfg.get('remnawave', {}).get('caddy_domain', remnawave_caddy_domain) }}"
         remnawave_caddy_monitor_port: "{{ fleet_host_cfg.get('remnawave', {}).get('caddy_monitor_port', remnawave_caddy_monitor_port) }}"
         remnawave_ipv6_state: "{{ fleet_host_cfg.get('remnawave', {}).get('ipv6_state', remnawave_ipv6_state) }}"
+        monitoring_agent_bind_address: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_bind_address', monitoring_agent_bind_address) }}"
+        monitoring_agent_node_exporter_port: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_node_exporter_port', monitoring_agent_node_exporter_port) }}"
+        monitoring_agent_cadvisor_port: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_cadvisor_port', monitoring_agent_cadvisor_port) }}"
+        monitoring_stack_retention_days: "{{ fleet_host_cfg.get('monitoring', {}).get('stack_retention_days', monitoring_stack_retention_days) }}"
+        monitoring_stack_grafana_admin_user: >-
+          {{ fleet_host_cfg.get('monitoring', {}).get('stack_grafana_admin_user', monitoring_stack_grafana_admin_user) }}
+        monitoring_stack_grafana_admin_password: >-
+          {{ fleet_host_cfg.get('monitoring', {}).get('stack_grafana_admin_password', monitoring_stack_grafana_admin_password) }}
       changed_when: false
       tags: [always]
 
@@ -92,6 +104,14 @@
     - role: docker
       when: effective_feature_docker | bool
       tags: [docker]
+
+    - role: monitoring_agent
+      when: effective_feature_monitoring_agent | bool
+      tags: [monitoring, metrics, agent]
+
+    - role: monitoring_stack
+      when: effective_feature_monitoring_stack | bool
+      tags: [monitoring, metrics, grafana, prometheus, loki]
 
     - role: remnawave_node
       when: effective_feature_remnawave_node | bool
