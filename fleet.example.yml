@@ -21,6 +21,12 @@ defaults:
     feature_node_tuning: true
     feature_user_shell: true
   remnawave:
+    # Empty = auto:
+    # target_profile_name -> <host_alias>
+    # inbound_tag -> VLESS_<HOST_ALIAS>
+    # target_inbound_tags -> [inbound_tag]
+    # reality_server_name -> caddy_domain
+    # reality_short_id/reality_private_key -> deterministic generation
     node_secret_key: ""
     node_port: 3001
     caddy_domain: ""
@@ -31,6 +37,15 @@ defaults:
     caddy_tls_cert_file: ""
     caddy_tls_key_file: ""
     caddy_acme_ca: ""
+    # panel_node_uuid: "00000000-0000-4000-8000-000000000001"
+    # target_profile_name: "fra_node_1"
+    # inbound_tag: "VLESS_FRA_NODE_1"
+    # target_inbound_tags:
+    #   - "VLESS_FRA_NODE_1"
+    reality_target: "127.0.0.1:8443"
+    # reality_short_id: "7642b35f5570246f"
+    # reality_private_key: "REPLACE_ME"
+    # reality_server_name: "node1.example.com"
   custom_roles: []
 
 hosts:
@@ -50,6 +65,17 @@ hosts:
       ipv6_state: enabled
       caddy_tls_mode: public
       caddy_local_only: true
+      # Optional: if empty, node name must match host alias (fra_node_1).
+      # panel_node_uuid: "00000000-0000-4000-8000-000000000001"
+      reality_target: "127.0.0.1:8443"
+      # Optional (auto by host alias). Uncomment if you need explicit values:
+      # target_profile_name: "fra_node_1"
+      # inbound_tag: "VLESS_FRA_NODE_1"
+      # target_inbound_tags:
+      #   - "VLESS_FRA_NODE_1"
+      # reality_server_name: "node1.example.com"
+      # reality_short_id: "7642b35f5570246f"
+      # reality_private_key: "REPLACE_ME"
     custom_roles: []
 
   # Node server with host-specific overrides
@@ -66,6 +92,17 @@ hosts:
       ipv6_state: enabled
       caddy_tls_mode: public
       caddy_local_only: true
+      # Optional: if empty, node name must match host alias (fra_node_2).
+      # panel_node_uuid: "00000000-0000-4000-8000-000000000002"
+      reality_target: "127.0.0.1:8443"
+      # Optional (auto by host alias). Uncomment if you need explicit values:
+      # target_profile_name: "fra_node_2"
+      # inbound_tag: "VLESS_FRA_NODE_2"
+      # target_inbound_tags:
+      #   - "VLESS_FRA_NODE_2"
+      # reality_server_name: "node2.example.com"
+      # reality_short_id: "c0d2ed6aa8460e20"
+      # reality_private_key: "REPLACE_ME"
     custom_roles: []
 
   # Non-node sandbox server with selective features
@@ -79,6 +116,12 @@ hosts:
       feature_caddy_node: false
       feature_node_tuning: false
       feature_user_shell: true
+    remnawave:
+      # Optional (normally not needed for non-node host):
+      # panel_node_uuid: "00000000-0000-4000-8000-000000000099"
+      # target_profile_name: "test_sandbox_1"
+      # target_inbound_tags:
+      #   - VLESS_TEST_SANDBOX_1
     # Example of local role in roles/<name>
     custom_roles:
       - user_shell

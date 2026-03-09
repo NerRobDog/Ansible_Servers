@@ -41,6 +41,14 @@ on:
         description: Optional ansible tags filter
         required: false
         default: ""
+      panel_sync_write:
+        description: Apply profile/node writes to RemaWave panel API
+        required: true
+        type: choice
+        default: "true"
+        options:
+          - "true"
+          - "false"
 
 env:
   ANSIBLE_LOCAL_TEMP: .ansible/tmp
@@ -107,6 +115,50 @@ jobs:
               .ansible/runtime/runtime_vars.json > .ansible/runtime/runtime_vars.tmp.json
             mv .ansible/runtime/runtime_vars.tmp.json .ansible/runtime/runtime_vars.json
           fi
+
+      - name: Decode profile placeholder vars
+        env:
+          RW_PROFILE_VARS_B64: ${{ secrets.RW_PROFILE_VARS_B64 }}
+        run: |
+          if [[ -z "${RW_PROFILE_VARS_B64}" ]]; then
+            echo '{}' > .ansible/runtime/profile_vars.json
+          else
+            echo "${RW_PROFILE_VARS_B64}" | base64 --decode > .ansible/runtime/profile_vars.json
+            jq -e 'type == "object"' .ansible/runtime/profile_vars.json >/dev/null
+          fi
+
+      - name: Sync RemaWave profiles and node assignments
+        env:
+          LIMIT: ${{ inputs.limit }}
+          CHECK_MODE: ${{ inputs.check_mode }}
+          PANEL_SYNC_WRITE: ${{ inputs.panel_sync_write }}
+          RW_PANEL_API_TOKEN: ${{ secrets.RW_PANEL_API_TOKEN }}
+          RW_PANEL_API_BASE_URL: ${{ vars.RW_PANEL_API_BASE_URL }}
+        run: |
+          if [[ -z "${RW_PANEL_API_TOKEN}" ]]; then
+            echo "Secret RW_PANEL_API_TOKEN is required for panel API sync." >&2
+            exit 1
+          fi
+          if [[ -z "${RW_PANEL_API_BASE_URL}" ]]; then
+            echo "Environment variable RW_PANEL_API_BASE_URL is required for panel API sync." >&2
+            exit 1
+          fi
+
+          write_flag=""
+          if [[ "${CHECK_MODE}" == "true" ]]; then
+            write_flag=""
+          elif [[ "${PANEL_SYNC_WRITE}" == "true" ]]; then
+            write_flag="--write"
+          fi
+
+          .github/scripts/remnawave-api-sync.py \
+            --fleet-config .ansible/runtime/fleet_config.yaml \
+            --manifest remnawave/profile-sync.yml \
+            --profile-vars .ansible/runtime/profile_vars.json \
+            --panel-api-base-url "${RW_PANEL_API_BASE_URL}" \
+            --api-token "${RW_PANEL_API_TOKEN}" \
+            --limit "${LIMIT}" \
+            ${write_flag}
 
       - name: Create vault password file when provided
         env:

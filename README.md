@@ -4,6 +4,7 @@
 
 Главная модель:
 - серверы описываются только в GitHub Environment Secret `RW_FLEET_CONFIG_B64`;
+- профили RemaWave хранятся в git-шаблонах `remnawave/profiles/*.json` и синкаются в панель pre-step'ом;
 - workflow запускается вручную в режимах `bootstrap`, `deploy`, `lockdown`;
 - push в репозиторий для добавления новых серверов не нужен.
 
@@ -37,6 +38,12 @@ Inputs:
 - `check_mode` — dry-run.
 - `run_smoke` — post-deploy smoke-проверки (`true|false`).
 - `tags` — опциональный фильтр ansible tags.
+- `panel_sync_write` — `true|false` для write/read-only API sync профилей и назначений нод.
+
+Pre-step перед Ansible:
+- `.github/scripts/remnawave-api-sync.py`
+- манифест: `remnawave/profile-sync.yml`
+- шаблоны: `remnawave/profiles/*.json`
 
 ## Reality Self-Steal (важно)
 
@@ -55,10 +62,15 @@ Inputs:
 
 - `RW_FLEET_CONFIG_B64` — base64 от JSON/YAML fleet config.
 - `ANSIBLE_SSH_PRIVATE_KEY` — приватный SSH-ключ для key-based доступа.
+- `RW_PANEL_API_TOKEN` — API токен панели RemaWave (нужен для pre-step sync).
 
 Опциональные:
-- `RW_PANEL_API_TOKEN`
+- `RW_PROFILE_VARS_B64` — опциональный global placeholder map. Основные Reality-поля задаются per-host в fleet; `reality_short_id/private_key` можно не задавать (будут сгенерированы из `node_secret_key`).
 - `ANSIBLE_VAULT_PASSWORD`
+
+Environment Variables:
+- `RW_PANEL_API_BASE_URL` — базовый URL панели (например, `https://panel.example.com`).
+- `REMNAWAVE_API_ENDPOINT_TEMPLATE` — старый optional source для host runtime vars (можно оставить пустым).
 
 ## Локальные проверки
 

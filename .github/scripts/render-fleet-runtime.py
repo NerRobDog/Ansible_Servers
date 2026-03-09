@@ -30,6 +30,9 @@ REMNAWAVE_DEFAULTS = {
     "caddy_tls_key_file": "",
     "caddy_local_only": True,
     "caddy_acme_ca": "",
+    "panel_node_uuid": "",
+    "target_profile_name": "",
+    "target_inbound_tags": [],
 }
 
 
@@ -156,6 +159,18 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
     remnawave_cfg["caddy_tls_cert_file"] = str(remnawave_cfg.get("caddy_tls_cert_file", "") or "")
     remnawave_cfg["caddy_tls_key_file"] = str(remnawave_cfg.get("caddy_tls_key_file", "") or "")
     remnawave_cfg["caddy_acme_ca"] = str(remnawave_cfg.get("caddy_acme_ca", "") or "")
+    remnawave_cfg["panel_node_uuid"] = str(remnawave_cfg.get("panel_node_uuid", "") or "").strip()
+    remnawave_cfg["target_profile_name"] = str(remnawave_cfg.get("target_profile_name", "") or "").strip()
+
+    inbound_tags = remnawave_cfg.get("target_inbound_tags", [])
+    if inbound_tags is None:
+        inbound_tags = []
+    if not isinstance(inbound_tags, list):
+        fail(f"Host '{alias}' remnawave.target_inbound_tags must be a list.")
+    for tag in inbound_tags:
+        if not isinstance(tag, str) or not tag.strip():
+            fail(f"Host '{alias}' remnawave.target_inbound_tags contains invalid tag: {tag!r}")
+    remnawave_cfg["target_inbound_tags"] = [tag.strip() for tag in inbound_tags]
     if remnawave_cfg["caddy_tls_mode"] == "files":
         if not remnawave_cfg["caddy_tls_cert_file"].strip() or not remnawave_cfg["caddy_tls_key_file"].strip():
             fail(f"Host '{alias}' remnawave.caddy_tls_mode=files requires caddy_tls_cert_file and caddy_tls_key_file.")
@@ -232,6 +247,9 @@ def main() -> None:
                 "remnawave_caddy_tls_key_file": cfg["remnawave"]["caddy_tls_key_file"],
                 "remnawave_caddy_local_only": cfg["remnawave"]["caddy_local_only"],
                 "remnawave_caddy_acme_ca": cfg["remnawave"]["caddy_acme_ca"],
+                "remnawave_panel_node_uuid": cfg["remnawave"]["panel_node_uuid"],
+                "remnawave_target_profile_name": cfg["remnawave"]["target_profile_name"],
+                "remnawave_target_inbound_tags": cfg["remnawave"]["target_inbound_tags"],
             }
             for alias, cfg in normalized_hosts.items()
         },

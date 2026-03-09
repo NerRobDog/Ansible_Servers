@@ -1,0 +1,23 @@
+---
+# RemaWave profile sync manifest.
+# Host-level values are resolved from fleet config (hosts.<alias>.remnawave.*).
+# Optional global placeholders may still come from RW_PROFILE_VARS_B64.
+
+default_profile_template: remnawave/profiles/rw_vless_reality.json
+
+nodes:
+  # Optional override map for host-level assignment.
+  # Usually assignment fields are stored in fleet config under hosts.<alias>.remnawave:
+  #   panel_node_uuid, target_profile_name, inbound_tag, target_inbound_tags,
+  #   reality_target, reality_short_id, reality_private_key, reality_server_name
+  # reality_short_id and reality_private_key are optional in fleet and are auto-generated
+  # deterministically from node_secret_key when omitted.
+  #
+  # Example:
+  # - host: de_node
+  #   panel_node_uuid: "00000000-0000-4000-8000-000000000001"
+  #   target_profile_name: "de_node"
+  #   inbound_tag: "VLESS_DE_NODE"
+  #   target_inbound_tags:
+  #     - VLESS_DE_NODE
+  []

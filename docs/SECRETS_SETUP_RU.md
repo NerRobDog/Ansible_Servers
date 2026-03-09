@@ -1,128 +1,176 @@
-# Настройка секретов GitHub Actions (Fleet YAML)
+# Настройка секретов GitHub Actions (Fleet + RemaWave API Sync)
 
-Этот документ описывает, как подготовить и загрузить секреты для деплоя без коммитов в `hosts.ini`.
+Этот документ объясняет, как настроить деплой так, чтобы менять только Secrets/Variables в GitHub Environment, без коммитов `hosts.ini`.
 
-## Что нужно заполнить
+## 1) Что вы редактируете
 
-Используйте шаблон:
-- [`fleet.two-servers.example.yml`](/Users/nik/Documents/PycharmProjects/Ansible_Servers/fleet.two-servers.example.yml) — готовый пример на 2 сервера.
-- [`fleet.example.yml`](/Users/nik/Documents/PycharmProjects/Ansible_Servers/fleet.example.yml) — общий multi-server шаблон.
+В обычной работе меняются только:
+1. `RW_FLEET_CONFIG_B64` (секрет с описанием серверов).
+2. Host-level Reality поля внутри fleet (`inbound_tag`, при необходимости `reality_short_id`/`reality_private_key`).
+3. При необходимости `RW_PANEL_API_TOKEN` и `RW_PANEL_API_BASE_URL`.
 
-Критично заполнить:
-1. `hosts.<alias>.ansible_host` — публичный IP.
-2. `hosts.<alias>.bootstrap.username/password` — логин и пароль для первого входа (`mode=bootstrap`).
-3. `hosts.<alias>.remnawave.node_secret_key` — секрет ноды.
-4. `hosts.<alias>.remnawave.caddy_domain` — домен (если `feature_caddy_node=true`).
+Шаблоны:
+- `fleet.two-servers.example.yml` — пример для 2 серверов.
+- `fleet.example.yml` — общий multi-server шаблон.
+- `remnawave/profile-sync.yml` — правила sync профилей/нод в панели.
+- `remnawave/profiles/*.json` — JSON-шаблоны config profile без секретов.
 
-## Где взять значения для RemaWave
+## 2) Где взять значения для RemaWave
 
-### Вариант A (рекомендуется для старта): вручную из панели RemaWave
+### 2.1 `node_secret_key` (для деплоя remnawave/node)
 
-1. Откройте вашу панель RemaWave.
-2. Создайте ноду или откройте экран с параметрами существующей ноды.
-3. Скопируйте `SECRET_KEY` (иногда может называться `node_secret_key` или просто `secret`).
-4. Вставьте этот ключ в YAML:
+1. Откройте панель RemaWave.
+2. Откройте ноду (или создайте новую).
+3. Найдите `SECRET_KEY` (может называться `secret`/`node_secret_key`).
+4. Вставьте в fleet YAML:
    - `hosts.<alias>.remnawave.node_secret_key`.
-5. При необходимости задайте свой порт:
-   - `hosts.<alias>.remnawave.node_port` (обычно `3001`).
 
-Примечание: названия разделов в UI панели могут немного отличаться между версиями, но нужен именно секрет ноды для `SECRET_KEY` контейнера.
+Примечание: этот ключ нужен контейнеру ноды и не извлекается нашим API sync шагом.
 
-### Вариант B: через API панели (опционально)
+### 2.2 `RW_PANEL_API_TOKEN` (для pre-step sync профилей и назначений нод)
 
-Используйте этот вариант, если хотите, чтобы playbook подтягивал параметры ноды автоматически.
+1. В панели откройте раздел API/Access Tokens (название может отличаться в вашей версии UI).
+2. Создайте токен с правами на:
+   - чтение/изменение Config Profiles;
+   - чтение/изменение Nodes.
+3. Скопируйте токен и сохраните в GitHub Environment Secret `RW_PANEL_API_TOKEN`.
 
-Нужно:
-1. GitHub Environment Variable `REMNAWAVE_API_ENDPOINT_TEMPLATE`  
-   пример: `https://panel.example.com/api/nodes/{inventory_hostname}`.
-2. GitHub Environment Secret `RW_PANEL_API_TOKEN`  
-   это API-токен панели (обычно создается в разделе API/Access Tokens в панели).
+Если получили `401/403` в workflow, обычно причина в неверном токене или недостаточных правах токена.
 
-Важно:
-1. `RW_PANEL_API_TOKEN` нужен только для API-режима.
-2. Если API не настроен, просто оставьте `RW_PANEL_API_TOKEN` пустым и заполняйте `node_secret_key` вручную в YAML.
+### 2.3 `RW_PANEL_API_BASE_URL`
 
-## Какие секреты нужны в GitHub Environment
+Это base URL панели, например:
+- `https://panel.example.com`
 
-Обязательные:
-1. `RW_FLEET_CONFIG_B64` — base64 от вашего YAML-конфига флота.
-2. `ANSIBLE_SSH_PRIVATE_KEY` — приватный ключ, который runner использует для key-based SSH.
+Сохраните его в GitHub Environment Variable `RW_PANEL_API_BASE_URL`.
+Скрипт сам добавит `/api`.
 
-Опциональные:
-1. `RW_PANEL_API_TOKEN`
+## 3) Какие поля добавились в fleet config
+
+Для каждого host в `hosts.<alias>.remnawave`:
+- `panel_node_uuid` — UUID ноды в панели (рекомендуется заполнять явно).
+- `target_profile_name` — имя profile, который должен быть назначен ноде (если пусто: берётся alias хоста, например `de_node`).
+- `inbound_tag` — базовый tag inbound (если пусто: `VLESS_<HOST_ALIAS>`, например `VLESS_DE_NODE`).
+- `reality_target` — обычно `127.0.0.1:8443`.
+- `reality_short_id` — shortId Reality (опционально; если пусто, генерируется автоматически и стабильно из `node_secret_key`).
+- `reality_private_key` — privateKey Reality (опционально; если пусто, генерируется автоматически и стабильно из `node_secret_key`).
+- `reality_server_name` — обычно ваш `caddy_domain`.
+
+Если `panel_node_uuid` пустой, sync ищет ноду по имени `hosts.<alias>`, и только потом делает fallback по `ansible_host == node.address`.
+
+## 4) Какие Secrets и Variables нужны в Environment
+
+### Обязательные Secrets
+
+1. `RW_FLEET_CONFIG_B64`
+2. `ANSIBLE_SSH_PRIVATE_KEY`
+3. `RW_PANEL_API_TOKEN`
+
+### Опциональные Secrets
+
+1. `RW_PROFILE_VARS_B64`
 2. `ANSIBLE_VAULT_PASSWORD`
 
-## Шаг 1. Подготовить SSH-ключ для runner
+### Обязательные Variables
 
-Если ключа еще нет:
+1. `RW_PANEL_API_BASE_URL`
+
+### Опциональные Variables
+
+1. `REMNAWAVE_API_ENDPOINT_TEMPLATE` (legacy источник runtime vars для роли `remnawave_node`).
+
+## 5) Подготовка SSH-ключа для runner
+
+Если ключа ещё нет:
 
 ```bash
 ssh-keygen -t ed25519 -f ~/.ssh/ansible_actions -N ""
 ```
 
-Секрет `ANSIBLE_SSH_PRIVATE_KEY` = содержимое файла `~/.ssh/ansible_actions`.
+Секрет `ANSIBLE_SSH_PRIVATE_KEY` = содержимое `~/.ssh/ansible_actions`.
 
-Публичная часть (`~/.ssh/ansible_actions.pub`) будет автоматически прокинута на серверы в `mode=bootstrap`.
+## 6) Как подготовить `RW_FLEET_CONFIG_B64`
 
-## Шаг 2. Закодировать YAML в base64
-
-Пример с вашим файлом `fleet.yml`.
+1. Заполните `fleet.yml` по образцу.
+2. Закодируйте:
 
 macOS:
 ```bash
 base64 -i fleet.yml | tr -d '\n'
 ```
 
-Linux (GNU coreutils):
+Linux:
 ```bash
 base64 -w 0 fleet.yml
 ```
 
-Универсально через OpenSSL (macOS/Linux):
-```bash
-openssl base64 -A -in fleet.yml
+3. Полученную строку сохраните в `RW_FLEET_CONFIG_B64`.
+
+## 7) Как подготовить `RW_PROFILE_VARS_B64` (опционально)
+
+Обычно этот секрет не нужен, потому что основные Reality значения берутся из fleet per-host.
+Используйте его только если в шаблонах добавлены дополнительные глобальные placeholders.
+
+Пример `profile-vars.json`:
+
+```json
+{
+  "RW_REALITY_TARGET": "127.0.0.1:8443",
+  "RW_REALITY_SERVER_NAME": "daring.watchd0g.dev"
+}
 ```
 
-Результат (одна длинная строка) вставляется в секрет `RW_FLEET_CONFIG_B64`.
-
-## Шаг 3. Загрузить секреты через GitHub UI
-
-1. Откройте репозиторий на GitHub.
-2. `Settings` -> `Environments` -> выберите окружение (например, `production`).
-3. В блоке `Environment secrets` нажмите `Add secret`.
-4. Добавьте:
-   - `RW_FLEET_CONFIG_B64` (base64-строка из шага 2)
-   - `ANSIBLE_SSH_PRIVATE_KEY` (приватный ключ целиком, включая строки `BEGIN/END`)
-5. При необходимости добавьте `RW_PANEL_API_TOKEN` и `ANSIBLE_VAULT_PASSWORD`.
-
-## Шаг 4. Загрузить секреты через gh CLI (альтернатива UI)
+Кодирование:
 
 ```bash
-# Переменные
+base64 -i profile-vars.json | tr -d '\n'
+```
+
+Сохраните результат в Secret `RW_PROFILE_VARS_B64`.
+
+## 8) Загрузка через GitHub UI
+
+1. GitHub -> `Settings` -> `Environments` -> нужное окружение (`Testing`/`Production`).
+2. В `Environment secrets` добавьте:
+   - `RW_FLEET_CONFIG_B64`
+   - `ANSIBLE_SSH_PRIVATE_KEY`
+   - `RW_PANEL_API_TOKEN`
+   - опционально `RW_PROFILE_VARS_B64`, `ANSIBLE_VAULT_PASSWORD`
+3. В `Environment variables` добавьте:
+   - `RW_PANEL_API_BASE_URL`
+
+## 9) Загрузка через `gh` CLI (альтернатива)
+
+```bash
 REPO="OWNER/REPO"
 ENV_NAME="production"
 
-# 1) RW_FLEET_CONFIG_B64
 openssl base64 -A -in fleet.yml | gh secret set RW_FLEET_CONFIG_B64 --repo "$REPO" --env "$ENV_NAME"
-
-# 2) ANSIBLE_SSH_PRIVATE_KEY
 gh secret set ANSIBLE_SSH_PRIVATE_KEY --repo "$REPO" --env "$ENV_NAME" < ~/.ssh/ansible_actions
+gh secret set RW_PANEL_API_TOKEN --repo "$REPO" --env "$ENV_NAME"
+openssl base64 -A -in profile-vars.json | gh secret set RW_PROFILE_VARS_B64 --repo "$REPO" --env "$ENV_NAME"
+
+gh variable set RW_PANEL_API_BASE_URL --repo "$REPO" --env "$ENV_NAME" --body "https://panel.example.com"
 ```
 
-## Как запускать workflow
+## 10) Запуск workflow
 
-Рекомендуемая последовательность для новых серверов:
-1. `mode=bootstrap` — вход по паролю, установка SSH-ключа.
-2. `mode=lockdown` — отключение password SSH и root SSH login.
-3. `mode=deploy` — обычные последующие деплои по ключу.
+Рекомендуемый порядок:
+1. `mode=bootstrap` для новых серверов.
+2. `mode=lockdown` для этих же серверов.
+3. `mode=deploy` для регулярных изменений.
 
-`limit` можно ставить:
-- `all` — все хосты,
-- `de_node,nl_node` — только часть флота.
+Важные inputs:
+- `limit`: `all` или `host1,host2`.
+- `check_mode`: `true` для dry-run.
+- `panel_sync_write`:
+  - `false` = только отчёт рассинхронизации панели (read-only);
+  - `true` = применить изменения профилей/назначений.
 
-## Важные правила безопасности
+## 11) Проверка и безопасность
 
-1. Не коммитьте реальные IP/пароли/секреты в git.
-2. Не храните `hosts.ini` в репозитории.
-3. Держите bootstrap-пароли только в `RW_FLEET_CONFIG_B64` внутри Environment Secret.
-4. После первого успешного цикла `bootstrap -> lockdown` можно сменить bootstrap-пароли на стороне провайдера.
+1. Не храните реальные IP/пароли/ключи в git.
+2. Не коммитьте `hosts.ini`.
+3. После успешного `bootstrap -> lockdown` смените bootstrap-пароли у провайдера.
+4. Если `node_secret_key` пустой, значения всё равно сгенерируются детерминированно из host/profile данных, но предпочтительно держать `node_secret_key` заполненным для более стабильного и предсказуемого seed.
+5. При ошибке `unknown panel_node_uuid` сверяйте UUID ноды в панели и fleet config.

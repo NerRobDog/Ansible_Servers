@@ -89,3 +89,31 @@ features:
 Правило:
 - база включена почти везде;
 - дополнительные роли включайте только там, где это действительно нужно.
+
+## RemaWave Panel Sync (CI pre-step)
+
+Workflow перед Ansible выполняет sync панели через `.github/scripts/remnawave-api-sync.py`.
+
+Host-level поля в fleet config:
+
+```yaml
+hosts:
+  de_node:
+    ansible_host: 5.42.127.98
+    remnawave:
+      panel_node_uuid: "00000000-0000-4000-8000-000000000001"
+      target_profile_name: ""
+      inbound_tag: ""
+      reality_target: "127.0.0.1:8443"
+      reality_short_id: ""
+      reality_private_key: ""
+      target_inbound_tags:
+        - VLESS_DE_NODE
+```
+
+Правила:
+- `panel_node_uuid` рекомендуется всегда, чтобы не полагаться на match по адресу.
+- `target_profile_name` по умолчанию = alias хоста; можно задать вручную.
+- `inbound_tag` по умолчанию = `VLESS_<HOST_ALIAS>`; можно задать вручную.
+- `reality_short_id` и `reality_private_key` опциональны: при пустых значениях генерируются детерминированно из `node_secret_key`.
+- `target_inbound_tags` по умолчанию берётся из сгенерированного `inbound_tag`.
