@@ -11,6 +11,7 @@
 
 Шаблоны:
 - `fleet.two-servers.example.yml` — пример для 2 серверов.
+- `fleet.two-nodes-plus-monitoring.example.yml` — пример для 2 нод + отдельного monitoring сервера.
 - `fleet.example.yml` — общий multi-server шаблон.
 - `remnawave/profile-sync.yml` — правила sync профилей/нод в панели.
 - `remnawave/profiles/*.json` — JSON-шаблоны config profile без секретов.
