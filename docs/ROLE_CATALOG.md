@@ -47,6 +47,25 @@
 - Основной параметр:
   - `remnawave.ipv6_state` = `enabled|disabled`.
 
+### `monitoring_agent`
+- Назначение: запуск `node_exporter` и `cadvisor` на ноде для удалённого scrape.
+- Требует: `feature_monitoring_agent=true`.
+- Основные параметры:
+  - `monitoring.agent_bind_address` (по умолчанию `0.0.0.0`)
+  - `monitoring.agent_node_exporter_port` (по умолчанию `9100`)
+  - `monitoring.agent_cadvisor_port` (по умолчанию `8080`)
+
+### `monitoring_stack`
+- Назначение: центральный стек `Prometheus + Alertmanager + Grafana + Loki + Promtail`.
+- Требует: `feature_monitoring_stack=true`.
+- Основные параметры:
+  - `monitoring.stack_retention_days`
+  - `monitoring.stack_grafana_admin_user`
+  - `monitoring.stack_grafana_admin_password`
+- Подключение нод:
+  - автоматически берёт хосты с `feature_monitoring_agent=true` из `fleet_hosts`.
+  - скрапит `node_exporter`/`cadvisor` по `ansible_host` и monitoring-портам.
+
 ### `user_shell`
 - Назначение: пользователь, authorized_keys, sudo, shell-окружение.
 - Обычно:
@@ -83,6 +102,8 @@ features:
   feature_remnawave_node: false
   feature_caddy_node: false
   feature_node_tuning: false
+  feature_monitoring_agent: false
+  feature_monitoring_stack: false
   feature_user_shell: false
 ```
 

@@ -19,6 +19,8 @@ defaults:
     feature_remnawave_node: true
     feature_caddy_node: true
     feature_node_tuning: true
+    feature_monitoring_agent: true
+    feature_monitoring_stack: false
     feature_user_shell: true
   remnawave:
     # Empty = auto:
@@ -47,6 +49,13 @@ defaults:
     # reality_private_key: "REPLACE_ME"
     # reality_server_name: "node1.example.com"
   custom_roles: []
+  monitoring:
+    agent_bind_address: "0.0.0.0"
+    agent_node_exporter_port: 9100
+    agent_cadvisor_port: 8080
+    stack_retention_days: 7
+    stack_grafana_admin_user: admin
+    stack_grafana_admin_password: "CHANGE_ME_GRAFANA_ADMIN_PASSWORD"
 
 hosts:
   # Node server: full stack from defaults
@@ -57,6 +66,7 @@ hosts:
       password: "CHANGE_ME_FRA_1"
     features:
       feature_remnawave_node: true
+      feature_monitoring_agent: true
     remnawave:
       node_secret_key: "CHANGE_ME_NODE_SECRET_FRA_1"
       node_port: 3001
@@ -77,6 +87,10 @@ hosts:
       # reality_short_id: "7642b35f5570246f"
       # reality_private_key: "REPLACE_ME"
     custom_roles: []
+    monitoring:
+      agent_bind_address: "0.0.0.0"
+      agent_node_exporter_port: 9100
+      agent_cadvisor_port: 8080
 
   # Node server with host-specific overrides
   fra_node_2:
@@ -104,6 +118,10 @@ hosts:
       # reality_short_id: "c0d2ed6aa8460e20"
       # reality_private_key: "REPLACE_ME"
     custom_roles: []
+    monitoring:
+      agent_bind_address: "0.0.0.0"
+      agent_node_exporter_port: 9100
+      agent_cadvisor_port: 8080
 
   # Non-node sandbox server with selective features
   test_sandbox_1:
@@ -115,6 +133,8 @@ hosts:
       feature_remnawave_node: false
       feature_caddy_node: false
       feature_node_tuning: false
+      feature_monitoring_agent: false
+      feature_monitoring_stack: false
       feature_user_shell: true
     remnawave:
       # Optional (normally not needed for non-node host):

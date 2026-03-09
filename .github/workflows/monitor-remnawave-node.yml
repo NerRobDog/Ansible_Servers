@@ -1,0 +1,176 @@
+---
+name: monitor-remnawave-node
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub Environment containing fleet and alert secrets
+        required: true
+        default: production
+      limit:
+        description: Host aliases list (comma-separated) or all
+        required: false
+        default: all
+      notify_on_success:
+        description: Send Telegram on successful run too
+        required: true
+        type: choice
+        default: "false"
+        options:
+          - "false"
+          - "true"
+
+env:
+  ANSIBLE_LOCAL_TEMP: .ansible/tmp
+  ANSIBLE_REMOTE_TEMP: .ansible/tmp
+  ANSIBLE_HOST_KEY_CHECKING: "True"
+  PY_COLORS: "1"
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || vars.RW_MONITOR_ENVIRONMENT || 'production' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install OS tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends jq openssh-client
+
+      - name: Install Ansible collections
+        run: ansible-galaxy collection install -r requirements.yml
+
+      - name: Prepare runtime directories
+        run: mkdir -p .ansible/tmp .ansible/runtime
+
+      - name: Decode fleet config from secret
+        env:
+          RW_FLEET_CONFIG_B64: ${{ secrets.RW_FLEET_CONFIG_B64 }}
+        run: |
+          if [[ -z "${RW_FLEET_CONFIG_B64}" ]]; then
+            echo "Secret RW_FLEET_CONFIG_B64 is required." >&2
+            exit 1
+          fi
+          echo "${RW_FLEET_CONFIG_B64}" | base64 --decode > .ansible/runtime/fleet_config.yaml
+
+      - name: Render runtime inventory and vars
+        run: |
+          .github/scripts/render-fleet-runtime.py \
+            --fleet-config .ansible/runtime/fleet_config.yaml \
+            --mode deploy \
+            --inventory-out .ansible/runtime/hosts.ini \
+            --vars-out .ansible/runtime/runtime_vars.json \
+            --bootstrap-out .ansible/runtime/bootstrap_map.json
+
+      - name: Setup SSH private key
+        env:
+          ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
+        run: |
+          if [[ -z "${ANSIBLE_SSH_PRIVATE_KEY}" ]]; then
+            echo "Secret ANSIBLE_SSH_PRIVATE_KEY is required." >&2
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${ANSIBLE_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Build known_hosts via ssh-keyscan
+        run: |
+          : > ~/.ssh/known_hosts
+          awk '
+            /^[^[]/ {
+              host="";
+              port="22";
+              for (i=1; i<=NF; i++) {
+                if ($i ~ /^ansible_host=/) { split($i, a, "="); host=a[2]; }
+                if ($i ~ /^ansible_port=/) { split($i, a, "="); port=a[2]; }
+              }
+              if (host != "") { print host " " port; }
+            }
+          ' .ansible/runtime/hosts.ini | sort -u > .ansible/runtime/host_ports.txt
+          if [[ ! -s .ansible/runtime/host_ports.txt ]]; then
+            echo "No hosts were generated from fleet config." >&2
+            exit 1
+          fi
+          while read -r host port; do
+            ssh-keyscan -p "${port}" -H "${host}" >> ~/.ssh/known_hosts 2>/dev/null
+          done < .ansible/runtime/host_ports.txt
+          sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Run smoke checks
+        id: smoke
+        env:
+          LIMIT: ${{ github.event.inputs.limit || 'all' }}
+        run: |
+          set +e
+          .github/scripts/smoke-remnawave.sh \
+            --inventory .ansible/runtime/hosts.ini \
+            --runtime-vars .ansible/runtime/runtime_vars.json \
+            --limit "${LIMIT}" 2>&1 | tee .ansible/runtime/smoke.log
+          rc=${PIPESTATUS[0]}
+          echo "exit_code=${rc}" >> "${GITHUB_OUTPUT}"
+          exit "${rc}"
+
+      - name: Build Telegram notification message
+        if: always()
+        id: notify_payload
+        env:
+          TARGET_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || vars.RW_MONITOR_ENVIRONMENT || 'production' }}
+          LIMIT: ${{ github.event.inputs.limit || 'all' }}
+          NOTIFY_ON_SUCCESS: ${{ github.event.inputs.notify_on_success || 'false' }}
+        run: |
+          job_status="${{ job.status }}"
+          if [[ "${job_status}" == "success" && "${NOTIFY_ON_SUCCESS}" != "true" ]]; then
+            echo "should_send=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          tail_log=""
+          if [[ -f .ansible/runtime/smoke.log ]]; then
+            tail_log="$(tail -n 20 .ansible/runtime/smoke.log | sed -E 's/\x1B\[[0-9;]*[mK]//g')"
+          fi
+
+          {
+            echo "message<<'EOF'"
+            echo "RemnaWave monitor: ${job_status}"
+            echo "Environment: ${TARGET_ENVIRONMENT}"
+            echo "Limit: ${LIMIT}"
+            echo "Repository: ${{ github.repository }}"
+            echo "Run: ${run_url}"
+            if [[ -n "${tail_log}" ]]; then
+              echo ""
+              echo "Last log lines:"
+              echo "${tail_log}"
+            fi
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+          echo "should_send=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Send Telegram topic notification
+        if: always() && steps.notify_payload.outputs.should_send == 'true'
+        env:
+          ALERT_TELEGRAM_BOT_TOKEN: ${{ secrets.ALERT_TELEGRAM_BOT_TOKEN }}
+          ALERT_TELEGRAM_CHAT_ID: ${{ secrets.ALERT_TELEGRAM_CHAT_ID }}
+          ALERT_TELEGRAM_TOPIC_ID: ${{ secrets.ALERT_TELEGRAM_TOPIC_ID }}
+        run: |
+          .github/scripts/notify-telegram-topic.sh "${{ steps.notify_payload.outputs.message }}"

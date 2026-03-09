@@ -1,0 +1,43 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["127.0.0.1:9090"]
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["127.0.0.1:9093"]
+
+  - job_name: loki
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["127.0.0.1:3100"]
+
+{% if monitoring_stack_scrape_fleet_agents | bool %}
+  - job_name: monitoring-node-exporter
+{% if monitoring_stack_scrape_hosts | length > 0 %}
+    static_configs:
+{% for host in monitoring_stack_scrape_hosts %}
+      - targets: ["{{ host.value.ansible_host }}:{{ host.value.monitoring.agent_node_exporter_port | default(monitoring_agent_node_exporter_port) }}"]
+        labels:
+          instance: "{{ host.key }}"
+{% endfor %}
+{% else %}
+    static_configs: []
+{% endif %}
+
+  - job_name: monitoring-cadvisor
+{% if monitoring_stack_scrape_hosts | length > 0 %}
+    static_configs:
+{% for host in monitoring_stack_scrape_hosts %}
+      - targets: ["{{ host.value.ansible_host }}:{{ host.value.monitoring.agent_cadvisor_port | default(monitoring_agent_cadvisor_port) }}"]
+        labels:
+          instance: "{{ host.key }}"
+{% endfor %}
+{% else %}
+    static_configs: []
+{% endif %}
+{% endif %}

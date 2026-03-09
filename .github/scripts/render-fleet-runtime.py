@@ -16,6 +16,8 @@ FEATURE_DEFAULTS = {
     "feature_remnawave_node": False,
     "feature_caddy_node": False,
     "feature_node_tuning": False,
+    "feature_monitoring_agent": False,
+    "feature_monitoring_stack": False,
     "feature_user_shell": False,
 }
 
@@ -33,6 +35,15 @@ REMNAWAVE_DEFAULTS = {
     "panel_node_uuid": "",
     "target_profile_name": "",
     "target_inbound_tags": [],
+}
+
+MONITORING_DEFAULTS = {
+    "agent_bind_address": "0.0.0.0",
+    "agent_node_exporter_port": 9100,
+    "agent_cadvisor_port": 8080,
+    "stack_retention_days": 7,
+    "stack_grafana_admin_user": "admin",
+    "stack_grafana_admin_password": "change_me",
 }
 
 
@@ -175,6 +186,33 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
         if not remnawave_cfg["caddy_tls_cert_file"].strip() or not remnawave_cfg["caddy_tls_key_file"].strip():
             fail(f"Host '{alias}' remnawave.caddy_tls_mode=files requires caddy_tls_cert_file and caddy_tls_key_file.")
 
+    default_monitoring = defaults.get("monitoring", {})
+    if default_monitoring is None:
+        default_monitoring = {}
+    if not isinstance(default_monitoring, dict):
+        fail("defaults.monitoring must be an object when provided.")
+    monitoring_cfg = MONITORING_DEFAULTS.copy()
+    monitoring_cfg.update(default_monitoring)
+    monitoring_cfg.update(host_cfg.get("monitoring", {}) or {})
+    try:
+        monitoring_cfg["agent_node_exporter_port"] = int(monitoring_cfg["agent_node_exporter_port"])
+        monitoring_cfg["agent_cadvisor_port"] = int(monitoring_cfg["agent_cadvisor_port"])
+        monitoring_cfg["stack_retention_days"] = int(monitoring_cfg["stack_retention_days"])
+    except Exception:
+        fail(f"Host '{alias}' monitoring ports/retention must be numbers.")
+    for key in ("agent_node_exporter_port", "agent_cadvisor_port"):
+        if not (1 <= monitoring_cfg[key] <= 65535):
+            fail(f"Host '{alias}' monitoring.{key} must be in range 1..65535.")
+    if monitoring_cfg["stack_retention_days"] < 1:
+        fail(f"Host '{alias}' monitoring.stack_retention_days must be >= 1.")
+    monitoring_cfg["agent_bind_address"] = str(monitoring_cfg.get("agent_bind_address", "0.0.0.0") or "0.0.0.0")
+    monitoring_cfg["stack_grafana_admin_user"] = str(
+        monitoring_cfg.get("stack_grafana_admin_user", "admin") or "admin"
+    )
+    monitoring_cfg["stack_grafana_admin_password"] = str(
+        monitoring_cfg.get("stack_grafana_admin_password", "change_me") or "change_me"
+    )
+
     custom_roles = host_cfg.get("custom_roles", defaults.get("custom_roles", []))
     if custom_roles is None:
         custom_roles = []
@@ -194,6 +232,7 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
         },
         "features": normalized_features,
         "remnawave": remnawave_cfg,
+        "monitoring": monitoring_cfg,
         "custom_roles": custom_roles,
     }
     return normalized
@@ -250,6 +289,12 @@ def main() -> None:
                 "remnawave_panel_node_uuid": cfg["remnawave"]["panel_node_uuid"],
                 "remnawave_target_profile_name": cfg["remnawave"]["target_profile_name"],
                 "remnawave_target_inbound_tags": cfg["remnawave"]["target_inbound_tags"],
+                "monitoring_agent_bind_address": cfg["monitoring"]["agent_bind_address"],
+                "monitoring_agent_node_exporter_port": cfg["monitoring"]["agent_node_exporter_port"],
+                "monitoring_agent_cadvisor_port": cfg["monitoring"]["agent_cadvisor_port"],
+                "monitoring_stack_retention_days": cfg["monitoring"]["stack_retention_days"],
+                "monitoring_stack_grafana_admin_user": cfg["monitoring"]["stack_grafana_admin_user"],
+                "monitoring_stack_grafana_admin_password": cfg["monitoring"]["stack_grafana_admin_password"],
             }
             for alias, cfg in normalized_hosts.items()
         },
