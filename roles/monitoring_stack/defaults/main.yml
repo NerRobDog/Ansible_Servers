@@ -1,0 +1,19 @@
+---
+monitoring_stack_install_path: /opt/monitoring-stack
+monitoring_stack_manage_runtime: true
+monitoring_stack_retention_days: 7
+
+monitoring_stack_prometheus_image: prom/prometheus:v2.55.0
+monitoring_stack_alertmanager_image: prom/alertmanager:v0.28.1
+monitoring_stack_grafana_image: grafana/grafana:11.2.2
+monitoring_stack_loki_image: grafana/loki:3.1.1
+monitoring_stack_promtail_image: grafana/promtail:3.1.1
+
+monitoring_stack_prometheus_port: 9090
+monitoring_stack_alertmanager_port: 9093
+monitoring_stack_grafana_port: 3000
+monitoring_stack_loki_port: 3100
+
+monitoring_stack_grafana_admin_user: admin
+monitoring_stack_grafana_admin_password: change_me
+monitoring_stack_scrape_fleet_agents: true

@@ -4,6 +4,7 @@ feature_docker: true
 feature_remnawave_node: true
 feature_caddy_node: true
 feature_node_tuning: true
+feature_monitoring_agent: true
 feature_user_shell: false
 
 remnawave_node_port: 3001

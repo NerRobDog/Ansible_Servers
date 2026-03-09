@@ -326,6 +326,20 @@ def test_yusic_worker_invalid_workdir_rejected() -> None:
     assert_true("workdir" in (proc.stderr + proc.stdout), "Error should mention workdir")
 
 
+def test_invalid_monitoring_port() -> None:
+    config = {
+        "hosts": {
+            "bad": {
+                "ansible_host": "203.0.113.50",
+                "monitoring": {"agent_node_exporter_port": 70000},
+            }
+        }
+    }
+
+    proc, _, _, _ = run_renderer(json.dumps(config), "deploy", suffix=".json")
+    assert_true(proc.returncode != 0, "Renderer should fail for invalid monitoring port")
+    assert_true("monitoring" in (proc.stderr + proc.stdout), "Error should mention monitoring")
+
 def main() -> int:
     tests = [
         test_valid_yaml_modes,
@@ -333,6 +347,7 @@ def main() -> int:
         test_invalid_missing_ansible_host,
         test_invalid_custom_roles_item,
         test_invalid_ipv6_state,
+        test_invalid_monitoring_port,
         test_yusic_worker_runtime_success,
         test_yusic_worker_invalid_relay_alias,
         test_yusic_worker_requires_enabled_workers_for_target,
