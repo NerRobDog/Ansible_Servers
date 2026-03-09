@@ -53,6 +53,7 @@ defaults:
   ansible_port: 22
   features:
     feature_base: true
+    feature_firewall: true
     feature_docker: true
     feature_remnawave_node: false
     feature_caddy_node: false

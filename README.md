@@ -19,6 +19,7 @@
 ## Роли
 
 - `base` — базовые пакеты.
+- `firewall` — UFW политика `deny incoming` + allow для SSH/443.
 - `docker` — установка Docker CE.
 - `remnawave_node` — deploy RemaWave node.
 - `caddy_node` — TLS decoy для self-steal Reality + локальный health endpoint.

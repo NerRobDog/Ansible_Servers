@@ -9,6 +9,14 @@
 - Дефолт: включена (`feature_base=true`).
 - Когда выключать: только на хостах с очень специфичным образом ОС.
 
+### `firewall`
+- Назначение: UFW-политика по умолчанию (`deny incoming`, `allow outgoing`) и разрешение только нужных портов.
+- Дефолт: включена (`feature_firewall=true`).
+- Базовые allow-правила:
+  - SSH (`firewall_ssh_port`, обычно 22/tcp)
+  - 443/tcp (Reality/public endpoint)
+- По умолчанию не открывает наружу порт Caddy monitor (`8443`).
+
 ### `docker`
 - Назначение: установка Docker CE и плагинов.
 - Дефолт: включена (`feature_docker=true`).
@@ -79,6 +87,7 @@ hosts:
 ```yaml
 features:
   feature_base: true
+  feature_firewall: true
   feature_docker: true
   feature_remnawave_node: false
   feature_caddy_node: false

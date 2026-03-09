@@ -12,6 +12,7 @@ except Exception:  # pragma: no cover - optional dependency check
 
 FEATURE_DEFAULTS = {
     "feature_base": True,
+    "feature_firewall": True,
     "feature_docker": True,
     "feature_remnawave_node": False,
     "feature_caddy_node": False,

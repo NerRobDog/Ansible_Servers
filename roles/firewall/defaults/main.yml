@@ -1,0 +1,9 @@
+---
+firewall_enabled: true
+firewall_ssh_port: "{{ ansible_port | default(22) }}"
+firewall_public_tcp_ports:
+  - 443
+firewall_allowed_tcp_ports: []
+firewall_allowed_udp_ports: []
+firewall_open_caddy_monitor_port: false
+firewall_caddy_monitor_port: "{{ remnawave_caddy_monitor_port | default(8443) }}"

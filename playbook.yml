@@ -20,6 +20,7 @@
     - name: Resolve effective feature flags
       ansible.builtin.set_fact:
         effective_feature_base: "{{ fleet_host_cfg.get('features', {}).get('feature_base', feature_base) | bool }}"
+        effective_feature_firewall: "{{ fleet_host_cfg.get('features', {}).get('feature_firewall', feature_firewall) | bool }}"
         effective_feature_docker: "{{ fleet_host_cfg.get('features', {}).get('feature_docker', feature_docker) | bool }}"
         effective_feature_remnawave_node: "{{ fleet_host_cfg.get('features', {}).get('feature_remnawave_node', feature_remnawave_node) | bool }}"
         effective_feature_caddy_node: "{{ fleet_host_cfg.get('features', {}).get('feature_caddy_node', feature_caddy_node) | bool }}"
@@ -83,6 +84,10 @@
     - role: base
       when: effective_feature_base | bool
       tags: [base]
+
+    - role: firewall
+      when: effective_feature_firewall | bool and (firewall_enabled | bool)
+      tags: [firewall]
 
     - role: docker
       when: effective_feature_docker | bool
