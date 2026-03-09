@@ -1,0 +1,126 @@
+---
+# Three-server fleet template: Germany node + Netherlands node + monitoring server.
+# Stack:
+# - de_node, nl_node: base + docker + remnawave_node + caddy_node + node_tuning + monitoring_agent
+# - monitoring_1: base + docker + monitoring_stack
+#
+# Usage:
+# 1) Fill placeholders below.
+# 2) Base64-encode this YAML.
+# 3) Save encoded string into GitHub Environment Secret RW_FLEET_CONFIG_B64.
+
+defaults:
+  ansible_port: 22
+  deploy_user: deploy
+  bootstrap:
+    username: root
+    password: "CHANGE_ME"
+  features:
+    feature_base: true
+    feature_docker: true
+    feature_remnawave_node: false
+    feature_caddy_node: false
+    feature_node_tuning: false
+    feature_monitoring_agent: false
+    feature_monitoring_stack: false
+    feature_user_shell: true
+  remnawave:
+    node_secret_key: ""
+    node_port: 3001
+    caddy_domain: ""
+    caddy_monitor_port: 8443
+    ipv6_state: enabled
+    caddy_tls_mode: public
+    caddy_local_only: true
+    caddy_tls_cert_file: ""
+    caddy_tls_key_file: ""
+    caddy_acme_ca: ""
+    reality_target: "127.0.0.1:8443"
+  custom_roles: []
+  monitoring:
+    agent_bind_address: "0.0.0.0"
+    agent_node_exporter_port: 9100
+    agent_cadvisor_port: 8080
+    stack_retention_days: 7
+    stack_grafana_admin_user: admin
+    stack_grafana_admin_password: "CHANGE_ME_GRAFANA_ADMIN_PASSWORD"
+
+hosts:
+  de_node:
+    ansible_host: "GERMANY_PUBLIC_IP"
+    bootstrap:
+      username: root
+      password: "GERMANY_SERVER_PASSWORD"
+    features:
+      feature_remnawave_node: true
+      feature_caddy_node: true
+      feature_node_tuning: true
+      feature_monitoring_agent: true
+      feature_monitoring_stack: false
+    remnawave:
+      node_secret_key: "GERMANY_REMNAWAVE_NODE_SECRET"
+      node_port: 3001
+      caddy_domain: "de-node.example.com"
+      caddy_monitor_port: 8443
+      ipv6_state: enabled
+      caddy_tls_mode: public
+      caddy_local_only: true
+      # Optional if node name in panel differs:
+      # panel_node_uuid: "GERMANY_PANEL_NODE_UUID"
+      reality_target: "127.0.0.1:8443"
+    monitoring:
+      agent_bind_address: "0.0.0.0"
+      agent_node_exporter_port: 9100
+      agent_cadvisor_port: 8080
+    custom_roles: []
+
+  nl_node:
+    ansible_host: "NETHERLANDS_PUBLIC_IP"
+    bootstrap:
+      username: root
+      password: "NETHERLANDS_SERVER_PASSWORD"
+    features:
+      feature_remnawave_node: true
+      feature_caddy_node: true
+      feature_node_tuning: true
+      feature_monitoring_agent: true
+      feature_monitoring_stack: false
+    remnawave:
+      node_secret_key: "NETHERLANDS_REMNAWAVE_NODE_SECRET"
+      node_port: 3001
+      caddy_domain: "nl-node.example.com"
+      caddy_monitor_port: 8443
+      ipv6_state: enabled
+      caddy_tls_mode: public
+      caddy_local_only: true
+      # Optional if node name in panel differs:
+      # panel_node_uuid: "NETHERLANDS_PANEL_NODE_UUID"
+      reality_target: "127.0.0.1:8443"
+    monitoring:
+      agent_bind_address: "0.0.0.0"
+      agent_node_exporter_port: 9100
+      agent_cadvisor_port: 8080
+    custom_roles: []
+
+  monitoring_1:
+    ansible_host: "MONITORING_SERVER_PUBLIC_IP"
+    bootstrap:
+      username: root
+      password: "MONITORING_SERVER_PASSWORD"
+    features:
+      feature_remnawave_node: false
+      feature_caddy_node: false
+      feature_node_tuning: false
+      feature_monitoring_agent: false
+      feature_monitoring_stack: true
+      feature_user_shell: true
+    monitoring:
+      stack_retention_days: 7
+      stack_grafana_admin_user: "admin"
+      stack_grafana_admin_password: "CHANGE_ME_STRONG_GRAFANA_PASSWORD"
+    custom_roles: []
+
+# Notes:
+# - monitoring_1 scrapes node exporter/cadvisor endpoints from hosts with feature_monitoring_agent=true.
+# - Open inbound access to 9100/8080 on node servers from monitoring_1.
+# - For production, strongly change Grafana admin password.
