@@ -24,7 +24,8 @@ scrape_configs:
 {% if monitoring_stack_scrape_hosts | length > 0 %}
     static_configs:
 {% for host in monitoring_stack_scrape_hosts %}
-      - targets: ["{% if host.key == inventory_hostname and (host.value.monitoring.agent_bind_address | default(monitoring_agent_bind_address)) in ['127.0.0.1', 'localhost'] %}host.docker.internal{% else %}{{ host.value.ansible_host }}{% endif %}:{{ host.value.monitoring.agent_node_exporter_port | default(monitoring_agent_node_exporter_port) }}"]
+{% set host_agent_bind = host.value.monitoring.agent_bind_address | default(monitoring_agent_bind_address) %}
+      - targets: ["{% if host.key == inventory_hostname and host_agent_bind in ['127.0.0.1', 'localhost'] %}host.docker.internal{% elif host_agent_bind not in ['0.0.0.0', '::'] %}{{ host_agent_bind }}{% else %}{{ host.value.ansible_host }}{% endif %}:{{ host.value.monitoring.agent_node_exporter_port | default(monitoring_agent_node_exporter_port) }}"]
         labels:
           instance: "{{ host.key }}"
           country: "{{ host.value.monitoring.labels.country | default('') }}"
@@ -38,7 +39,8 @@ scrape_configs:
 {% if monitoring_stack_scrape_hosts | length > 0 %}
     static_configs:
 {% for host in monitoring_stack_scrape_hosts %}
-      - targets: ["{% if host.key == inventory_hostname and (host.value.monitoring.agent_bind_address | default(monitoring_agent_bind_address)) in ['127.0.0.1', 'localhost'] %}host.docker.internal{% else %}{{ host.value.ansible_host }}{% endif %}:{{ host.value.monitoring.agent_cadvisor_port | default(monitoring_agent_cadvisor_port) }}"]
+{% set host_agent_bind = host.value.monitoring.agent_bind_address | default(monitoring_agent_bind_address) %}
+      - targets: ["{% if host.key == inventory_hostname and host_agent_bind in ['127.0.0.1', 'localhost'] %}host.docker.internal{% elif host_agent_bind not in ['0.0.0.0', '::'] %}{{ host_agent_bind }}{% else %}{{ host.value.ansible_host }}{% endif %}:{{ host.value.monitoring.agent_cadvisor_port | default(monitoring_agent_cadvisor_port) }}"]
         labels:
           instance: "{{ host.key }}"
           country: "{{ host.value.monitoring.labels.country | default('') }}"
