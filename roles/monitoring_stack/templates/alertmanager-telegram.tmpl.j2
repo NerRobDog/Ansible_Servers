@@ -1,3 +1,4 @@
+{% raw %}
 {{ define "telegram.header" -}}
 {{- $status := .Status | toUpper -}}
 {{- $severity := (index .CommonLabels "severity") | default "info" -}}
@@ -29,3 +30,4 @@ Alerts: {{ len .Alerts }}
 [INFO] {{ template "telegram.header" . }}
 {{ template "telegram.body" . }}
 {{- end }}
+{% endraw %}
