@@ -67,6 +67,10 @@ def test_valid_yaml_modes() -> None:
         "    feature_remnawave_node: true\n"
         "  remnawave:\n"
         "    node_secret_key: from-defaults\n"
+        "  monitoring:\n"
+        "    agent_acl_enabled: true\n"
+        "    agent_acl_allowed_sources:\n"
+        "      - 203.0.113.100\n"
         "hosts:\n"
         "  de_node:\n"
         "    ansible_host: 203.0.113.10\n"
@@ -92,6 +96,19 @@ def test_valid_yaml_modes() -> None:
         assert_true(runtime_vars["fleet_mode"] == mode, f"fleet_mode mismatch for {mode}")
         assert_true("de_node" in runtime_vars["fleet_hosts"], "de_node missing in fleet_hosts")
         assert_true("de_node" in runtime_vars["remnawave_runtime_host_vars"], "de_node missing in remnawave_runtime_host_vars")
+        monitoring_cfg = runtime_vars["fleet_hosts"]["de_node"]["monitoring"]
+        assert_true(monitoring_cfg["agent_acl_enabled"] is True, "monitoring.agent_acl_enabled default not applied")
+        assert_true(
+            monitoring_cfg["agent_acl_allowed_sources"] == ["203.0.113.100"],
+            "monitoring.agent_acl_allowed_sources default not applied",
+        )
+        assert_true(monitoring_cfg["agent_promtail_enabled"] is True, "monitoring.agent_promtail_enabled default mismatch")
+        assert_true(monitoring_cfg["labels"]["role"] == "node", "monitoring.labels.role default mismatch")
+        assert_true(monitoring_cfg["labels"]["country"] == "", "monitoring.labels.country default mismatch")
+        assert_true(
+            runtime_vars["remnawave_runtime_host_vars"]["de_node"]["monitoring_agent_acl_enabled"] is True,
+            "monitoring_agent_acl_enabled missing in runtime host vars",
+        )
 
         bootstrap_map = json.loads(boot_path.read_text(encoding="utf-8"))
         assert_true(bootstrap_map["de_node"]["deploy_user"] == "deploy", "bootstrap_map deploy_user mismatch")
@@ -176,6 +193,107 @@ def test_invalid_monitoring_port() -> None:
     assert_true("monitoring" in (proc.stderr + proc.stdout), "Error should mention monitoring")
 
 
+def test_invalid_monitoring_acl_sources_type() -> None:
+    config = {
+        "hosts": {
+            "bad": {
+                "ansible_host": "203.0.113.60",
+                "monitoring": {"agent_acl_allowed_sources": "203.0.113.10"},
+            }
+        }
+    }
+
+    proc, _, _, _ = run_renderer(json.dumps(config), "deploy", suffix=".json")
+    assert_true(proc.returncode != 0, "Renderer should fail for invalid monitoring ACL source type")
+    assert_true("agent_acl_allowed_sources" in (proc.stderr + proc.stdout), "Error should mention agent_acl_allowed_sources")
+
+
+def test_monitoring_requires_single_stack_host() -> None:
+    config = {
+        "hosts": {
+            "de_node": {
+                "ansible_host": "203.0.113.70",
+                "features": {"feature_monitoring_agent": True},
+            },
+            "nl_node": {
+                "ansible_host": "203.0.113.71",
+                "features": {"feature_monitoring_agent": True},
+            },
+        }
+    }
+
+    proc, _, _, _ = run_renderer(json.dumps(config), "deploy", suffix=".json")
+    assert_true(proc.returncode != 0, "Renderer should fail when monitoring stack host is missing")
+    assert_true("feature_monitoring_stack" in (proc.stderr + proc.stdout), "Error should mention stack host requirement")
+
+
+def test_monitoring_fails_with_multiple_stack_hosts() -> None:
+    config = {
+        "hosts": {
+            "de_node": {
+                "ansible_host": "203.0.113.80",
+                "features": {
+                    "feature_monitoring_agent": True,
+                    "feature_monitoring_stack": True,
+                },
+            },
+            "nl_node": {
+                "ansible_host": "203.0.113.81",
+                "features": {
+                    "feature_monitoring_agent": True,
+                    "feature_monitoring_stack": True,
+                },
+            },
+        }
+    }
+
+    proc, _, _, _ = run_renderer(json.dumps(config), "deploy", suffix=".json")
+    assert_true(proc.returncode != 0, "Renderer should fail when multiple monitoring stack hosts are enabled")
+    assert_true("feature_monitoring_stack" in (proc.stderr + proc.stdout), "Error should mention stack host requirement")
+
+
+def test_monitoring_resolves_loki_push_url_and_labels() -> None:
+    yaml_text = (
+        "---\n"
+        "defaults:\n"
+        "  features:\n"
+        "    feature_monitoring_agent: true\n"
+        "  monitoring:\n"
+        "    labels:\n"
+        "      country: global-country\n"
+        "      role: edge\n"
+        "hosts:\n"
+        "  de_node:\n"
+        "    ansible_host: 203.0.113.90\n"
+        "    features:\n"
+        "      feature_monitoring_stack: true\n"
+        "    monitoring:\n"
+        "      stack_loki_ingest_bind_address: 127.0.0.1\n"
+        "  nl_node:\n"
+        "    ansible_host: 203.0.113.91\n"
+        "    monitoring:\n"
+        "      labels:\n"
+        "        country: nl\n"
+        "        role: node\n"
+    )
+
+    proc, _, vars_path, _ = run_renderer(yaml_text, "deploy")
+    assert_true(proc.returncode == 0, f"Renderer failed: {proc.stderr or proc.stdout}")
+    runtime_vars = json.loads(vars_path.read_text(encoding="utf-8"))
+    de_cfg = runtime_vars["fleet_hosts"]["de_node"]["monitoring"]
+    nl_cfg = runtime_vars["fleet_hosts"]["nl_node"]["monitoring"]
+    assert_true(
+        de_cfg["loki_push_url"] == "http://127.0.0.1:3100/loki/api/v1/push",
+        "Stack host should resolve local loki_push_url when ingest bind address is loopback",
+    )
+    assert_true(
+        nl_cfg["loki_push_url"] == "http://203.0.113.90:3100/loki/api/v1/push",
+        "Node host should resolve loki_push_url to monitoring stack host address",
+    )
+    assert_true(nl_cfg["labels"]["country"] == "nl", "Host labels override defaults")
+    assert_true(nl_cfg["labels"]["role"] == "node", "Host labels role mismatch")
+
+
 def main() -> int:
     tests = [
         test_valid_yaml_modes,
@@ -184,6 +302,10 @@ def main() -> int:
         test_invalid_custom_roles_item,
         test_invalid_ipv6_state,
         test_invalid_monitoring_port,
+        test_invalid_monitoring_acl_sources_type,
+        test_monitoring_requires_single_stack_host,
+        test_monitoring_fails_with_multiple_stack_hosts,
+        test_monitoring_resolves_loki_push_url_and_labels,
     ]
 
     for test in tests:

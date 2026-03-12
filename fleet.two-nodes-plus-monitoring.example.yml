@@ -41,6 +41,16 @@ defaults:
     agent_bind_address: "0.0.0.0"
     agent_node_exporter_port: 9100
     agent_cadvisor_port: 8080
+    agent_promtail_enabled: true
+    agent_acl_enabled: false
+    agent_acl_allowed_sources: []
+    loki_push_url: ""
+    labels:
+      country: ""
+      role: node
+    stack_bind_address: "127.0.0.1"
+    stack_loki_ingest_bind_address: "0.0.0.0"
+    stack_loki_ingest_allowed_sources: []
     stack_retention_days: 7
     stack_grafana_admin_user: admin
     stack_grafana_admin_password: "CHANGE_ME_GRAFANA_ADMIN_PASSWORD"
@@ -72,6 +82,14 @@ hosts:
       agent_bind_address: "0.0.0.0"
       agent_node_exporter_port: 9100
       agent_cadvisor_port: 8080
+      agent_promtail_enabled: true
+      labels:
+        country: DE
+        role: node
+      # Для приватного scrape включите ACL и укажите IP monitoring_1.
+      # agent_acl_enabled: true
+      # agent_acl_allowed_sources:
+      #   - "MONITORING_SERVER_PUBLIC_IP/32"
     custom_roles: []
 
   nl_node:
@@ -100,6 +118,14 @@ hosts:
       agent_bind_address: "0.0.0.0"
       agent_node_exporter_port: 9100
       agent_cadvisor_port: 8080
+      agent_promtail_enabled: true
+      labels:
+        country: NL
+        role: node
+      # Для приватного scrape включите ACL и укажите IP monitoring_1.
+      # agent_acl_enabled: true
+      # agent_acl_allowed_sources:
+      #   - "MONITORING_SERVER_PUBLIC_IP/32"
     custom_roles: []
 
   monitoring_1:
@@ -115,12 +141,22 @@ hosts:
       feature_monitoring_stack: true
       feature_user_shell: true
     monitoring:
+      stack_bind_address: "127.0.0.1"
+      stack_loki_ingest_bind_address: "0.0.0.0"
+      stack_loki_ingest_allowed_sources:
+        - "GERMANY_PUBLIC_IP/32"
+        - "NETHERLANDS_PUBLIC_IP/32"
       stack_retention_days: 7
       stack_grafana_admin_user: "admin"
       stack_grafana_admin_password: "CHANGE_ME_STRONG_GRAFANA_PASSWORD"
+      labels:
+        country: DE
+        role: monitoring
     custom_roles: []
 
 # Notes:
 # - monitoring_1 scrapes node exporter/cadvisor endpoints from hosts with feature_monitoring_agent=true.
-# - Open inbound access to 9100/8080 on node servers from monitoring_1.
+# - Предпочтительно: monitoring.agent_acl_enabled=true + monitoring.agent_acl_allowed_sources вместо открытых 9100/8080.
 # - For production, strongly change Grafana admin password.
+# - Для Alertmanager->Telegram задайте Environment Secrets:
+#   MONITORING_ALERT_TELEGRAM_BOT_TOKEN, MONITORING_ALERT_TELEGRAM_CHAT_ID, MONITORING_ALERT_TELEGRAM_TOPIC_ID.

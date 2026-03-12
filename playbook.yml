@@ -17,6 +17,60 @@
       when: (fleet_hosts | default({})) | length > 0
       tags: [always]
 
+    - name: Build monitoring host summary from fleet config
+      ansible.builtin.set_fact:
+        monitoring_hosts_from_fleet: >-
+          {{
+            (
+              (
+                (fleet_hosts | default({}) | dict2items)
+                | selectattr('value.features', 'defined')
+                | selectattr('value.features', 'mapping')
+                | selectattr('value.features.feature_monitoring_agent', 'defined')
+                | selectattr('value.features.feature_monitoring_agent')
+                | map(attribute='key')
+                | list
+              )
+              +
+              (
+                (fleet_hosts | default({}) | dict2items)
+                | selectattr('value.features', 'defined')
+                | selectattr('value.features', 'mapping')
+                | selectattr('value.features.feature_monitoring_stack', 'defined')
+                | selectattr('value.features.feature_monitoring_stack')
+                | map(attribute='key')
+                | list
+              )
+            ) | unique
+          }}
+        monitoring_stack_hosts_from_fleet: >-
+          {{
+            (fleet_hosts | default({}) | dict2items)
+            | selectattr('value.features', 'defined')
+            | selectattr('value.features', 'mapping')
+            | selectattr('value.features.feature_monitoring_stack', 'defined')
+            | selectattr('value.features.feature_monitoring_stack')
+            | map(attribute='key')
+            | list
+          }}
+      when:
+        - (fleet_hosts | default({})) | length > 0
+        - inventory_hostname == ansible_play_hosts_all[0]
+      changed_when: false
+      tags: [always]
+
+    - name: Assert exactly one monitoring stack host when monitoring is enabled
+      ansible.builtin.assert:
+        that:
+          - monitoring_stack_hosts_from_fleet | length == 1
+        fail_msg: >-
+          Exactly one host with features.feature_monitoring_stack=true is required when monitoring features are enabled.
+      when:
+        - (fleet_hosts | default({})) | length > 0
+        - monitoring_hosts_from_fleet | default([]) | length > 0
+        - inventory_hostname == ansible_play_hosts_all[0]
+      tags: [always]
+
     - name: Resolve effective feature flags
       ansible.builtin.set_fact:
         effective_feature_base: "{{ fleet_host_cfg.get('features', {}).get('feature_base', feature_base) | bool }}"
@@ -57,11 +111,75 @@
         monitoring_agent_bind_address: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_bind_address', monitoring_agent_bind_address) }}"
         monitoring_agent_node_exporter_port: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_node_exporter_port', monitoring_agent_node_exporter_port) }}"
         monitoring_agent_cadvisor_port: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_cadvisor_port', monitoring_agent_cadvisor_port) }}"
+        monitoring_agent_promtail_enabled: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_promtail_enabled', monitoring_agent_promtail_enabled) }}"
+        monitoring_agent_acl_enabled: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_acl_enabled', monitoring_agent_acl_enabled) }}"
+        monitoring_agent_acl_allowed_sources: >-
+          {{ fleet_host_cfg.get('monitoring', {}).get('agent_acl_allowed_sources', monitoring_agent_acl_allowed_sources) }}
+        monitoring_loki_push_url: "{{ fleet_host_cfg.get('monitoring', {}).get('loki_push_url', monitoring_loki_push_url) }}"
+        monitoring_labels_country: "{{ fleet_host_cfg.get('monitoring', {}).get('labels', {}).get('country', monitoring_labels_country) }}"
+        monitoring_labels_role: "{{ fleet_host_cfg.get('monitoring', {}).get('labels', {}).get('role', monitoring_labels_role) }}"
         monitoring_stack_retention_days: "{{ fleet_host_cfg.get('monitoring', {}).get('stack_retention_days', monitoring_stack_retention_days) }}"
+        monitoring_stack_bind_address: "{{ fleet_host_cfg.get('monitoring', {}).get('stack_bind_address', monitoring_stack_bind_address) }}"
+        monitoring_stack_loki_port: "{{ fleet_host_cfg.get('monitoring', {}).get('stack_loki_port', monitoring_stack_loki_port) }}"
+        monitoring_stack_loki_ingest_bind_address: >-
+          {{ fleet_host_cfg.get('monitoring', {}).get('stack_loki_ingest_bind_address', monitoring_stack_loki_ingest_bind_address) }}
+        monitoring_stack_loki_ingest_allowed_sources: >-
+          {{ fleet_host_cfg.get('monitoring', {}).get('stack_loki_ingest_allowed_sources', monitoring_stack_loki_ingest_allowed_sources) }}
         monitoring_stack_grafana_admin_user: >-
           {{ fleet_host_cfg.get('monitoring', {}).get('stack_grafana_admin_user', monitoring_stack_grafana_admin_user) }}
         monitoring_stack_grafana_admin_password: >-
           {{ fleet_host_cfg.get('monitoring', {}).get('stack_grafana_admin_password', monitoring_stack_grafana_admin_password) }}
+      changed_when: false
+      tags: [always]
+
+    - name: Resolve monitoring stack host alias from fleet config
+      ansible.builtin.set_fact:
+        monitoring_stack_host_alias_effective: >-
+          {{
+            (fleet_hosts | default({}) | dict2items)
+            | selectattr('value.features', 'defined')
+            | selectattr('value.features', 'mapping')
+            | selectattr('value.features.feature_monitoring_stack', 'defined')
+            | selectattr('value.features.feature_monitoring_stack')
+            | map(attribute='key')
+            | list
+            | first
+            | default('') }}
+      when: (fleet_hosts | default({})) | length > 0
+      changed_when: false
+      tags: [always]
+
+    - name: Resolve monitoring stack host address from fleet config
+      ansible.builtin.set_fact:
+        monitoring_stack_host_address_effective: >-
+          {{
+            (fleet_hosts | default({})).get(monitoring_stack_host_alias_effective, {}).get('ansible_host', '')
+          }}
+      when: (fleet_hosts | default({})) | length > 0
+      changed_when: false
+      tags: [always]
+
+    - name: Auto-resolve Loki push URL when omitted
+      ansible.builtin.set_fact:
+        monitoring_loki_push_url: >-
+          {{
+            (
+              "http://127.0.0.1:" ~ (monitoring_stack_loki_port | string) ~ "/loki/api/v1/push"
+            )
+            if
+            (
+              inventory_hostname == monitoring_stack_host_alias_effective
+              and (monitoring_stack_loki_ingest_bind_address | string) in ['127.0.0.1', 'localhost']
+            )
+            else
+            (
+              "http://" ~ monitoring_stack_host_address_effective ~ ":" ~ (monitoring_stack_loki_port | string) ~ "/loki/api/v1/push"
+            )
+          }}
+      when:
+        - (fleet_hosts | default({})) | length > 0
+        - monitoring_loki_push_url | trim | length == 0
+        - monitoring_stack_host_alias_effective | length > 0
       changed_when: false
       tags: [always]
 

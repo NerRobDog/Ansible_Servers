@@ -1,6 +1,7 @@
 ---
 # Two-server fleet template: Germany + Netherlands.
 # Stack: base + docker + remnawave_node + caddy_node + node_tuning + user_shell.
+# Monitoring feature flags здесь выключены, потому что нет отдельного monitoring_stack host.
 #
 # Usage:
 # 1) Fill placeholders below.
@@ -19,7 +20,7 @@ defaults:
     feature_remnawave_node: true
     feature_caddy_node: true
     feature_node_tuning: true
-    feature_monitoring_agent: true
+    feature_monitoring_agent: false
     feature_monitoring_stack: false
     feature_user_shell: true
   remnawave:
@@ -53,6 +54,16 @@ defaults:
     agent_bind_address: "0.0.0.0"
     agent_node_exporter_port: 9100
     agent_cadvisor_port: 8080
+    agent_promtail_enabled: true
+    agent_acl_enabled: false
+    agent_acl_allowed_sources: []
+    loki_push_url: ""
+    labels:
+      country: ""
+      role: node
+    stack_bind_address: "127.0.0.1"
+    stack_loki_ingest_bind_address: "0.0.0.0"
+    stack_loki_ingest_allowed_sources: []
     stack_retention_days: 7
     stack_grafana_admin_user: admin
     stack_grafana_admin_password: "CHANGE_ME_GRAFANA_ADMIN_PASSWORD"
@@ -87,6 +98,13 @@ hosts:
       agent_bind_address: "0.0.0.0"
       agent_node_exporter_port: 9100
       agent_cadvisor_port: 8080
+      agent_promtail_enabled: false
+      labels:
+        country: DE
+        role: node
+      # Включайте ACL, если scrape идёт только с фиксированных IP.
+      agent_acl_enabled: false
+      agent_acl_allowed_sources: []
 
   nl_node:
     ansible_host: "NETHERLANDS_PUBLIC_IP"
@@ -117,3 +135,11 @@ hosts:
       agent_bind_address: "0.0.0.0"
       agent_node_exporter_port: 9100
       agent_cadvisor_port: 8080
+      agent_promtail_enabled: false
+      labels:
+        country: NL
+        role: node
+      # Пример строгого режима: scrape разрешён только с DE ноды.
+      # agent_acl_enabled: true
+      # agent_acl_allowed_sources:
+      #   - "GERMANY_PUBLIC_IP/32"

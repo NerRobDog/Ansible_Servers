@@ -1,0 +1,57 @@
+groups:
+  - name: remna-fleet-health
+    interval: 30s
+    rules:
+      - alert: ScrapeTargetDown
+        expr: up{job=~"monitoring-node-exporter|monitoring-cadvisor|loki|alertmanager"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Scrape target down ({{ '{{' }} $labels.job {{ '}}' }})"
+          description: "{{ '{{' }} $labels.instance {{ '}}' }} is not reachable for job {{ '{{' }} $labels.job {{ '}}' }}."
+
+      - alert: NodeHighCPU
+        expr: 100 - (avg by(instance, country, role) (irate(node_cpu_seconds_total{job="monitoring-node-exporter",mode="idle"}[5m])) * 100) > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: "CPU usage is above 90% for 10m."
+
+      - alert: NodeHighMemory
+        expr: (1 - (node_memory_MemAvailable_bytes{job="monitoring-node-exporter"} / node_memory_MemTotal_bytes{job="monitoring-node-exporter"})) * 100 > 90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: "RAM usage is above 90% for 10m."
+
+      - alert: NodeRootDiskAlmostFull
+        expr: (1 - (node_filesystem_avail_bytes{job="monitoring-node-exporter",mountpoint="/",fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{job="monitoring-node-exporter",mountpoint="/",fstype!~"tmpfs|overlay|squashfs"})) * 100 > 90
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Root filesystem is almost full on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: "Root filesystem usage is above 90% for 15m."
+
+      - alert: RemnaContainerRestartBurst
+        expr: changes(container_start_time_seconds{job="monitoring-cadvisor",name=~".*(remnanode|caddy).*"}[15m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container restart burst on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: "remnanode/caddy restarted more than once in the last 15 minutes."
+
+      - alert: PrometheusConfigReloadFailed
+        expr: prometheus_config_last_reload_successful == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus configuration reload failed"
+          description: "Prometheus reported unsuccessful config reload."
