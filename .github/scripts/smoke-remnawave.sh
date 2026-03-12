@@ -198,6 +198,93 @@ for alias in "${targets[@]}"; do
 	    run_ansible_retry "$alias" 12 5 -b -m ansible.builtin.shell -a "curl --silent --show-error --fail --connect-timeout 3 'http://127.0.0.1:9093/-/ready' >/dev/null"
 	    run_ansible_retry "$alias" 12 5 -b -m ansible.builtin.shell -a "curl --silent --show-error --fail --connect-timeout 3 'http://127.0.0.1:3100/ready' >/dev/null"
 	    run_ansible_retry "$alias" 12 5 -b -m ansible.builtin.shell -a "curl --silent --show-error --fail --connect-timeout 3 'http://127.0.0.1:3000/api/health' >/dev/null"
+
+	    echo "[smoke][$alias] Check monitoring target coverage, health and duplicates"
+	    expected_node_instances_b64="$(
+	      jq -c '
+	        [
+	          .fleet_hosts
+	          | to_entries[]
+	          | select(.value.features.feature_monitoring_agent == true)
+	          | "\(.value.ansible_host):\(.value.monitoring.agent_node_exporter_port)"
+	        ] | unique | sort
+	      ' "$runtime_vars" | base64 | tr -d '\n'
+	    )"
+	    expected_cadvisor_instances_b64="$(
+	      jq -c '
+	        [
+	          .fleet_hosts
+	          | to_entries[]
+	          | select(.value.features.feature_monitoring_agent == true)
+	          | "\(.value.ansible_host):\(.value.monitoring.agent_cadvisor_port)"
+	        ] | unique | sort
+	      ' "$runtime_vars" | base64 | tr -d '\n'
+	    )"
+	    prom_targets_check_script_b64="$(
+	      cat <<'PY' | base64 | tr -d '\n'
+import base64
+import collections
+import json
+import sys
+import urllib.request
+
+expected_node = json.loads(base64.b64decode("__EXPECTED_NODE_B64__").decode("utf-8"))
+expected_cadvisor = json.loads(base64.b64decode("__EXPECTED_CADVISOR_B64__").decode("utf-8"))
+expected = {
+    "monitoring-node-exporter": expected_node,
+    "monitoring-cadvisor": expected_cadvisor,
+}
+
+with urllib.request.urlopen("http://127.0.0.1:9090/api/v1/targets?state=active", timeout=10) as resp:
+    payload = json.load(resp)
+
+active_targets = payload.get("data", {}).get("activeTargets", [])
+errors = []
+
+for job_name, expected_instances in expected.items():
+    job_targets = []
+    for target in active_targets:
+        labels = target.get("labels", {})
+        if labels.get("job") != job_name:
+            continue
+        job_targets.append(
+            {
+                "instance": labels.get("instance", ""),
+                "health": str(target.get("health", "")).lower(),
+            }
+        )
+
+    observed_instances = [item["instance"] for item in job_targets]
+    counts = collections.Counter(observed_instances)
+    missing_instances = sorted(set(expected_instances) - set(observed_instances))
+    duplicate_instances = sorted(instance for instance, count in counts.items() if count > 1)
+    unexpected_instances = sorted(set(observed_instances) - set(expected_instances))
+    unhealthy_expected = sorted(
+        instance
+        for instance in expected_instances
+        if not any(t["instance"] == instance and t["health"] == "up" for t in job_targets)
+    )
+
+    if missing_instances:
+        errors.append(f"{job_name}: missing {missing_instances}")
+    if duplicate_instances:
+        errors.append(f"{job_name}: duplicates {duplicate_instances}")
+    if unexpected_instances:
+        errors.append(f"{job_name}: unexpected {unexpected_instances}")
+    if unhealthy_expected:
+        errors.append(f"{job_name}: not-up {unhealthy_expected}")
+
+if errors:
+    print("; ".join(errors))
+    sys.exit(1)
+
+print("monitoring-targets-ok")
+PY
+	    )"
+	    prom_targets_check_script_b64="${prom_targets_check_script_b64/__EXPECTED_NODE_B64__/${expected_node_instances_b64}}"
+	    prom_targets_check_script_b64="${prom_targets_check_script_b64/__EXPECTED_CADVISOR_B64__/${expected_cadvisor_instances_b64}}"
+	    run_ansible_retry "$alias" 8 5 -b -m ansible.builtin.shell -a "python3 -c \"import base64; exec(base64.b64decode('${prom_targets_check_script_b64}'))\"" >/dev/null
+
 	    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/prometheus/alerts.yml" >/dev/null
 	    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/provisioning/datasources/datasources.yml" >/dev/null
 	    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/dashboards/remna-fleet-overview.json" >/dev/null
