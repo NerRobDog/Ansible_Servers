@@ -13,7 +13,15 @@ monitoring_stack_prometheus_port: 9090
 monitoring_stack_alertmanager_port: 9093
 monitoring_stack_grafana_port: 3000
 monitoring_stack_loki_port: 3100
+monitoring_stack_bind_address: "127.0.0.1"
+monitoring_stack_loki_ingest_bind_address: "0.0.0.0"
+monitoring_stack_loki_ingest_allowed_sources: []
+monitoring_stack_loki_ingest_acl_chain: MONITORING_STACK_LOKI_ACL
+monitoring_stack_loki_ingest_acl_cleanup_when_disabled: true
 
 monitoring_stack_grafana_admin_user: admin
 monitoring_stack_grafana_admin_password: change_me
+monitoring_stack_alert_telegram_bot_token: ""
+monitoring_stack_alert_telegram_chat_id: ""
+monitoring_stack_alert_telegram_topic_id: ""
 monitoring_stack_scrape_fleet_agents: true

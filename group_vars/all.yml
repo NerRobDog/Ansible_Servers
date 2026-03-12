@@ -118,8 +118,17 @@ monitoring_agent_node_exporter_port: 9100
 monitoring_agent_cadvisor_port: 8080
 monitoring_agent_enable_node_exporter: true
 monitoring_agent_enable_cadvisor: true
+monitoring_agent_promtail_enabled: true
+monitoring_agent_promtail_image: grafana/promtail:3.1.1
 monitoring_agent_manage_runtime: true
 monitoring_agent_install_path: /opt/monitoring-agent
+monitoring_loki_push_url: ""
+monitoring_labels_country: ""
+monitoring_labels_role: node
+monitoring_agent_acl_enabled: false
+monitoring_agent_acl_allowed_sources: []
+monitoring_agent_acl_chain: MONITORING_AGENT_ACL
+monitoring_agent_acl_cleanup_when_disabled: true
 
 monitoring_stack_install_path: /opt/monitoring-stack
 monitoring_stack_manage_runtime: true
@@ -130,4 +139,12 @@ monitoring_stack_prometheus_port: 9090
 monitoring_stack_alertmanager_port: 9093
 monitoring_stack_grafana_port: 3000
 monitoring_stack_loki_port: 3100
+monitoring_stack_bind_address: "127.0.0.1"
+monitoring_stack_loki_ingest_bind_address: "0.0.0.0"
+monitoring_stack_loki_ingest_allowed_sources: []
+monitoring_stack_loki_ingest_acl_chain: MONITORING_STACK_LOKI_ACL
+monitoring_stack_loki_ingest_acl_cleanup_when_disabled: true
+monitoring_stack_alert_telegram_bot_token: ""
+monitoring_stack_alert_telegram_chat_id: ""
+monitoring_stack_alert_telegram_topic_id: ""
 monitoring_stack_scrape_fleet_agents: true

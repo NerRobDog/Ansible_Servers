@@ -28,3 +28,19 @@ services:
     ports:
       - "{{ monitoring_agent_bind_address }}:{{ monitoring_agent_cadvisor_port }}:8080"
 {% endif %}
+{% if monitoring_agent_promtail_enabled | bool %}
+
+  promtail:
+    image: {{ monitoring_agent_promtail_image }}
+    container_name: monitoring-promtail-agent
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./promtail.yml:/etc/promtail/config.yml:ro
+      - /var/log:/var/log:ro
+      - /var/log/journal:/var/log/journal:ro
+      - /run/log/journal:/run/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+{% endif %}

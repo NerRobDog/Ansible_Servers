@@ -8,3 +8,12 @@ monitoring_agent_enable_node_exporter: true
 monitoring_agent_enable_cadvisor: true
 monitoring_agent_node_exporter_image: prom/node-exporter:v1.8.2
 monitoring_agent_cadvisor_image: gcr.io/cadvisor/cadvisor:v0.49.1
+monitoring_agent_promtail_enabled: true
+monitoring_agent_promtail_image: grafana/promtail:3.1.1
+monitoring_loki_push_url: ""
+monitoring_labels_country: ""
+monitoring_labels_role: node
+monitoring_agent_acl_enabled: false
+monitoring_agent_acl_allowed_sources: []
+monitoring_agent_acl_chain: MONITORING_AGENT_ACL
+monitoring_agent_acl_cleanup_when_disabled: true

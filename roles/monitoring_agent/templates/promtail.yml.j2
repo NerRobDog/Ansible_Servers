@@ -6,11 +6,11 @@ positions:
   filename: /tmp/positions.yaml
 
 clients:
-  - url: http://127.0.0.1:3100/loki/api/v1/push
+  - url: {{ monitoring_loki_push_url }}
     external_labels:
       instance: "{{ inventory_hostname }}"
       country: "{{ monitoring_labels_country }}"
-      role: "monitoring"
+      role: "{{ monitoring_labels_role }}"
 
 scrape_configs:
   - job_name: journal
@@ -32,9 +32,20 @@ scrape_configs:
           job: varlogs
           __path__: /var/log/**/*.log
 
-  - job_name: docker
-    static_configs:
-      - targets: [localhost]
-        labels:
-          job: docker
-          __path__: /var/lib/docker/containers/*/*-json.log
+  - job_name: docker-remnawave
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 30s
+    pipeline_stages:
+      - docker: {}
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(remnanode|caddy)$'
+        action: keep
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: container
+      - source_labels: ['__meta_docker_container_log_stream']
+        target_label: stream
+      - target_label: job
+        replacement: docker-remnawave
