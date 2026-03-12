@@ -204,7 +204,7 @@ for alias in "${targets[@]}"; do
 	    run_ansible_retry "$alias" 12 5 -b -m ansible.builtin.shell -a "curl --silent --show-error --fail --connect-timeout 3 'http://127.0.0.1:3000/api/health' >/dev/null"
 
 	    echo "[smoke][$alias] Check monitoring target coverage, health and duplicates"
-	    expected_node_instances_b64="$(
+	    expected_node_instances_json="$(
 	      jq -c '
 	        [
 	          .fleet_hosts
@@ -212,9 +212,9 @@ for alias in "${targets[@]}"; do
 	          | select(((.value.features.feature_monitoring_agent // false) | tostring | ascii_downcase) == "true")
 	          | .key
 	        ] | unique | sort
-	      ' "$runtime_vars" | base64 | tr -d '\n'
+	      ' "$runtime_vars"
 	    )"
-	    expected_cadvisor_instances_b64="$(
+	    expected_cadvisor_instances_json="$(
 	      jq -c '
 	        [
 	          .fleet_hosts
@@ -222,18 +222,18 @@ for alias in "${targets[@]}"; do
 	          | select(((.value.features.feature_monitoring_agent // false) | tostring | ascii_downcase) == "true")
 	          | .key
 	        ] | unique | sort
-	      ' "$runtime_vars" | base64 | tr -d '\n'
+	      ' "$runtime_vars"
 	    )"
-	    prom_targets_check_script_b64="$(
-	      cat <<'PY' | base64 | tr -d '\n'
+	    prom_targets_check_script="$(
+	      cat <<'PY'
 import base64
 import collections
 import json
 import sys
 import urllib.request
 
-expected_node = json.loads(base64.b64decode("__EXPECTED_NODE_B64__").decode("utf-8"))
-expected_cadvisor = json.loads(base64.b64decode("__EXPECTED_CADVISOR_B64__").decode("utf-8"))
+expected_node = __EXPECTED_NODE_JSON__
+expected_cadvisor = __EXPECTED_CADVISOR_JSON__
 expected = {
     "monitoring-node-exporter": expected_node,
     "monitoring-cadvisor": expected_cadvisor,
@@ -285,8 +285,9 @@ if errors:
 print("monitoring-targets-ok")
 PY
 	    )"
-	    prom_targets_check_script_b64="${prom_targets_check_script_b64/__EXPECTED_NODE_B64__/${expected_node_instances_b64}}"
-	    prom_targets_check_script_b64="${prom_targets_check_script_b64/__EXPECTED_CADVISOR_B64__/${expected_cadvisor_instances_b64}}"
+	    prom_targets_check_script="${prom_targets_check_script/__EXPECTED_NODE_JSON__/${expected_node_instances_json}}"
+	    prom_targets_check_script="${prom_targets_check_script/__EXPECTED_CADVISOR_JSON__/${expected_cadvisor_instances_json}}"
+	    prom_targets_check_script_b64="$(printf '%s' "${prom_targets_check_script}" | base64 | tr -d '\n')"
 	    run_ansible_retry "$alias" 8 5 -b -m ansible.builtin.shell -a "python3 -c \"import base64; exec(base64.b64decode('${prom_targets_check_script_b64}'))\"" >/dev/null
 
 	    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/prometheus/alerts.yml" >/dev/null
