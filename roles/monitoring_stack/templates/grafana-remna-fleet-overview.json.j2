@@ -271,7 +271,7 @@
         {
           "editorMode": "code",
           "expr": "100 - (avg by(instance) (irate(node_cpu_seconds_total{job=\"monitoring-node-exporter\",mode=\"idle\",instance=~\"$instance\",country=~\"$country\",role=~\"$role\"}[5m])) * 100)",
-          "legendFormat": "{{instance}}",
+          "legendFormat": "{% raw %}{{instance}}{% endraw %}",
           "refId": "A"
         }
       ],
@@ -305,7 +305,7 @@
         {
           "editorMode": "code",
           "expr": "(1 - (node_memory_MemAvailable_bytes{job=\"monitoring-node-exporter\",instance=~\"$instance\",country=~\"$country\",role=~\"$role\"} / node_memory_MemTotal_bytes{job=\"monitoring-node-exporter\",instance=~\"$instance\",country=~\"$country\",role=~\"$role\"})) * 100",
-          "legendFormat": "{{instance}}",
+          "legendFormat": "{% raw %}{{instance}}{% endraw %}",
           "refId": "A"
         }
       ],
@@ -339,13 +339,13 @@
         {
           "editorMode": "code",
           "expr": "sum by(instance) (rate(node_network_receive_bytes_total{job=\"monitoring-node-exporter\",device!~\"lo|docker.*\",instance=~\"$instance\",country=~\"$country\",role=~\"$role\"}[5m])) * 8 / 1000000",
-          "legendFormat": "{{instance}} rx",
+          "legendFormat": "{% raw %}{{instance}}{% endraw %} rx",
           "refId": "A"
         },
         {
           "editorMode": "code",
           "expr": "sum by(instance) (rate(node_network_transmit_bytes_total{job=\"monitoring-node-exporter\",device!~\"lo|docker.*\",instance=~\"$instance\",country=~\"$country\",role=~\"$role\"}[5m])) * 8 / 1000000",
-          "legendFormat": "{{instance}} tx",
+          "legendFormat": "{% raw %}{{instance}}{% endraw %} tx",
           "refId": "B"
         }
       ],
