@@ -49,6 +49,14 @@ on:
         options:
           - "true"
           - "false"
+      panel_sync_enforce:
+        description: Fail deploy when read-only panel sync detects drift
+        required: true
+        type: choice
+        default: "true"
+        options:
+          - "true"
+          - "false"
 
 env:
   ANSIBLE_LOCAL_TEMP: .ansible/tmp
@@ -128,6 +136,8 @@ jobs:
           fi
 
       - name: Sync RemaWave profiles and node assignments
+        id: panel_sync
+        continue-on-error: ${{ inputs.panel_sync_enforce == 'false' }}
         env:
           LIMIT: ${{ inputs.limit }}
           CHECK_MODE: ${{ inputs.check_mode }}
@@ -159,6 +169,11 @@ jobs:
             --api-token "${RW_PANEL_API_TOKEN}" \
             --limit "${LIMIT}" \
             ${write_flag}
+
+      - name: Warn when panel sync drift is ignored
+        if: ${{ steps.panel_sync.outcome == 'failure' && inputs.panel_sync_enforce == 'false' }}
+        run: |
+          echo "::warning::Panel sync drift detected but ignored because panel_sync_enforce=false. Ansible deploy continues without panel writes."
 
       - name: Create vault password file when provided
         env:
