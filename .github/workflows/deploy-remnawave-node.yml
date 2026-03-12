@@ -191,22 +191,48 @@ jobs:
           : > ~/.ssh/known_hosts
           awk '
             /^[^[]/ {
+              alias=$1;
               host="";
               port="22";
               for (i=1; i<=NF; i++) {
                 if ($i ~ /^ansible_host=/) { split($i, a, "="); host=a[2]; }
                 if ($i ~ /^ansible_port=/) { split($i, a, "="); port=a[2]; }
               }
-              if (host != "") { print host " " port; }
+              if (host != "") { print alias " " host " " port; }
             }
-          ' .ansible/runtime/hosts.ini | sort -u > .ansible/runtime/host_ports.txt
-          if [[ ! -s .ansible/runtime/host_ports.txt ]]; then
+          ' .ansible/runtime/hosts.ini | sort -u > .ansible/runtime/host_targets.txt
+          if [[ ! -s .ansible/runtime/host_targets.txt ]]; then
             echo "No hosts were generated from fleet config." >&2
             exit 1
           fi
-          while read -r host port; do
-            ssh-keyscan -p "${port}" -H "${host}" >> ~/.ssh/known_hosts 2>/dev/null
-          done < .ansible/runtime/host_ports.txt
+          failed_targets=""
+          while read -r alias host port; do
+            success=0
+            log_file=".ansible/runtime/ssh-keyscan-${alias}.log"
+            : > "${log_file}"
+            for attempt in 1 2 3; do
+              if ssh-keyscan -T 10 -t ed25519,ecdsa,rsa -p "${port}" -H "${host}" >> ~/.ssh/known_hosts 2>>"${log_file}"; then
+                success=1
+                break
+              fi
+              sleep 2
+            done
+
+            if [[ "${success}" -ne 1 ]]; then
+              echo "ssh-keyscan failed for ${alias} (${host}:${port})" >&2
+              if [[ -s "${log_file}" ]]; then
+                sed -n '1,120p' "${log_file}" >&2
+              fi
+              failed_targets="${failed_targets}${alias} (${host}:${port})"$'\n'
+            fi
+          done < .ansible/runtime/host_targets.txt
+
+          if [[ -n "${failed_targets}" ]]; then
+            echo "Failed to collect known_hosts for:" >&2
+            printf '%s' "${failed_targets}" >&2
+            exit 1
+          fi
+
           sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
