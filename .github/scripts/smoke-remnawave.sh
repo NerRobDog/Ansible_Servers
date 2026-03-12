@@ -84,6 +84,28 @@ run_ansible() {
   ansible -i "$inventory" "$alias" -o "$@"
 }
 
+run_ansible_retry() {
+  local alias="$1"
+  local attempts="$2"
+  local delay_seconds="$3"
+  shift 3
+
+  local attempt=1
+  while true; do
+    if run_ansible "$alias" "$@" >/dev/null; then
+      return 0
+    fi
+
+    if [[ "$attempt" -ge "$attempts" ]]; then
+      echo "[smoke][$alias] Check failed after ${attempts} attempts: $*" >&2
+      return 1
+    fi
+
+    attempt=$((attempt + 1))
+    sleep "$delay_seconds"
+  done
+}
+
 for alias in "${targets[@]}"; do
   if ! jq -e --arg alias "$alias" '.fleet_hosts[$alias]' "$runtime_vars" >/dev/null; then
     echo "Host alias '$alias' not found in runtime vars." >&2
@@ -166,20 +188,20 @@ for alias in "${targets[@]}"; do
     run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://${agent_probe_host}:${cadvisor_port}/metrics' >/dev/null" >/dev/null
   fi
 
-  if [[ "$feature_monitoring_stack" == "true" ]]; then
-    echo "[smoke][$alias] Check monitoring_stack services"
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-prometheus$ | grep -q monitoring-prometheus" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-alertmanager$ | grep -q monitoring-alertmanager" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-grafana$ | grep -q monitoring-grafana" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-loki$ | grep -q monitoring-loki" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://127.0.0.1:9090/-/ready' >/dev/null" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://127.0.0.1:9093/-/ready' >/dev/null" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://127.0.0.1:3100/ready' >/dev/null" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://127.0.0.1:3000/api/health' >/dev/null" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/prometheus/alerts.yml" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/provisioning/datasources/datasources.yml" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/dashboards/remna-fleet-overview.json" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/dashboards/remna-node-drilldown.json" >/dev/null
+	  if [[ "$feature_monitoring_stack" == "true" ]]; then
+	    echo "[smoke][$alias] Check monitoring_stack services"
+	    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-prometheus$ | grep -q monitoring-prometheus" >/dev/null
+	    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-alertmanager$ | grep -q monitoring-alertmanager" >/dev/null
+	    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-grafana$ | grep -q monitoring-grafana" >/dev/null
+	    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-loki$ | grep -q monitoring-loki" >/dev/null
+	    run_ansible_retry "$alias" 12 5 -b -m ansible.builtin.shell -a "curl --silent --show-error --fail --connect-timeout 3 'http://127.0.0.1:9090/-/ready' >/dev/null"
+	    run_ansible_retry "$alias" 12 5 -b -m ansible.builtin.shell -a "curl --silent --show-error --fail --connect-timeout 3 'http://127.0.0.1:9093/-/ready' >/dev/null"
+	    run_ansible_retry "$alias" 12 5 -b -m ansible.builtin.shell -a "curl --silent --show-error --fail --connect-timeout 3 'http://127.0.0.1:3100/ready' >/dev/null"
+	    run_ansible_retry "$alias" 12 5 -b -m ansible.builtin.shell -a "curl --silent --show-error --fail --connect-timeout 3 'http://127.0.0.1:3000/api/health' >/dev/null"
+	    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/prometheus/alerts.yml" >/dev/null
+	    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/provisioning/datasources/datasources.yml" >/dev/null
+	    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/dashboards/remna-fleet-overview.json" >/dev/null
+	    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/dashboards/remna-node-drilldown.json" >/dev/null
   fi
 
 done
