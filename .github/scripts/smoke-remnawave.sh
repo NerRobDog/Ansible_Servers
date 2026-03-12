@@ -206,7 +206,7 @@ for alias in "${targets[@]}"; do
 	          .fleet_hosts
 	          | to_entries[]
 	          | select(.value.features.feature_monitoring_agent == true)
-	          | "\(.value.ansible_host):\(.value.monitoring.agent_node_exporter_port)"
+	          | .key
 	        ] | unique | sort
 	      ' "$runtime_vars" | base64 | tr -d '\n'
 	    )"
@@ -216,7 +216,7 @@ for alias in "${targets[@]}"; do
 	          .fleet_hosts
 	          | to_entries[]
 	          | select(.value.features.feature_monitoring_agent == true)
-	          | "\(.value.ansible_host):\(.value.monitoring.agent_cadvisor_port)"
+	          | .key
 	        ] | unique | sort
 	      ' "$runtime_vars" | base64 | tr -d '\n'
 	    )"
