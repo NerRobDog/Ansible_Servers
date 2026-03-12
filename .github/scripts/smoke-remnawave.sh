@@ -91,13 +91,17 @@ run_ansible_retry() {
   shift 3
 
   local attempt=1
+  local last_output=""
   while true; do
-    if run_ansible "$alias" "$@" >/dev/null; then
+    if last_output="$(run_ansible "$alias" "$@" 2>&1)"; then
       return 0
     fi
 
     if [[ "$attempt" -ge "$attempts" ]]; then
       echo "[smoke][$alias] Check failed after ${attempts} attempts: $*" >&2
+      if [[ -n "$last_output" ]]; then
+        echo "$last_output" >&2
+      fi
       return 1
     fi
 
@@ -205,7 +209,7 @@ for alias in "${targets[@]}"; do
 	        [
 	          .fleet_hosts
 	          | to_entries[]
-	          | select(.value.features.feature_monitoring_agent == true)
+	          | select(((.value.features.feature_monitoring_agent // false) | tostring | ascii_downcase) == "true")
 	          | .key
 	        ] | unique | sort
 	      ' "$runtime_vars" | base64 | tr -d '\n'
@@ -215,7 +219,7 @@ for alias in "${targets[@]}"; do
 	        [
 	          .fleet_hosts
 	          | to_entries[]
-	          | select(.value.features.feature_monitoring_agent == true)
+	          | select(((.value.features.feature_monitoring_agent // false) | tostring | ascii_downcase) == "true")
 	          | .key
 	        ] | unique | sort
 	      ' "$runtime_vars" | base64 | tr -d '\n'
