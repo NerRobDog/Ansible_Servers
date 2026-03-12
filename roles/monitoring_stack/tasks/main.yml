@@ -1,4 +1,30 @@
 ---
+- name: Resolve monitoring stack Telegram alert secrets
+  ansible.builtin.set_fact:
+    monitoring_stack_alert_telegram_bot_token_effective: >-
+      {{
+        monitoring_stack_alert_telegram_bot_token
+        | default(lookup('env', 'MONITORING_ALERT_TELEGRAM_BOT_TOKEN'), true)
+        | string
+        | trim
+      }}
+    monitoring_stack_alert_telegram_chat_id_effective: >-
+      {{
+        monitoring_stack_alert_telegram_chat_id
+        | default(lookup('env', 'MONITORING_ALERT_TELEGRAM_CHAT_ID'), true)
+        | string
+        | trim
+      }}
+    monitoring_stack_alert_telegram_topic_id_effective: >-
+      {{
+        monitoring_stack_alert_telegram_topic_id
+        | default(lookup('env', 'MONITORING_ALERT_TELEGRAM_TOPIC_ID'), true)
+        | string
+        | trim
+      }}
+  changed_when: false
+  tags: [monitoring, metrics, alerts]
+
 - name: Validate monitoring stack settings
   ansible.builtin.assert:
     that:
@@ -11,10 +37,16 @@
       - (monitoring_stack_grafana_port | int) < 65536
       - (monitoring_stack_loki_port | int) > 0
       - (monitoring_stack_loki_port | int) < 65536
+      - monitoring_stack_bind_address | trim | length > 0
+      - monitoring_stack_loki_ingest_bind_address | trim | length > 0
       - monitoring_stack_grafana_admin_user | trim | length > 0
       - monitoring_stack_grafana_admin_password | trim | length > 0
-    fail_msg: "Invalid monitoring_stack settings. Check ports, retention and grafana credentials."
-  tags: [monitoring, metrics, grafana, prometheus, loki]
+      - monitoring_stack_alert_telegram_bot_token_effective | length > 0
+      - monitoring_stack_alert_telegram_chat_id_effective | length > 0
+    fail_msg: >-
+      Invalid monitoring_stack settings. Check ports, retention, Grafana credentials,
+      and MONITORING_ALERT_TELEGRAM_BOT_TOKEN / MONITORING_ALERT_TELEGRAM_CHAT_ID.
+  tags: [monitoring, metrics, grafana, prometheus, loki, alerts]
 
 - name: Ensure monitoring stack directories exist
   ansible.builtin.file:
@@ -27,8 +59,14 @@
     - "{{ monitoring_stack_install_path }}"
     - "{{ monitoring_stack_install_path }}/prometheus"
     - "{{ monitoring_stack_install_path }}/alertmanager"
+    - "{{ monitoring_stack_install_path }}/alertmanager/templates"
     - "{{ monitoring_stack_install_path }}/loki"
     - "{{ monitoring_stack_install_path }}/promtail"
+    - "{{ monitoring_stack_install_path }}/grafana"
+    - "{{ monitoring_stack_install_path }}/grafana/provisioning"
+    - "{{ monitoring_stack_install_path }}/grafana/provisioning/datasources"
+    - "{{ monitoring_stack_install_path }}/grafana/provisioning/dashboards"
+    - "{{ monitoring_stack_install_path }}/grafana/dashboards"
   tags: [monitoring, metrics, grafana, prometheus, loki]
 
 - name: Build monitoring scrape host list from fleet config
@@ -62,8 +100,14 @@
     - src: prometheus.yml.j2
       dest: "{{ monitoring_stack_install_path }}/prometheus/prometheus.yml"
       mode: "0644"
+    - src: alerts.yml.j2
+      dest: "{{ monitoring_stack_install_path }}/prometheus/alerts.yml"
+      mode: "0644"
     - src: alertmanager.yml.j2
       dest: "{{ monitoring_stack_install_path }}/alertmanager/alertmanager.yml"
+      mode: "0644"
+    - src: alertmanager-telegram.tmpl.j2
+      dest: "{{ monitoring_stack_install_path }}/alertmanager/templates/telegram.tmpl"
       mode: "0644"
     - src: loki.yml.j2
       dest: "{{ monitoring_stack_install_path }}/loki/config.yml"
@@ -71,11 +115,23 @@
     - src: promtail.yml.j2
       dest: "{{ monitoring_stack_install_path }}/promtail/config.yml"
       mode: "0644"
+    - src: grafana-datasources.yml.j2
+      dest: "{{ monitoring_stack_install_path }}/grafana/provisioning/datasources/datasources.yml"
+      mode: "0644"
+    - src: grafana-dashboards.yml.j2
+      dest: "{{ monitoring_stack_install_path }}/grafana/provisioning/dashboards/dashboards.yml"
+      mode: "0644"
+    - src: grafana-remna-fleet-overview.json.j2
+      dest: "{{ monitoring_stack_install_path }}/grafana/dashboards/remna-fleet-overview.json"
+      mode: "0644"
+    - src: grafana-remna-node-drilldown.json.j2
+      dest: "{{ monitoring_stack_install_path }}/grafana/dashboards/remna-node-drilldown.json"
+      mode: "0644"
     - src: docker-compose.yml.j2
       dest: "{{ monitoring_stack_install_path }}/docker-compose.yml"
       mode: "0644"
   notify: Restart monitoring stack
-  tags: [monitoring, metrics, grafana, prometheus, loki]
+  tags: [monitoring, metrics, grafana, prometheus, loki, alerts]
 
 - name: Ensure monitoring stack is running
   community.docker.docker_compose_v2:
@@ -84,4 +140,293 @@
     pull: missing
     remove_orphans: true
   when: monitoring_stack_manage_runtime | bool
-  tags: [monitoring, metrics, grafana, prometheus, loki]
+  tags: [monitoring, metrics, grafana, prometheus, loki, alerts]
+
+- name: Set monitoring stack Loki ACL mode
+  ansible.builtin.set_fact:
+    monitoring_stack_loki_acl_enabled: >-
+      {{
+        (monitoring_stack_loki_ingest_allowed_sources | default([]) | length > 0)
+        and ((monitoring_stack_loki_ingest_bind_address | string) not in ['127.0.0.1', 'localhost'])
+      }}
+  changed_when: false
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Ensure iptables userspace tools are present for monitoring stack Loki ACL
+  ansible.builtin.package:
+    name: iptables
+    state: present
+  when: monitoring_stack_loki_acl_enabled | bool or monitoring_stack_loki_ingest_acl_cleanup_when_disabled | bool
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Initialize normalized monitoring stack Loki ACL source list
+  ansible.builtin.set_fact:
+    monitoring_stack_loki_acl_sources_effective: []
+  when: monitoring_stack_loki_acl_enabled | bool
+  changed_when: false
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Build normalized monitoring stack Loki ACL source list
+  ansible.builtin.set_fact:
+    monitoring_stack_loki_acl_sources_effective: >-
+      {{
+        monitoring_stack_loki_acl_sources_effective
+        + [
+          (
+            source if "/" in source
+            else source ~ ("/128" if ":" in source else "/32")
+          )
+        ]
+      }}
+  vars:
+    source: "{{ item | string | trim }}"
+  loop: "{{ monitoring_stack_loki_ingest_allowed_sources | default([]) }}"
+  when:
+    - monitoring_stack_loki_acl_enabled | bool
+    - source | length > 0
+  changed_when: false
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Validate monitoring stack Loki ACL config
+  ansible.builtin.assert:
+    that:
+      - monitoring_stack_loki_ingest_acl_chain | trim | length > 0
+      - monitoring_stack_loki_acl_sources_effective | length > 0
+    fail_msg: >-
+      monitoring_stack_loki_ingest_allowed_sources must contain at least one CIDR/IP
+      when stack_loki_ingest_bind_address is not loopback.
+  when: monitoring_stack_loki_acl_enabled | bool
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Capture current iptables filter table for monitoring stack Loki ACL
+  ansible.builtin.command: iptables-save -t filter
+  register: monitoring_stack_loki_filter_table
+  check_mode: false
+  changed_when: false
+  when: monitoring_stack_loki_acl_enabled | bool or monitoring_stack_loki_ingest_acl_cleanup_when_disabled | bool
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Detect existing monitoring stack Loki ACL chain and jump state
+  ansible.builtin.set_fact:
+    monitoring_stack_loki_acl_chain_exists: >-
+      {{
+        (
+          monitoring_stack_loki_filter_table.stdout
+          | regex_search("(?m)^:" ~ (monitoring_stack_loki_ingest_acl_chain | regex_escape) ~ " ")
+        ) is not none
+      }}
+    monitoring_stack_loki_acl_jump_exists: >-
+      {{
+        (
+          monitoring_stack_loki_filter_table.stdout
+          | regex_search("(?m)^-A DOCKER-USER -j " ~ (monitoring_stack_loki_ingest_acl_chain | regex_escape) ~ "$")
+        ) is not none
+      }}
+    monitoring_stack_loki_acl_current_rules: >-
+      {{
+        monitoring_stack_loki_filter_table.stdout_lines
+        | select("match", "^-A " ~ (monitoring_stack_loki_ingest_acl_chain | regex_escape) ~ " ")
+        | list
+      }}
+  when: monitoring_stack_loki_acl_enabled | bool or monitoring_stack_loki_ingest_acl_cleanup_when_disabled | bool
+  changed_when: false
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Initialize desired monitoring stack Loki ACL rules
+  ansible.builtin.set_fact:
+    monitoring_stack_loki_acl_desired_rules:
+      - "-A {{ monitoring_stack_loki_ingest_acl_chain }} -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN"
+  when: monitoring_stack_loki_acl_enabled | bool
+  changed_when: false
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Add source allow rules to desired monitoring stack Loki ACL
+  ansible.builtin.set_fact:
+    monitoring_stack_loki_acl_desired_rules: >-
+      {{
+        monitoring_stack_loki_acl_desired_rules
+        + [
+          "-A " ~ monitoring_stack_loki_ingest_acl_chain
+          ~ " -s " ~ item
+          ~ " -p tcp --dport " ~ (monitoring_stack_loki_port | string)
+          ~ " -j RETURN"
+        ]
+      }}
+  loop: "{{ monitoring_stack_loki_acl_sources_effective }}"
+  when: monitoring_stack_loki_acl_enabled | bool
+  changed_when: false
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Add terminal rules to desired monitoring stack Loki ACL
+  ansible.builtin.set_fact:
+    monitoring_stack_loki_acl_desired_rules: >-
+      {{
+        monitoring_stack_loki_acl_desired_rules
+        + [
+          "-A " ~ monitoring_stack_loki_ingest_acl_chain
+          ~ " -p tcp --dport " ~ (monitoring_stack_loki_port | string)
+          ~ " -j DROP",
+          "-A " ~ monitoring_stack_loki_ingest_acl_chain ~ " -j RETURN"
+        ]
+      }}
+  when: monitoring_stack_loki_acl_enabled | bool
+  changed_when: false
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Detect monitoring stack Loki ACL drift
+  ansible.builtin.set_fact:
+    monitoring_stack_loki_acl_needs_apply: >-
+      {{
+        (not monitoring_stack_loki_acl_chain_exists)
+        or (not monitoring_stack_loki_acl_jump_exists)
+        or (monitoring_stack_loki_acl_current_rules != monitoring_stack_loki_acl_desired_rules)
+      }}
+  when: monitoring_stack_loki_acl_enabled | bool
+  changed_when: false
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Detect monitoring stack Loki ACL cleanup requirement
+  ansible.builtin.set_fact:
+    monitoring_stack_loki_acl_cleanup_needed: >-
+      {{
+        (not (monitoring_stack_loki_acl_enabled | bool))
+        and (monitoring_stack_loki_ingest_acl_cleanup_when_disabled | bool)
+        and (
+          (monitoring_stack_loki_acl_chain_exists | default(false))
+          or (monitoring_stack_loki_acl_jump_exists | default(false))
+        )
+      }}
+  changed_when: false
+  when: monitoring_stack_loki_ingest_acl_cleanup_when_disabled | bool
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Report monitoring stack Loki ACL drift in check mode
+  ansible.builtin.debug:
+    msg: "Monitoring stack Loki ACL rules would be updated."
+  when:
+    - monitoring_stack_loki_acl_enabled | bool
+    - ansible_check_mode | bool
+    - monitoring_stack_loki_acl_needs_apply | bool
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Report monitoring stack Loki ACL cleanup in check mode
+  ansible.builtin.debug:
+    msg: "Monitoring stack Loki ACL rules would be removed."
+  when:
+    - monitoring_stack_loki_ingest_acl_cleanup_when_disabled | bool
+    - ansible_check_mode | bool
+    - monitoring_stack_loki_acl_cleanup_needed | default(false) | bool
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Create monitoring stack Loki ACL chain when missing
+  ansible.builtin.command: "iptables -w -N {{ monitoring_stack_loki_ingest_acl_chain }}"
+  when:
+    - monitoring_stack_loki_acl_enabled | bool
+    - monitoring_stack_loki_acl_needs_apply | bool
+    - not monitoring_stack_loki_acl_chain_exists | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Flush monitoring stack Loki ACL chain before applying desired rules
+  ansible.builtin.command: "iptables -w -F {{ monitoring_stack_loki_ingest_acl_chain }}"
+  when:
+    - monitoring_stack_loki_acl_enabled | bool
+    - monitoring_stack_loki_acl_needs_apply | bool
+    - monitoring_stack_loki_acl_chain_exists | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Remove previous DOCKER-USER jump to monitoring stack Loki ACL chain
+  ansible.builtin.shell: |
+    while iptables -w -C DOCKER-USER -j {{ monitoring_stack_loki_ingest_acl_chain }} 2>/dev/null; do
+      iptables -w -D DOCKER-USER -j {{ monitoring_stack_loki_ingest_acl_chain }}
+    done
+  when:
+    - monitoring_stack_loki_acl_enabled | bool
+    - monitoring_stack_loki_acl_needs_apply | bool
+    - monitoring_stack_loki_acl_jump_exists | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Insert monitoring stack Loki ACL chain jump at top of DOCKER-USER
+  ansible.builtin.command: "iptables -w -I DOCKER-USER 1 -j {{ monitoring_stack_loki_ingest_acl_chain }}"
+  when:
+    - monitoring_stack_loki_acl_enabled | bool
+    - monitoring_stack_loki_acl_needs_apply | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Add established/related return rule to monitoring stack Loki ACL chain
+  ansible.builtin.command: >-
+    iptables -w -A {{ monitoring_stack_loki_ingest_acl_chain }} -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+  when:
+    - monitoring_stack_loki_acl_enabled | bool
+    - monitoring_stack_loki_acl_needs_apply | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Add allowed source rules to monitoring stack Loki ACL chain
+  ansible.builtin.command: >-
+    iptables -w -A {{ monitoring_stack_loki_ingest_acl_chain }} -s {{ item }} -p tcp
+    --dport {{ monitoring_stack_loki_port }} -j RETURN
+  loop: "{{ monitoring_stack_loki_acl_sources_effective }}"
+  when:
+    - monitoring_stack_loki_acl_enabled | bool
+    - monitoring_stack_loki_acl_needs_apply | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Add default drop rule to monitoring stack Loki ACL chain
+  ansible.builtin.command: >-
+    iptables -w -A {{ monitoring_stack_loki_ingest_acl_chain }} -p tcp
+    --dport {{ monitoring_stack_loki_port }} -j DROP
+  when:
+    - monitoring_stack_loki_acl_enabled | bool
+    - monitoring_stack_loki_acl_needs_apply | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Add final return rule to monitoring stack Loki ACL chain
+  ansible.builtin.command: "iptables -w -A {{ monitoring_stack_loki_ingest_acl_chain }} -j RETURN"
+  when:
+    - monitoring_stack_loki_acl_enabled | bool
+    - monitoring_stack_loki_acl_needs_apply | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Remove monitoring stack Loki ACL chain jump from DOCKER-USER when ACL is disabled
+  ansible.builtin.shell: |
+    while iptables -w -C DOCKER-USER -j {{ monitoring_stack_loki_ingest_acl_chain }} 2>/dev/null; do
+      iptables -w -D DOCKER-USER -j {{ monitoring_stack_loki_ingest_acl_chain }}
+    done
+  when:
+    - monitoring_stack_loki_acl_cleanup_needed | default(false) | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Flush monitoring stack Loki ACL chain when ACL is disabled
+  ansible.builtin.command: "iptables -w -F {{ monitoring_stack_loki_ingest_acl_chain }}"
+  when:
+    - monitoring_stack_loki_acl_cleanup_needed | default(false) | bool
+    - monitoring_stack_loki_acl_chain_exists | default(false) | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Delete monitoring stack Loki ACL chain when ACL is disabled
+  ansible.builtin.command: "iptables -w -X {{ monitoring_stack_loki_ingest_acl_chain }}"
+  when:
+    - monitoring_stack_loki_acl_cleanup_needed | default(false) | bool
+    - monitoring_stack_loki_acl_chain_exists | default(false) | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, loki, firewall]

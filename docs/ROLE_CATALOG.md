@@ -56,23 +56,48 @@
   - `remnawave.ipv6_state` = `enabled|disabled`.
 
 ### `monitoring_agent`
-- Назначение: запуск `node_exporter` и `cadvisor` на ноде для удалённого scrape.
+- Назначение: запуск `node_exporter`, `cadvisor` и `promtail` на ноде.
 - Требует: `feature_monitoring_agent=true`.
 - Основные параметры:
   - `monitoring.agent_bind_address` (по умолчанию `0.0.0.0`)
   - `monitoring.agent_node_exporter_port` (по умолчанию `9100`)
   - `monitoring.agent_cadvisor_port` (по умолчанию `8080`)
+  - `monitoring.agent_promtail_enabled` (по умолчанию `true`)
+  - `monitoring.loki_push_url` (если пусто — вычисляется автоматически через stack-host)
+  - `monitoring.labels.country`, `monitoring.labels.role`
+  - `monitoring.agent_acl_enabled` (по умолчанию `false`)
+  - `monitoring.agent_acl_allowed_sources` (CIDR-список разрешённых источников для `9100/8080`)
+- Если `agent_acl_enabled=true`, роль управляет `DOCKER-USER` chain `MONITORING_AGENT_ACL`:
+  - разрешает только `agent_acl_allowed_sources` к exporter-портам;
+  - запрещает остальные подключения к exporter-портам;
+  - при `agent_acl_enabled=false` удаляет эти ACL-правила обратно (по умолчанию).
 
 ### `monitoring_stack`
 - Назначение: центральный стек `Prometheus + Alertmanager + Grafana + Loki + Promtail`.
 - Требует: `feature_monitoring_stack=true`.
 - Основные параметры:
+  - `monitoring.stack_bind_address` (по умолчанию `127.0.0.1`)
+  - `monitoring.stack_loki_ingest_bind_address` (по умолчанию `0.0.0.0`)
+  - `monitoring.stack_loki_ingest_allowed_sources` (CIDR allow-list для Loki ingest)
   - `monitoring.stack_retention_days`
   - `monitoring.stack_grafana_admin_user`
   - `monitoring.stack_grafana_admin_password`
+- Telegram alerting (обязателен для stack-host):
+  - `MONITORING_ALERT_TELEGRAM_BOT_TOKEN`
+  - `MONITORING_ALERT_TELEGRAM_CHAT_ID`
+  - `MONITORING_ALERT_TELEGRAM_TOPIC_ID` (опционально)
+- Что делает дополнительно:
+  - включает `alerts.yml` в Prometheus (rule-based alerting);
+  - настраивает Alertmanager routing по severity (`critical|warning|info`);
+  - включает Grafana provisioning (datasources `Prometheus`/`Loki` + встроенные дашборды).
 - Подключение нод:
   - автоматически берёт хосты с `feature_monitoring_agent=true` из `fleet_hosts`.
   - скрапит `node_exporter`/`cadvisor` по `ansible_host` и monitoring-портам.
+- Ограничение на флот:
+  - если включены monitoring features, в environment должен быть ровно один `feature_monitoring_stack=true` host.
+- Для single-host схемы (`monitoring_stack` + `monitoring_agent` на одном сервере) используйте:
+  - `monitoring.agent_bind_address: "172.17.0.1"`
+  - `monitoring.stack_bind_address: "127.0.0.1"`
 
 ### `user_shell`
 - Назначение: пользователь, authorized_keys, sudo, shell-окружение.

@@ -42,7 +42,19 @@ MONITORING_DEFAULTS = {
     "agent_bind_address": "0.0.0.0",
     "agent_node_exporter_port": 9100,
     "agent_cadvisor_port": 8080,
+    "agent_promtail_enabled": True,
+    "agent_acl_enabled": False,
+    "agent_acl_allowed_sources": [],
+    "loki_push_url": "",
+    "labels": {
+        "country": "",
+        "role": "node",
+    },
     "stack_retention_days": 7,
+    "stack_bind_address": "127.0.0.1",
+    "stack_loki_port": 3100,
+    "stack_loki_ingest_bind_address": "0.0.0.0",
+    "stack_loki_ingest_allowed_sources": [],
     "stack_grafana_admin_user": "admin",
     "stack_grafana_admin_password": "change_me",
 }
@@ -192,21 +204,73 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
         default_monitoring = {}
     if not isinstance(default_monitoring, dict):
         fail("defaults.monitoring must be an object when provided.")
+    host_monitoring = host_cfg.get("monitoring", {}) or {}
+    if not isinstance(host_monitoring, dict):
+        fail(f"Host '{alias}' monitoring must be an object when provided.")
     monitoring_cfg = MONITORING_DEFAULTS.copy()
     monitoring_cfg.update(default_monitoring)
-    monitoring_cfg.update(host_cfg.get("monitoring", {}) or {})
+    monitoring_cfg.update(host_monitoring)
     try:
         monitoring_cfg["agent_node_exporter_port"] = int(monitoring_cfg["agent_node_exporter_port"])
         monitoring_cfg["agent_cadvisor_port"] = int(monitoring_cfg["agent_cadvisor_port"])
         monitoring_cfg["stack_retention_days"] = int(monitoring_cfg["stack_retention_days"])
+        monitoring_cfg["stack_loki_port"] = int(monitoring_cfg["stack_loki_port"])
     except Exception:
         fail(f"Host '{alias}' monitoring ports/retention must be numbers.")
-    for key in ("agent_node_exporter_port", "agent_cadvisor_port"):
+    for key in ("agent_node_exporter_port", "agent_cadvisor_port", "stack_loki_port"):
         if not (1 <= monitoring_cfg[key] <= 65535):
             fail(f"Host '{alias}' monitoring.{key} must be in range 1..65535.")
     if monitoring_cfg["stack_retention_days"] < 1:
         fail(f"Host '{alias}' monitoring.stack_retention_days must be >= 1.")
     monitoring_cfg["agent_bind_address"] = str(monitoring_cfg.get("agent_bind_address", "0.0.0.0") or "0.0.0.0")
+    monitoring_cfg["agent_promtail_enabled"] = parse_bool(monitoring_cfg.get("agent_promtail_enabled", True))
+    monitoring_cfg["agent_acl_enabled"] = parse_bool(monitoring_cfg.get("agent_acl_enabled", False))
+    acl_sources = monitoring_cfg.get("agent_acl_allowed_sources", [])
+    if acl_sources is None:
+        acl_sources = []
+    if not isinstance(acl_sources, list):
+        fail(f"Host '{alias}' monitoring.agent_acl_allowed_sources must be a list.")
+    normalized_acl_sources = []
+    for source in acl_sources:
+        source_text = str(source).strip()
+        if not source_text:
+            fail(f"Host '{alias}' monitoring.agent_acl_allowed_sources contains empty source value.")
+        normalized_acl_sources.append(source_text)
+    monitoring_cfg["agent_acl_allowed_sources"] = normalized_acl_sources
+    monitoring_cfg["loki_push_url"] = str(monitoring_cfg.get("loki_push_url", "") or "").strip()
+    labels_cfg = MONITORING_DEFAULTS["labels"].copy()
+    defaults_labels = default_monitoring.get("labels", {})
+    host_labels = host_monitoring.get("labels", {})
+    if defaults_labels is None:
+        defaults_labels = {}
+    if host_labels is None:
+        host_labels = {}
+    if not isinstance(defaults_labels, dict):
+        fail("defaults.monitoring.labels must be an object when provided.")
+    if not isinstance(host_labels, dict):
+        fail(f"Host '{alias}' monitoring.labels must be an object when provided.")
+    labels_cfg.update(defaults_labels)
+    labels_cfg.update(host_labels)
+    monitoring_cfg["labels"] = {
+        "country": str(labels_cfg.get("country", "") or "").strip(),
+        "role": str(labels_cfg.get("role", "node") or "node").strip(),
+    }
+    monitoring_cfg["stack_bind_address"] = str(monitoring_cfg.get("stack_bind_address", "127.0.0.1") or "127.0.0.1")
+    monitoring_cfg["stack_loki_ingest_bind_address"] = str(
+        monitoring_cfg.get("stack_loki_ingest_bind_address", "0.0.0.0") or "0.0.0.0"
+    )
+    loki_sources = monitoring_cfg.get("stack_loki_ingest_allowed_sources", [])
+    if loki_sources is None:
+        loki_sources = []
+    if not isinstance(loki_sources, list):
+        fail(f"Host '{alias}' monitoring.stack_loki_ingest_allowed_sources must be a list.")
+    normalized_loki_sources = []
+    for source in loki_sources:
+        source_text = str(source).strip()
+        if not source_text:
+            fail(f"Host '{alias}' monitoring.stack_loki_ingest_allowed_sources contains empty source value.")
+        normalized_loki_sources.append(source_text)
+    monitoring_cfg["stack_loki_ingest_allowed_sources"] = normalized_loki_sources
     monitoring_cfg["stack_grafana_admin_user"] = str(
         monitoring_cfg.get("stack_grafana_admin_user", "admin") or "admin"
     )
@@ -271,10 +335,43 @@ def main() -> None:
         alias: normalize_host(alias, cfg, defaults)
         for alias, cfg in hosts_raw.items()
     }
+    monitoring_hosts = [
+        alias
+        for alias, cfg in normalized_hosts.items()
+        if cfg["features"]["feature_monitoring_agent"] or cfg["features"]["feature_monitoring_stack"]
+    ]
+    stack_hosts = [
+        alias
+        for alias, cfg in normalized_hosts.items()
+        if cfg["features"]["feature_monitoring_stack"]
+    ]
+    if monitoring_hosts and len(stack_hosts) != 1:
+        fail(
+            "Exactly one host with features.feature_monitoring_stack=true is required when monitoring features are enabled."
+        )
+
+    stack_host_alias = stack_hosts[0] if stack_hosts else ""
+    stack_host_address = normalized_hosts[stack_host_alias]["ansible_host"] if stack_host_alias else ""
+    stack_loki_port = normalized_hosts[stack_host_alias]["monitoring"]["stack_loki_port"] if stack_host_alias else 3100
+    for alias, cfg in normalized_hosts.items():
+        if cfg["monitoring"]["loki_push_url"]:
+            continue
+        if not stack_host_alias:
+            cfg["monitoring"]["loki_push_url"] = ""
+            continue
+        if (
+            alias == stack_host_alias
+            and cfg["monitoring"]["stack_loki_ingest_bind_address"] in {"127.0.0.1", "localhost"}
+        ):
+            cfg["monitoring"]["loki_push_url"] = f"http://127.0.0.1:{stack_loki_port}/loki/api/v1/push"
+        else:
+            cfg["monitoring"]["loki_push_url"] = f"http://{stack_host_address}:{stack_loki_port}/loki/api/v1/push"
 
     runtime_vars = {
         "fleet_mode": args.mode,
         "fleet_hosts": normalized_hosts,
+        "monitoring_stack_host_alias": stack_host_alias,
+        "monitoring_stack_host_address": stack_host_address,
         "remnawave_runtime_host_vars": {
             alias: {
                 "remnawave_node_secret_key": cfg["remnawave"]["node_secret_key"],
@@ -293,7 +390,17 @@ def main() -> None:
                 "monitoring_agent_bind_address": cfg["monitoring"]["agent_bind_address"],
                 "monitoring_agent_node_exporter_port": cfg["monitoring"]["agent_node_exporter_port"],
                 "monitoring_agent_cadvisor_port": cfg["monitoring"]["agent_cadvisor_port"],
+                "monitoring_agent_promtail_enabled": cfg["monitoring"]["agent_promtail_enabled"],
+                "monitoring_agent_acl_enabled": cfg["monitoring"]["agent_acl_enabled"],
+                "monitoring_agent_acl_allowed_sources": cfg["monitoring"]["agent_acl_allowed_sources"],
+                "monitoring_loki_push_url": cfg["monitoring"]["loki_push_url"],
+                "monitoring_labels_country": cfg["monitoring"]["labels"]["country"],
+                "monitoring_labels_role": cfg["monitoring"]["labels"]["role"],
                 "monitoring_stack_retention_days": cfg["monitoring"]["stack_retention_days"],
+                "monitoring_stack_bind_address": cfg["monitoring"]["stack_bind_address"],
+                "monitoring_stack_loki_port": cfg["monitoring"]["stack_loki_port"],
+                "monitoring_stack_loki_ingest_bind_address": cfg["monitoring"]["stack_loki_ingest_bind_address"],
+                "monitoring_stack_loki_ingest_allowed_sources": cfg["monitoring"]["stack_loki_ingest_allowed_sources"],
                 "monitoring_stack_grafana_admin_user": cfg["monitoring"]["stack_grafana_admin_user"],
                 "monitoring_stack_grafana_admin_password": cfg["monitoring"]["stack_grafana_admin_password"],
             }

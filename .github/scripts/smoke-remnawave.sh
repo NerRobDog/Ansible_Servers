@@ -145,20 +145,41 @@ for alias in "${targets[@]}"; do
   if [[ "$feature_monitoring_agent" == "true" ]]; then
     node_exporter_port="$(jq -r --arg alias "$alias" '.remnawave_runtime_host_vars[$alias].monitoring_agent_node_exporter_port // 9100' "$runtime_vars")"
     cadvisor_port="$(jq -r --arg alias "$alias" '.remnawave_runtime_host_vars[$alias].monitoring_agent_cadvisor_port // 8080' "$runtime_vars")"
+    promtail_enabled="$(jq -r --arg alias "$alias" '.remnawave_runtime_host_vars[$alias].monitoring_agent_promtail_enabled // true' "$runtime_vars")"
+    agent_bind_address="$(jq -r --arg alias "$alias" '
+      .remnawave_runtime_host_vars[$alias].monitoring_agent_bind_address
+      // .fleet_hosts[$alias].monitoring.agent_bind_address
+      // "127.0.0.1"
+    ' "$runtime_vars")"
+    agent_probe_host="$agent_bind_address"
+    if [[ "$agent_probe_host" == "0.0.0.0" ]]; then
+      agent_probe_host="127.0.0.1"
+    fi
 
     echo "[smoke][$alias] Check monitoring_agent containers and ports"
     run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-node-exporter$ | grep -q monitoring-node-exporter" >/dev/null
     run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-cadvisor$ | grep -q monitoring-cadvisor" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://127.0.0.1:${node_exporter_port}/metrics' >/dev/null" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://127.0.0.1:${cadvisor_port}/metrics' >/dev/null" >/dev/null
+    if [[ "$promtail_enabled" == "true" ]]; then
+      run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-promtail-agent$ | grep -q monitoring-promtail-agent" >/dev/null
+    fi
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://${agent_probe_host}:${node_exporter_port}/metrics' >/dev/null" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://${agent_probe_host}:${cadvisor_port}/metrics' >/dev/null" >/dev/null
   fi
 
   if [[ "$feature_monitoring_stack" == "true" ]]; then
     echo "[smoke][$alias] Check monitoring_stack services"
     run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-prometheus$ | grep -q monitoring-prometheus" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-alertmanager$ | grep -q monitoring-alertmanager" >/dev/null
     run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-grafana$ | grep -q monitoring-grafana" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-loki$ | grep -q monitoring-loki" >/dev/null
     run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://127.0.0.1:9090/-/ready' >/dev/null" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://127.0.0.1:9093/-/ready' >/dev/null" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://127.0.0.1:3100/ready' >/dev/null" >/dev/null
     run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://127.0.0.1:3000/api/health' >/dev/null" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/prometheus/alerts.yml" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/provisioning/datasources/datasources.yml" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/dashboards/remna-fleet-overview.json" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/dashboards/remna-node-drilldown.json" >/dev/null
   fi
 
 done

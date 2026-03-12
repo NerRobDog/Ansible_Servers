@@ -24,5 +24,14 @@ schema_config:
         prefix: index_
         period: 24h
 
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  delete_request_store: filesystem
+
+limits_config:
+  retention_period: {{ monitoring_stack_retention_days }}d
+
 ruler:
-  alertmanager_url: http://127.0.0.1:9093
+  alertmanager_url: http://alertmanager:9093

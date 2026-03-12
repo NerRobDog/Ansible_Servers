@@ -9,9 +9,12 @@ services:
       - --web.enable-lifecycle
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus_data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
-      - "{{ monitoring_stack_prometheus_port }}:9090"
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_prometheus_port }}:9090"
     restart: unless-stopped
 
   alertmanager:
@@ -22,9 +25,10 @@ services:
       - --storage.path=/alertmanager
     volumes:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager/templates:/etc/alertmanager/templates:ro
       - alertmanager_data:/alertmanager
     ports:
-      - "{{ monitoring_stack_alertmanager_port }}:9093"
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_alertmanager_port }}:9093"
     restart: unless-stopped
 
   grafana:
@@ -36,8 +40,10 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
-      - "{{ monitoring_stack_grafana_port }}:3000"
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_grafana_port }}:3000"
     restart: unless-stopped
 
   loki:
@@ -48,7 +54,7 @@ services:
       - ./loki/config.yml:/etc/loki/config.yml:ro
       - loki_data:/loki
     ports:
-      - "{{ monitoring_stack_loki_port }}:3100"
+      - "{{ monitoring_stack_loki_ingest_bind_address }}:{{ monitoring_stack_loki_port }}:3100"
     restart: unless-stopped
 
   promtail:
@@ -58,6 +64,9 @@ services:
     volumes:
       - ./promtail/config.yml:/etc/promtail/config.yml:ro
       - /var/log:/var/log:ro
+      - /var/log/journal:/var/log/journal:ro
+      - /run/log/journal:/run/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
