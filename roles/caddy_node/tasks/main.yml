@@ -95,7 +95,9 @@
   failed_when: >-
     (remnawave_caddy_ufw_panel_rules.rc != 0)
     and ('Skipping adding existing rule' not in remnawave_caddy_ufw_panel_rules.stdout)
-  when: remnawave_panel_allowed_sources_effective | length > 0
+  when:
+    - remnawave_panel_allowed_sources_effective | length > 0
+    - not ansible_check_mode
   tags: [remnawave, caddy]
 
 - name: Install Caddy prerequisites
