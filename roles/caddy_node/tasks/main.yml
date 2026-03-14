@@ -17,6 +17,9 @@
     remnawave_caddy_tls_key_file_effective: "{{ remnawave_caddy_tls_key_file_resolved | default(remnawave_caddy_tls_key_file, true) | string }}"
     remnawave_caddy_local_only_effective: "{{ remnawave_caddy_local_only_resolved | default(remnawave_caddy_local_only, true) | bool }}"
     remnawave_caddy_acme_ca_effective: "{{ remnawave_caddy_acme_ca_resolved | default(remnawave_caddy_acme_ca, true) | string }}"
+    remnawave_node_port_effective: "{{ remnawave_node_port_resolved | default(remnawave_node_port, true) | int }}"
+    remnawave_panel_allowed_sources_effective: >-
+      {{ remnawave_panel_allowed_sources_resolved | default(remnawave_panel_allowed_sources, true) }}
   changed_when: false
   tags: [remnawave, caddy]
 
@@ -42,6 +45,57 @@
   changed_when: false
   failed_when: remnawave_caddy_domain_dns.rc != 0
   when: remnawave_caddy_tls_mode_effective == "public"
+  tags: [remnawave, caddy]
+
+- name: Validate panel allowed sources format
+  ansible.builtin.assert:
+    that:
+      - remnawave_panel_allowed_sources_effective is iterable
+      - remnawave_panel_allowed_sources_effective is not string
+      - (remnawave_panel_allowed_sources_effective | map('string') | select('match', '^[0-9a-fA-F:.]+\\/([0-9]|[12][0-9]|3[0-2]|1[01][0-9]|12[0-8])$') | list | length) == (remnawave_panel_allowed_sources_effective | length)
+    fail_msg: "remnawave.panel_allowed_sources must be a list of IPv4/IPv6 CIDRs."
+  tags: [remnawave, caddy]
+
+- name: Check UFW status when panel allowed sources are configured
+  ansible.builtin.command: ufw status
+  register: remnawave_caddy_ufw_status
+  changed_when: false
+  when: remnawave_panel_allowed_sources_effective | length > 0
+  tags: [remnawave, caddy]
+
+- name: Ensure UFW is active for panel access control
+  ansible.builtin.assert:
+    that:
+      - remnawave_caddy_ufw_status.rc == 0
+      - "'Status: active' in remnawave_caddy_ufw_status.stdout"
+    fail_msg: "UFW must be active to apply remnawave.panel_allowed_sources on NODE_PORT."
+  when: remnawave_panel_allowed_sources_effective | length > 0
+  tags: [remnawave, caddy]
+
+- name: Allow panel CIDRs to access RemaWave node API port
+  ansible.builtin.command:
+    argv:
+      - ufw
+      - allow
+      - proto
+      - tcp
+      - from
+      - "{{ item }}"
+      - to
+      - any
+      - port
+      - "{{ remnawave_node_port_effective | string }}"
+      - comment
+      - remnawave-panel
+  loop: "{{ remnawave_panel_allowed_sources_effective }}"
+  register: remnawave_caddy_ufw_panel_rules
+  changed_when: >-
+    ('Rule added' in remnawave_caddy_ufw_panel_rules.stdout)
+    or ('Rules updated' in remnawave_caddy_ufw_panel_rules.stdout)
+  failed_when: >-
+    (remnawave_caddy_ufw_panel_rules.rc != 0)
+    and ('Skipping adding existing rule' not in remnawave_caddy_ufw_panel_rules.stdout)
+  when: remnawave_panel_allowed_sources_effective | length > 0
   tags: [remnawave, caddy]
 
 - name: Install Caddy prerequisites

@@ -30,6 +30,7 @@
 - Основные параметры:
   - `remnawave.node_port`
   - `remnawave.node_secret_key`
+  - `remnawave.panel_allowed_sources` (CIDR-список для UFW allow на `node_port`, опционально)
 
 ### `caddy_node`
 - Назначение: TLS decoy для Reality self-steal + health endpoint.
