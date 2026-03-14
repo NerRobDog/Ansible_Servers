@@ -21,3 +21,4 @@ remnawave_caddy_tls_cert_file: ""
 remnawave_caddy_tls_key_file: ""
 remnawave_caddy_local_only: true
 remnawave_caddy_acme_ca: ""
+remnawave_panel_allowed_sources: []
