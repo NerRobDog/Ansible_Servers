@@ -1,10 +1,12 @@
 .DS_Store
 .venv/
+.venv*/
 .ansible/
 __pycache__/
 *.pyc
 hosts.plain.ini
 .env
+.env.test
 
 # Local/operator-only files
 fleet.yml

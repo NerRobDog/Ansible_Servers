@@ -9,13 +9,17 @@
 - Дефолт: включена (`feature_base=true`).
 - Когда выключать: только на хостах с очень специфичным образом ОС.
 
-### `firewall`
-- Назначение: UFW-политика по умолчанию (`deny incoming`, `allow outgoing`) и разрешение только нужных портов.
-- Дефолт: включена (`feature_firewall=true`).
-- Базовые allow-правила:
-  - SSH (`firewall_ssh_port`, обычно 22/tcp)
-  - 443/tcp (Reality/public endpoint)
-- По умолчанию не открывает наружу порт Caddy monitor (`8443`).
+### `firewall_ufw`
+- Назначение: единая UFW-политика для хоста.
+- Требует: `feature_firewall=true`.
+- Основные параметры:
+  - `firewall.ssh_allowed_sources` (CIDR/IP список для SSH на `ansible_port`)
+  - `firewall.extra_allowed_tcp_ports`
+  - `firewall.extra_allowed_udp_ports`
+  - `remnawave.panel_allowed_sources` (CIDR/IP список для доступа панели к `remnawave.node_port`)
+- Политика по умолчанию:
+  - `default deny incoming`, `default allow outgoing`
+  - allow `SSH`, allow `443/tcp`, allow `node_port` только из `panel_allowed_sources`.
 
 ### `docker`
 - Назначение: установка Docker CE и плагинов.
@@ -30,6 +34,7 @@
 - Основные параметры:
   - `remnawave.node_port`
   - `remnawave.node_secret_key`
+  - `remnawave.panel_allowed_sources` (используется ролью `firewall_ufw` для allow к `node_port`)
 
 ### `caddy_node`
 - Назначение: TLS decoy для Reality self-steal + health endpoint.
@@ -55,6 +60,50 @@
 - Основной параметр:
   - `remnawave.ipv6_state` = `enabled|disabled`.
 
+### `monitoring_agent`
+- Назначение: запуск `node_exporter`, `cadvisor` и `promtail` на ноде.
+- Требует: `feature_monitoring_agent=true`.
+- Основные параметры:
+  - `monitoring.agent_bind_address` (по умолчанию `0.0.0.0`)
+  - `monitoring.agent_node_exporter_port` (по умолчанию `9100`)
+  - `monitoring.agent_cadvisor_port` (по умолчанию `8080`)
+  - `monitoring.agent_promtail_enabled` (по умолчанию `true`)
+  - `monitoring.loki_push_url` (если пусто — вычисляется автоматически через stack-host)
+  - `monitoring.labels.country`, `monitoring.labels.role`
+  - `monitoring.agent_acl_enabled` (по умолчанию `false`)
+  - `monitoring.agent_acl_allowed_sources` (CIDR-список разрешённых источников для `9100/8080`)
+- Если `agent_acl_enabled=true`, роль управляет `DOCKER-USER` chain `MONITORING_AGENT_ACL`:
+  - разрешает только `agent_acl_allowed_sources` к exporter-портам;
+  - запрещает остальные подключения к exporter-портам;
+  - при `agent_acl_enabled=false` удаляет эти ACL-правила обратно (по умолчанию).
+
+### `monitoring_stack`
+- Назначение: центральный стек `Prometheus + Alertmanager + Grafana + Loki + Promtail`.
+- Требует: `feature_monitoring_stack=true`.
+- Основные параметры:
+  - `monitoring.stack_bind_address` (по умолчанию `127.0.0.1`)
+  - `monitoring.stack_loki_ingest_bind_address` (по умолчанию `0.0.0.0`)
+  - `monitoring.stack_loki_ingest_allowed_sources` (CIDR allow-list для Loki ingest)
+  - `monitoring.stack_retention_days`
+  - `monitoring.stack_grafana_admin_user`
+  - `monitoring.stack_grafana_admin_password`
+- Telegram alerting (обязателен для stack-host):
+  - `MONITORING_ALERT_TELEGRAM_BOT_TOKEN`
+  - `MONITORING_ALERT_TELEGRAM_CHAT_ID`
+  - `MONITORING_ALERT_TELEGRAM_TOPIC_ID` (опционально)
+- Что делает дополнительно:
+  - включает `alerts.yml` в Prometheus (rule-based alerting);
+  - настраивает Alertmanager routing по severity (`critical|warning|info`);
+  - включает Grafana provisioning (datasources `Prometheus`/`Loki` + встроенные дашборды).
+- Подключение нод:
+  - автоматически берёт хосты с `feature_monitoring_agent=true` из `fleet_hosts`.
+  - скрапит `node_exporter`/`cadvisor` по `ansible_host` и monitoring-портам.
+- Ограничение на флот:
+  - если включены monitoring features, в environment должен быть ровно один `feature_monitoring_stack=true` host.
+- Для single-host схемы (`monitoring_stack` + `monitoring_agent` на одном сервере) используйте:
+  - `monitoring.agent_bind_address: "172.17.0.1"`
+  - `monitoring.stack_bind_address: "127.0.0.1"`
+
 ### `user_shell`
 - Назначение: пользователь, authorized_keys, sudo, shell-окружение.
 - Обычно:
@@ -64,6 +113,7 @@
 ### `ssh_lockdown`
 - Назначение: отключение SSH password auth и root login.
 - Запуск: в режиме `lockdown`.
+- В режиме `clean` выполняется автоматически после bootstrap-pass.
 
 ## Custom roles
 
@@ -87,11 +137,13 @@ hosts:
 ```yaml
 features:
   feature_base: true
-  feature_firewall: true
+  feature_firewall: false
   feature_docker: true
   feature_remnawave_node: false
   feature_caddy_node: false
   feature_node_tuning: false
+  feature_monitoring_agent: false
+  feature_monitoring_stack: false
   feature_user_shell: false
 ```
 

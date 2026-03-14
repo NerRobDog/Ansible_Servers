@@ -1,0 +1,52 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["127.0.0.1:9090"]
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+
+  - job_name: loki
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["loki:3100"]
+
+{% if monitoring_stack_scrape_fleet_agents | bool %}
+  - job_name: monitoring-node-exporter
+{% if monitoring_stack_scrape_hosts | length > 0 %}
+    static_configs:
+{% for host in monitoring_stack_scrape_hosts %}
+{% set host_agent_bind = host.value.monitoring.agent_bind_address | default(monitoring_agent_bind_address) %}
+      - targets: ["{% if host.key == inventory_hostname and host_agent_bind in ['127.0.0.1', 'localhost'] %}host.docker.internal{% elif host_agent_bind not in ['0.0.0.0', '::'] %}{{ host_agent_bind }}{% else %}{{ host.value.ansible_host }}{% endif %}:{{ host.value.monitoring.agent_node_exporter_port | default(monitoring_agent_node_exporter_port) }}"]
+        labels:
+          instance: "{{ host.key }}"
+          country: "{{ host.value.monitoring.labels.country | default('') }}"
+          role: "{{ host.value.monitoring.labels.role | default('node') }}"
+{% endfor %}
+{% else %}
+    static_configs: []
+{% endif %}
+
+  - job_name: monitoring-cadvisor
+{% if monitoring_stack_scrape_hosts | length > 0 %}
+    static_configs:
+{% for host in monitoring_stack_scrape_hosts %}
+{% set host_agent_bind = host.value.monitoring.agent_bind_address | default(monitoring_agent_bind_address) %}
+      - targets: ["{% if host.key == inventory_hostname and host_agent_bind in ['127.0.0.1', 'localhost'] %}host.docker.internal{% elif host_agent_bind not in ['0.0.0.0', '::'] %}{{ host_agent_bind }}{% else %}{{ host.value.ansible_host }}{% endif %}:{{ host.value.monitoring.agent_cadvisor_port | default(monitoring_agent_cadvisor_port) }}"]
+        labels:
+          instance: "{{ host.key }}"
+          country: "{{ host.value.monitoring.labels.country | default('') }}"
+          role: "{{ host.value.monitoring.labels.role | default('node') }}"
+{% endfor %}
+{% else %}
+    static_configs: []
+{% endif %}
+{% endif %}

@@ -1,7 +1,8 @@
 ---
-# Two-server fleet template: Germany + Netherlands.
-# Stack: base + docker + remnawave_node + caddy_node + node_tuning + user_shell.
-# Monitoring feature flags здесь выключены, потому что нет отдельного monitoring_stack host.
+# Three-server fleet template: Germany node + Netherlands node + monitoring server.
+# Stack:
+# - de_node, nl_node: base + docker + remnawave_node + caddy_node + node_tuning + monitoring_agent
+# - monitoring_1: base + docker + monitoring_stack
 #
 # Usage:
 # 1) Fill placeholders below.
@@ -18,19 +19,13 @@ defaults:
     feature_base: true
     feature_firewall: true
     feature_docker: true
-    feature_remnawave_node: true
-    feature_caddy_node: true
-    feature_node_tuning: true
+    feature_remnawave_node: false
+    feature_caddy_node: false
+    feature_node_tuning: false
     feature_monitoring_agent: false
     feature_monitoring_stack: false
     feature_user_shell: true
   remnawave:
-    # Empty = auto:
-    # target_profile_name -> <host_alias>
-    # inbound_tag -> VLESS_<HOST_ALIAS>
-    # target_inbound_tags -> [inbound_tag]
-    # reality_server_name -> caddy_domain
-    # reality_short_id/reality_private_key -> deterministic generation
     node_secret_key: ""
     node_port: 3001
     caddy_domain: ""
@@ -41,24 +36,16 @@ defaults:
     caddy_tls_cert_file: ""
     caddy_tls_key_file: ""
     caddy_acme_ca: ""
-    # panel_node_uuid: "00000000-0000-4000-8000-000000000001"
-    # target_profile_name: "de_node"
-    # inbound_tag: "VLESS_DE_NODE"
-    # target_inbound_tags:
-    #   - "VLESS_DE_NODE"
     reality_target: "127.0.0.1:8443"
-    # reality_short_id: "c0d2ed6aa8460e20"
-    # reality_private_key: "REPLACE_ME"
-    # reality_server_name: "de-node.example.com"
     # panel_allowed_sources:
     #   - "89.23.98.20/32"
+  custom_roles: []
   firewall:
     ssh_allowed_sources:
       - "0.0.0.0/0"
       - "::/0"
     extra_allowed_tcp_ports: []
     extra_allowed_udp_ports: []
-  custom_roles: []
   monitoring:
     agent_bind_address: "0.0.0.0"
     agent_node_exporter_port: 9100
@@ -83,6 +70,12 @@ hosts:
     bootstrap:
       username: root
       password: "GERMANY_SERVER_PASSWORD"
+    features:
+      feature_remnawave_node: true
+      feature_caddy_node: true
+      feature_node_tuning: true
+      feature_monitoring_agent: true
+      feature_monitoring_stack: false
     remnawave:
       node_secret_key: "GERMANY_REMNAWAVE_NODE_SECRET"
       node_port: 3001
@@ -91,37 +84,36 @@ hosts:
       ipv6_state: enabled
       caddy_tls_mode: public
       caddy_local_only: true
-      # Optional: if empty, node name must match host alias (de_node).
+      # Optional if node name in panel differs:
       # panel_node_uuid: "GERMANY_PANEL_NODE_UUID"
       reality_target: "127.0.0.1:8443"
-      # Optional (auto by host alias). Uncomment if you need explicit values:
-      # target_profile_name: "de_node"
-      # inbound_tag: "VLESS_DE_NODE"
-      # target_inbound_tags:
-      #   - "VLESS_DE_NODE"
-      # reality_server_name: "de-node.example.com"
-      # reality_short_id: "7642b35f5570246f"
-      # reality_private_key: "REPLACE_ME"
-      # panel_allowed_sources:
-      #   - "89.23.98.20/32"
-    custom_roles: []
+      panel_allowed_sources:
+        - "89.23.98.20/32"
     monitoring:
       agent_bind_address: "0.0.0.0"
       agent_node_exporter_port: 9100
       agent_cadvisor_port: 8080
-      agent_promtail_enabled: false
+      agent_promtail_enabled: true
       labels:
         country: DE
         role: node
-      # Включайте ACL, если scrape идёт только с фиксированных IP.
-      agent_acl_enabled: false
-      agent_acl_allowed_sources: []
+      # Для приватного scrape включите ACL и укажите IP monitoring_1.
+      # agent_acl_enabled: true
+      # agent_acl_allowed_sources:
+      #   - "MONITORING_SERVER_PUBLIC_IP/32"
+    custom_roles: []
 
   nl_node:
     ansible_host: "NETHERLANDS_PUBLIC_IP"
     bootstrap:
       username: root
       password: "NETHERLANDS_SERVER_PASSWORD"
+    features:
+      feature_remnawave_node: true
+      feature_caddy_node: true
+      feature_node_tuning: true
+      feature_monitoring_agent: true
+      feature_monitoring_stack: false
     remnawave:
       node_secret_key: "NETHERLANDS_REMNAWAVE_NODE_SECRET"
       node_port: 3001
@@ -130,29 +122,54 @@ hosts:
       ipv6_state: enabled
       caddy_tls_mode: public
       caddy_local_only: true
-      # Optional: if empty, node name must match host alias (nl_node).
+      # Optional if node name in panel differs:
       # panel_node_uuid: "NETHERLANDS_PANEL_NODE_UUID"
       reality_target: "127.0.0.1:8443"
-      # Optional (auto by host alias). Uncomment if you need explicit values:
-      # target_profile_name: "nl_node"
-      # inbound_tag: "VLESS_NL_NODE"
-      # target_inbound_tags:
-      #   - "VLESS_NL_NODE"
-      # reality_server_name: "nl-node.example.com"
-      # reality_short_id: "c0d2ed6aa8460e20"
-      # reality_private_key: "REPLACE_ME"
-      # panel_allowed_sources:
-      #   - "89.23.98.20/32"
-    custom_roles: []
+      panel_allowed_sources:
+        - "89.23.98.20/32"
     monitoring:
       agent_bind_address: "0.0.0.0"
       agent_node_exporter_port: 9100
       agent_cadvisor_port: 8080
-      agent_promtail_enabled: false
+      agent_promtail_enabled: true
       labels:
         country: NL
         role: node
-      # Пример строгого режима: scrape разрешён только с DE ноды.
+      # Для приватного scrape включите ACL и укажите IP monitoring_1.
       # agent_acl_enabled: true
       # agent_acl_allowed_sources:
-      #   - "GERMANY_PUBLIC_IP/32"
+      #   - "MONITORING_SERVER_PUBLIC_IP/32"
+    custom_roles: []
+
+  monitoring_1:
+    ansible_host: "MONITORING_SERVER_PUBLIC_IP"
+    bootstrap:
+      username: root
+      password: "MONITORING_SERVER_PASSWORD"
+    features:
+      feature_remnawave_node: false
+      feature_caddy_node: false
+      feature_node_tuning: false
+      feature_monitoring_agent: false
+      feature_monitoring_stack: true
+      feature_user_shell: true
+    monitoring:
+      stack_bind_address: "127.0.0.1"
+      stack_loki_ingest_bind_address: "0.0.0.0"
+      stack_loki_ingest_allowed_sources:
+        - "GERMANY_PUBLIC_IP/32"
+        - "NETHERLANDS_PUBLIC_IP/32"
+      stack_retention_days: 7
+      stack_grafana_admin_user: "admin"
+      stack_grafana_admin_password: "CHANGE_ME_STRONG_GRAFANA_PASSWORD"
+      labels:
+        country: DE
+        role: monitoring
+    custom_roles: []
+
+# Notes:
+# - monitoring_1 scrapes node exporter/cadvisor endpoints from hosts with feature_monitoring_agent=true.
+# - Предпочтительно: monitoring.agent_acl_enabled=true + monitoring.agent_acl_allowed_sources вместо открытых 9100/8080.
+# - For production, strongly change Grafana admin password.
+# - Для Alertmanager->Telegram задайте Environment Secrets:
+#   MONITORING_ALERT_TELEGRAM_BOT_TOKEN, MONITORING_ALERT_TELEGRAM_CHAT_ID, MONITORING_ALERT_TELEGRAM_TOPIC_ID.

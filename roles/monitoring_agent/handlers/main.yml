@@ -1,0 +1,9 @@
+---
+- name: Restart monitoring agent stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_agent_install_path }}"
+    state: present
+    pull: missing
+    recreate: always
+    remove_orphans: true
+  when: monitoring_agent_manage_runtime | bool

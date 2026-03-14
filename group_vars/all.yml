@@ -92,6 +92,7 @@ remnawave_caddy_tls_cert_file: ""
 remnawave_caddy_tls_key_file: ""
 remnawave_caddy_local_only: true
 remnawave_caddy_acme_ca: ""
+remnawave_panel_allowed_sources: []
 
 remnawave_bbr_enabled: true
 remnawave_ipv6_state: enabled
@@ -99,13 +100,60 @@ remnawave_warp_enabled: false
 
 # Fleet-driven feature flags
 feature_base: true
-feature_firewall: true
+feature_firewall: false
 feature_docker: true
 feature_remnawave_node: false
 feature_caddy_node: false
 feature_node_tuning: false
+feature_monitoring_agent: false
+feature_monitoring_stack: false
 feature_user_shell: false
 custom_roles: []
 ssh_lockdown_enabled: false
 fleet_mode: deploy
 fleet_hosts: {}
+force_feature_firewall: false
+
+# Firewall defaults
+firewall_ssh_allowed_sources:
+  - "0.0.0.0/0"
+  - "::/0"
+firewall_extra_allowed_tcp_ports: []
+firewall_extra_allowed_udp_ports: []
+
+# Monitoring defaults
+monitoring_agent_bind_address: "0.0.0.0"
+monitoring_agent_node_exporter_port: 9100
+monitoring_agent_cadvisor_port: 8080
+monitoring_agent_enable_node_exporter: true
+monitoring_agent_enable_cadvisor: true
+monitoring_agent_promtail_enabled: true
+monitoring_agent_promtail_image: grafana/promtail:3.1.1
+monitoring_agent_manage_runtime: true
+monitoring_agent_install_path: /opt/monitoring-agent
+monitoring_loki_push_url: ""
+monitoring_labels_country: ""
+monitoring_labels_role: node
+monitoring_agent_acl_enabled: false
+monitoring_agent_acl_allowed_sources: []
+monitoring_agent_acl_chain: MONITORING_AGENT_ACL
+monitoring_agent_acl_cleanup_when_disabled: true
+
+monitoring_stack_install_path: /opt/monitoring-stack
+monitoring_stack_manage_runtime: true
+monitoring_stack_retention_days: 7
+monitoring_stack_grafana_admin_user: admin
+monitoring_stack_grafana_admin_password: change_me
+monitoring_stack_prometheus_port: 9090
+monitoring_stack_alertmanager_port: 9093
+monitoring_stack_grafana_port: 3000
+monitoring_stack_loki_port: 3100
+monitoring_stack_bind_address: "127.0.0.1"
+monitoring_stack_loki_ingest_bind_address: "0.0.0.0"
+monitoring_stack_loki_ingest_allowed_sources: []
+monitoring_stack_loki_ingest_acl_chain: MONITORING_STACK_LOKI_ACL
+monitoring_stack_loki_ingest_acl_cleanup_when_disabled: true
+monitoring_stack_alert_telegram_bot_token: ""
+monitoring_stack_alert_telegram_chat_id: ""
+monitoring_stack_alert_telegram_topic_id: ""
+monitoring_stack_scrape_fleet_agents: true

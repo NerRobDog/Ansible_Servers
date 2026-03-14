@@ -12,12 +12,20 @@ except Exception:  # pragma: no cover - optional dependency check
 
 FEATURE_DEFAULTS = {
     "feature_base": True,
-    "feature_firewall": True,
+    "feature_firewall": False,
     "feature_docker": True,
     "feature_remnawave_node": False,
     "feature_caddy_node": False,
     "feature_node_tuning": False,
+    "feature_monitoring_agent": False,
+    "feature_monitoring_stack": False,
     "feature_user_shell": False,
+}
+
+FIREWALL_DEFAULTS = {
+    "ssh_allowed_sources": ["0.0.0.0/0", "::/0"],
+    "extra_allowed_tcp_ports": [],
+    "extra_allowed_udp_ports": [],
 }
 
 REMNAWAVE_DEFAULTS = {
@@ -34,6 +42,27 @@ REMNAWAVE_DEFAULTS = {
     "panel_node_uuid": "",
     "target_profile_name": "",
     "target_inbound_tags": [],
+}
+
+MONITORING_DEFAULTS = {
+    "agent_bind_address": "0.0.0.0",
+    "agent_node_exporter_port": 9100,
+    "agent_cadvisor_port": 8080,
+    "agent_promtail_enabled": True,
+    "agent_acl_enabled": False,
+    "agent_acl_allowed_sources": [],
+    "loki_push_url": "",
+    "labels": {
+        "country": "",
+        "role": "node",
+    },
+    "stack_retention_days": 7,
+    "stack_bind_address": "127.0.0.1",
+    "stack_loki_port": 3100,
+    "stack_loki_ingest_bind_address": "0.0.0.0",
+    "stack_loki_ingest_allowed_sources": [],
+    "stack_grafana_admin_user": "admin",
+    "stack_grafana_admin_password": "change_me",
 }
 
 
@@ -176,6 +205,127 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
         if not remnawave_cfg["caddy_tls_cert_file"].strip() or not remnawave_cfg["caddy_tls_key_file"].strip():
             fail(f"Host '{alias}' remnawave.caddy_tls_mode=files requires caddy_tls_cert_file and caddy_tls_key_file.")
 
+    default_monitoring = defaults.get("monitoring", {})
+    if default_monitoring is None:
+        default_monitoring = {}
+    if not isinstance(default_monitoring, dict):
+        fail("defaults.monitoring must be an object when provided.")
+    host_monitoring = host_cfg.get("monitoring", {}) or {}
+    if not isinstance(host_monitoring, dict):
+        fail(f"Host '{alias}' monitoring must be an object when provided.")
+    monitoring_cfg = MONITORING_DEFAULTS.copy()
+    monitoring_cfg.update(default_monitoring)
+    monitoring_cfg.update(host_monitoring)
+    try:
+        monitoring_cfg["agent_node_exporter_port"] = int(monitoring_cfg["agent_node_exporter_port"])
+        monitoring_cfg["agent_cadvisor_port"] = int(monitoring_cfg["agent_cadvisor_port"])
+        monitoring_cfg["stack_retention_days"] = int(monitoring_cfg["stack_retention_days"])
+        monitoring_cfg["stack_loki_port"] = int(monitoring_cfg["stack_loki_port"])
+    except Exception:
+        fail(f"Host '{alias}' monitoring ports/retention must be numbers.")
+    for key in ("agent_node_exporter_port", "agent_cadvisor_port", "stack_loki_port"):
+        if not (1 <= monitoring_cfg[key] <= 65535):
+            fail(f"Host '{alias}' monitoring.{key} must be in range 1..65535.")
+    if monitoring_cfg["stack_retention_days"] < 1:
+        fail(f"Host '{alias}' monitoring.stack_retention_days must be >= 1.")
+    monitoring_cfg["agent_bind_address"] = str(monitoring_cfg.get("agent_bind_address", "0.0.0.0") or "0.0.0.0")
+    monitoring_cfg["agent_promtail_enabled"] = parse_bool(monitoring_cfg.get("agent_promtail_enabled", True))
+    monitoring_cfg["agent_acl_enabled"] = parse_bool(monitoring_cfg.get("agent_acl_enabled", False))
+    acl_sources = monitoring_cfg.get("agent_acl_allowed_sources", [])
+    if acl_sources is None:
+        acl_sources = []
+    if not isinstance(acl_sources, list):
+        fail(f"Host '{alias}' monitoring.agent_acl_allowed_sources must be a list.")
+    normalized_acl_sources = []
+    for source in acl_sources:
+        source_text = str(source).strip()
+        if not source_text:
+            fail(f"Host '{alias}' monitoring.agent_acl_allowed_sources contains empty source value.")
+        normalized_acl_sources.append(source_text)
+    monitoring_cfg["agent_acl_allowed_sources"] = normalized_acl_sources
+    monitoring_cfg["loki_push_url"] = str(monitoring_cfg.get("loki_push_url", "") or "").strip()
+    labels_cfg = MONITORING_DEFAULTS["labels"].copy()
+    defaults_labels = default_monitoring.get("labels", {})
+    host_labels = host_monitoring.get("labels", {})
+    if defaults_labels is None:
+        defaults_labels = {}
+    if host_labels is None:
+        host_labels = {}
+    if not isinstance(defaults_labels, dict):
+        fail("defaults.monitoring.labels must be an object when provided.")
+    if not isinstance(host_labels, dict):
+        fail(f"Host '{alias}' monitoring.labels must be an object when provided.")
+    labels_cfg.update(defaults_labels)
+    labels_cfg.update(host_labels)
+    monitoring_cfg["labels"] = {
+        "country": str(labels_cfg.get("country", "") or "").strip(),
+        "role": str(labels_cfg.get("role", "node") or "node").strip(),
+    }
+    monitoring_cfg["stack_bind_address"] = str(monitoring_cfg.get("stack_bind_address", "127.0.0.1") or "127.0.0.1")
+    monitoring_cfg["stack_loki_ingest_bind_address"] = str(
+        monitoring_cfg.get("stack_loki_ingest_bind_address", "0.0.0.0") or "0.0.0.0"
+    )
+    loki_sources = monitoring_cfg.get("stack_loki_ingest_allowed_sources", [])
+    if loki_sources is None:
+        loki_sources = []
+    if not isinstance(loki_sources, list):
+        fail(f"Host '{alias}' monitoring.stack_loki_ingest_allowed_sources must be a list.")
+    normalized_loki_sources = []
+    for source in loki_sources:
+        source_text = str(source).strip()
+        if not source_text:
+            fail(f"Host '{alias}' monitoring.stack_loki_ingest_allowed_sources contains empty source value.")
+        normalized_loki_sources.append(source_text)
+    monitoring_cfg["stack_loki_ingest_allowed_sources"] = normalized_loki_sources
+    monitoring_cfg["stack_grafana_admin_user"] = str(
+        monitoring_cfg.get("stack_grafana_admin_user", "admin") or "admin"
+    )
+    monitoring_cfg["stack_grafana_admin_password"] = str(
+        monitoring_cfg.get("stack_grafana_admin_password", "change_me") or "change_me"
+    )
+
+    default_firewall = defaults.get("firewall", {})
+    if default_firewall is None:
+        default_firewall = {}
+    if not isinstance(default_firewall, dict):
+        fail("defaults.firewall must be an object when provided.")
+    host_firewall = host_cfg.get("firewall", {}) or {}
+    if not isinstance(host_firewall, dict):
+        fail(f"Host '{alias}' firewall must be an object when provided.")
+    firewall_cfg = FIREWALL_DEFAULTS.copy()
+    firewall_cfg.update(default_firewall)
+    firewall_cfg.update(host_firewall)
+
+    ssh_allowed_sources = firewall_cfg.get("ssh_allowed_sources", [])
+    if ssh_allowed_sources is None:
+        ssh_allowed_sources = []
+    if not isinstance(ssh_allowed_sources, list):
+        fail(f"Host '{alias}' firewall.ssh_allowed_sources must be a list.")
+    normalized_ssh_allowed_sources = []
+    for source in ssh_allowed_sources:
+        source_text = str(source).strip()
+        if not source_text:
+            fail(f"Host '{alias}' firewall.ssh_allowed_sources contains empty source value.")
+        normalized_ssh_allowed_sources.append(source_text)
+    firewall_cfg["ssh_allowed_sources"] = normalized_ssh_allowed_sources
+
+    for key in ("extra_allowed_tcp_ports", "extra_allowed_udp_ports"):
+        values = firewall_cfg.get(key, [])
+        if values is None:
+            values = []
+        if not isinstance(values, list):
+            fail(f"Host '{alias}' firewall.{key} must be a list.")
+        normalized_ports = []
+        for value in values:
+            try:
+                port = int(value)
+            except Exception:
+                fail(f"Host '{alias}' firewall.{key} contains invalid port: {value!r}")
+            if not (1 <= port <= 65535):
+                fail(f"Host '{alias}' firewall.{key} contains out-of-range port: {port}")
+            normalized_ports.append(port)
+        firewall_cfg[key] = normalized_ports
+
     custom_roles = host_cfg.get("custom_roles", defaults.get("custom_roles", []))
     if custom_roles is None:
         custom_roles = []
@@ -195,6 +345,8 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
         },
         "features": normalized_features,
         "remnawave": remnawave_cfg,
+        "monitoring": monitoring_cfg,
+        "firewall": firewall_cfg,
         "custom_roles": custom_roles,
     }
     return normalized
@@ -232,10 +384,43 @@ def main() -> None:
         alias: normalize_host(alias, cfg, defaults)
         for alias, cfg in hosts_raw.items()
     }
+    monitoring_hosts = [
+        alias
+        for alias, cfg in normalized_hosts.items()
+        if cfg["features"]["feature_monitoring_agent"] or cfg["features"]["feature_monitoring_stack"]
+    ]
+    stack_hosts = [
+        alias
+        for alias, cfg in normalized_hosts.items()
+        if cfg["features"]["feature_monitoring_stack"]
+    ]
+    if monitoring_hosts and len(stack_hosts) != 1:
+        fail(
+            "Exactly one host with features.feature_monitoring_stack=true is required when monitoring features are enabled."
+        )
+
+    stack_host_alias = stack_hosts[0] if stack_hosts else ""
+    stack_host_address = normalized_hosts[stack_host_alias]["ansible_host"] if stack_host_alias else ""
+    stack_loki_port = normalized_hosts[stack_host_alias]["monitoring"]["stack_loki_port"] if stack_host_alias else 3100
+    for alias, cfg in normalized_hosts.items():
+        if cfg["monitoring"]["loki_push_url"]:
+            continue
+        if not stack_host_alias:
+            cfg["monitoring"]["loki_push_url"] = ""
+            continue
+        if (
+            alias == stack_host_alias
+            and cfg["monitoring"]["stack_loki_ingest_bind_address"] in {"127.0.0.1", "localhost"}
+        ):
+            cfg["monitoring"]["loki_push_url"] = f"http://127.0.0.1:{stack_loki_port}/loki/api/v1/push"
+        else:
+            cfg["monitoring"]["loki_push_url"] = f"http://{stack_host_address}:{stack_loki_port}/loki/api/v1/push"
 
     runtime_vars = {
         "fleet_mode": args.mode,
         "fleet_hosts": normalized_hosts,
+        "monitoring_stack_host_alias": stack_host_alias,
+        "monitoring_stack_host_address": stack_host_address,
         "remnawave_runtime_host_vars": {
             alias: {
                 "remnawave_node_secret_key": cfg["remnawave"]["node_secret_key"],
@@ -251,6 +436,25 @@ def main() -> None:
                 "remnawave_panel_node_uuid": cfg["remnawave"]["panel_node_uuid"],
                 "remnawave_target_profile_name": cfg["remnawave"]["target_profile_name"],
                 "remnawave_target_inbound_tags": cfg["remnawave"]["target_inbound_tags"],
+                "monitoring_agent_bind_address": cfg["monitoring"]["agent_bind_address"],
+                "monitoring_agent_node_exporter_port": cfg["monitoring"]["agent_node_exporter_port"],
+                "monitoring_agent_cadvisor_port": cfg["monitoring"]["agent_cadvisor_port"],
+                "monitoring_agent_promtail_enabled": cfg["monitoring"]["agent_promtail_enabled"],
+                "monitoring_agent_acl_enabled": cfg["monitoring"]["agent_acl_enabled"],
+                "monitoring_agent_acl_allowed_sources": cfg["monitoring"]["agent_acl_allowed_sources"],
+                "monitoring_loki_push_url": cfg["monitoring"]["loki_push_url"],
+                "monitoring_labels_country": cfg["monitoring"]["labels"]["country"],
+                "monitoring_labels_role": cfg["monitoring"]["labels"]["role"],
+                "monitoring_stack_retention_days": cfg["monitoring"]["stack_retention_days"],
+                "monitoring_stack_bind_address": cfg["monitoring"]["stack_bind_address"],
+                "monitoring_stack_loki_port": cfg["monitoring"]["stack_loki_port"],
+                "monitoring_stack_loki_ingest_bind_address": cfg["monitoring"]["stack_loki_ingest_bind_address"],
+                "monitoring_stack_loki_ingest_allowed_sources": cfg["monitoring"]["stack_loki_ingest_allowed_sources"],
+                "monitoring_stack_grafana_admin_user": cfg["monitoring"]["stack_grafana_admin_user"],
+                "monitoring_stack_grafana_admin_password": cfg["monitoring"]["stack_grafana_admin_password"],
+                "firewall_ssh_allowed_sources": cfg["firewall"]["ssh_allowed_sources"],
+                "firewall_extra_allowed_tcp_ports": cfg["firewall"]["extra_allowed_tcp_ports"],
+                "firewall_extra_allowed_udp_ports": cfg["firewall"]["extra_allowed_udp_ports"],
             }
             for alias, cfg in normalized_hosts.items()
         },

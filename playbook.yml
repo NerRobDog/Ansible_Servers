@@ -17,14 +17,76 @@
       when: (fleet_hosts | default({})) | length > 0
       tags: [always]
 
+    - name: Build monitoring host summary from fleet config
+      ansible.builtin.set_fact:
+        monitoring_hosts_from_fleet: >-
+          {{
+            (
+              (
+                (fleet_hosts | default({}) | dict2items)
+                | selectattr('value.features', 'defined')
+                | selectattr('value.features', 'mapping')
+                | selectattr('value.features.feature_monitoring_agent', 'defined')
+                | selectattr('value.features.feature_monitoring_agent')
+                | map(attribute='key')
+                | list
+              )
+              +
+              (
+                (fleet_hosts | default({}) | dict2items)
+                | selectattr('value.features', 'defined')
+                | selectattr('value.features', 'mapping')
+                | selectattr('value.features.feature_monitoring_stack', 'defined')
+                | selectattr('value.features.feature_monitoring_stack')
+                | map(attribute='key')
+                | list
+              )
+            ) | unique
+          }}
+        monitoring_stack_hosts_from_fleet: >-
+          {{
+            (fleet_hosts | default({}) | dict2items)
+            | selectattr('value.features', 'defined')
+            | selectattr('value.features', 'mapping')
+            | selectattr('value.features.feature_monitoring_stack', 'defined')
+            | selectattr('value.features.feature_monitoring_stack')
+            | map(attribute='key')
+            | list
+          }}
+      when:
+        - (fleet_hosts | default({})) | length > 0
+        - inventory_hostname == ansible_play_hosts_all[0]
+      changed_when: false
+      tags: [always]
+
+    - name: Assert exactly one monitoring stack host when monitoring is enabled
+      ansible.builtin.assert:
+        that:
+          - monitoring_stack_hosts_from_fleet | length == 1
+        fail_msg: >-
+          Exactly one host with features.feature_monitoring_stack=true is required when monitoring features are enabled.
+      when:
+        - (fleet_hosts | default({})) | length > 0
+        - monitoring_hosts_from_fleet | default([]) | length > 0
+        - inventory_hostname == ansible_play_hosts_all[0]
+      tags: [always]
+
     - name: Resolve effective feature flags
       ansible.builtin.set_fact:
         effective_feature_base: "{{ fleet_host_cfg.get('features', {}).get('feature_base', feature_base) | bool }}"
-        effective_feature_firewall: "{{ fleet_host_cfg.get('features', {}).get('feature_firewall', feature_firewall) | bool }}"
+        effective_feature_firewall: >-
+          {{
+            (force_feature_firewall | bool)
+            or (fleet_host_cfg.get('features', {}).get('feature_firewall', feature_firewall) | bool)
+          }}
         effective_feature_docker: "{{ fleet_host_cfg.get('features', {}).get('feature_docker', feature_docker) | bool }}"
         effective_feature_remnawave_node: "{{ fleet_host_cfg.get('features', {}).get('feature_remnawave_node', feature_remnawave_node) | bool }}"
         effective_feature_caddy_node: "{{ fleet_host_cfg.get('features', {}).get('feature_caddy_node', feature_caddy_node) | bool }}"
         effective_feature_node_tuning: "{{ fleet_host_cfg.get('features', {}).get('feature_node_tuning', feature_node_tuning) | bool }}"
+        effective_feature_monitoring_agent: >-
+          {{ fleet_host_cfg.get('features', {}).get('feature_monitoring_agent', feature_monitoring_agent) | bool }}
+        effective_feature_monitoring_stack: >-
+          {{ fleet_host_cfg.get('features', {}).get('feature_monitoring_stack', feature_monitoring_stack) | bool }}
         effective_feature_user_shell: >-
           {{
             (fleet_mode_effective == 'bootstrap')
@@ -51,6 +113,86 @@
         remnawave_caddy_domain: "{{ fleet_host_cfg.get('remnawave', {}).get('caddy_domain', remnawave_caddy_domain) }}"
         remnawave_caddy_monitor_port: "{{ fleet_host_cfg.get('remnawave', {}).get('caddy_monitor_port', remnawave_caddy_monitor_port) }}"
         remnawave_ipv6_state: "{{ fleet_host_cfg.get('remnawave', {}).get('ipv6_state', remnawave_ipv6_state) }}"
+        remnawave_panel_allowed_sources: >-
+          {{ fleet_host_cfg.get('remnawave', {}).get('panel_allowed_sources', remnawave_panel_allowed_sources) }}
+        monitoring_agent_bind_address: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_bind_address', monitoring_agent_bind_address) }}"
+        monitoring_agent_node_exporter_port: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_node_exporter_port', monitoring_agent_node_exporter_port) }}"
+        monitoring_agent_cadvisor_port: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_cadvisor_port', monitoring_agent_cadvisor_port) }}"
+        monitoring_agent_promtail_enabled: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_promtail_enabled', monitoring_agent_promtail_enabled) }}"
+        monitoring_agent_acl_enabled: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_acl_enabled', monitoring_agent_acl_enabled) }}"
+        monitoring_agent_acl_allowed_sources: >-
+          {{ fleet_host_cfg.get('monitoring', {}).get('agent_acl_allowed_sources', monitoring_agent_acl_allowed_sources) }}
+        monitoring_loki_push_url: "{{ fleet_host_cfg.get('monitoring', {}).get('loki_push_url', monitoring_loki_push_url) }}"
+        monitoring_labels_country: "{{ fleet_host_cfg.get('monitoring', {}).get('labels', {}).get('country', monitoring_labels_country) }}"
+        monitoring_labels_role: "{{ fleet_host_cfg.get('monitoring', {}).get('labels', {}).get('role', monitoring_labels_role) }}"
+        monitoring_stack_retention_days: "{{ fleet_host_cfg.get('monitoring', {}).get('stack_retention_days', monitoring_stack_retention_days) }}"
+        monitoring_stack_bind_address: "{{ fleet_host_cfg.get('monitoring', {}).get('stack_bind_address', monitoring_stack_bind_address) }}"
+        monitoring_stack_loki_port: "{{ fleet_host_cfg.get('monitoring', {}).get('stack_loki_port', monitoring_stack_loki_port) }}"
+        monitoring_stack_loki_ingest_bind_address: >-
+          {{ fleet_host_cfg.get('monitoring', {}).get('stack_loki_ingest_bind_address', monitoring_stack_loki_ingest_bind_address) }}
+        monitoring_stack_loki_ingest_allowed_sources: >-
+          {{ fleet_host_cfg.get('monitoring', {}).get('stack_loki_ingest_allowed_sources', monitoring_stack_loki_ingest_allowed_sources) }}
+        monitoring_stack_grafana_admin_user: >-
+          {{ fleet_host_cfg.get('monitoring', {}).get('stack_grafana_admin_user', monitoring_stack_grafana_admin_user) }}
+        monitoring_stack_grafana_admin_password: >-
+          {{ fleet_host_cfg.get('monitoring', {}).get('stack_grafana_admin_password', monitoring_stack_grafana_admin_password) }}
+        firewall_ssh_allowed_sources: >-
+          {{ fleet_host_cfg.get('firewall', {}).get('ssh_allowed_sources', firewall_ssh_allowed_sources) }}
+        firewall_extra_allowed_tcp_ports: >-
+          {{ fleet_host_cfg.get('firewall', {}).get('extra_allowed_tcp_ports', firewall_extra_allowed_tcp_ports) }}
+        firewall_extra_allowed_udp_ports: >-
+          {{ fleet_host_cfg.get('firewall', {}).get('extra_allowed_udp_ports', firewall_extra_allowed_udp_ports) }}
+      changed_when: false
+      tags: [always]
+
+    - name: Resolve monitoring stack host alias from fleet config
+      ansible.builtin.set_fact:
+        monitoring_stack_host_alias_effective: >-
+          {{
+            (fleet_hosts | default({}) | dict2items)
+            | selectattr('value.features', 'defined')
+            | selectattr('value.features', 'mapping')
+            | selectattr('value.features.feature_monitoring_stack', 'defined')
+            | selectattr('value.features.feature_monitoring_stack')
+            | map(attribute='key')
+            | list
+            | first
+            | default('') }}
+      when: (fleet_hosts | default({})) | length > 0
+      changed_when: false
+      tags: [always]
+
+    - name: Resolve monitoring stack host address from fleet config
+      ansible.builtin.set_fact:
+        monitoring_stack_host_address_effective: >-
+          {{
+            (fleet_hosts | default({})).get(monitoring_stack_host_alias_effective, {}).get('ansible_host', '')
+          }}
+      when: (fleet_hosts | default({})) | length > 0
+      changed_when: false
+      tags: [always]
+
+    - name: Auto-resolve Loki push URL when omitted
+      ansible.builtin.set_fact:
+        monitoring_loki_push_url: >-
+          {{
+            (
+              "http://127.0.0.1:" ~ (monitoring_stack_loki_port | string) ~ "/loki/api/v1/push"
+            )
+            if
+            (
+              inventory_hostname == monitoring_stack_host_alias_effective
+              and (monitoring_stack_loki_ingest_bind_address | string) in ['127.0.0.1', 'localhost']
+            )
+            else
+            (
+              "http://" ~ monitoring_stack_host_address_effective ~ ":" ~ (monitoring_stack_loki_port | string) ~ "/loki/api/v1/push"
+            )
+          }}
+      when:
+        - (fleet_hosts | default({})) | length > 0
+        - monitoring_loki_push_url | trim | length == 0
+        - monitoring_stack_host_alias_effective | length > 0
       changed_when: false
       tags: [always]
 
@@ -85,13 +227,21 @@
       when: effective_feature_base | bool
       tags: [base]
 
-    - role: firewall
-      when: effective_feature_firewall | bool and (firewall_enabled | bool)
-      tags: [firewall]
+    - role: firewall_ufw
+      when: effective_feature_firewall | bool
+      tags: [firewall, ufw]
 
     - role: docker
       when: effective_feature_docker | bool
       tags: [docker]
+
+    - role: monitoring_agent
+      when: effective_feature_monitoring_agent | bool
+      tags: [monitoring, metrics, agent]
+
+    - role: monitoring_stack
+      when: effective_feature_monitoring_stack | bool
+      tags: [monitoring, metrics, grafana, prometheus, loki]
 
     - role: remnawave_node
       when: effective_feature_remnawave_node | bool

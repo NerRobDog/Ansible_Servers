@@ -1,0 +1,33 @@
+{% raw %}
+{{ define "telegram.header" -}}
+{{- $status := .Status | toUpper -}}
+{{- $severity := or (index .CommonLabels "severity") "info" -}}
+[{{ $status }}][{{ $severity | toUpper }}] {{ .CommonLabels.alertname }}
+{{- end }}
+
+{{ define "telegram.body" -}}
+Host: {{ with index .CommonLabels "instance" }}{{ . }}{{ else }}n/a{{ end }}
+Country: {{ with index .CommonLabels "country" }}{{ . }}{{ else }}n/a{{ end }}
+Role: {{ with index .CommonLabels "role" }}{{ . }}{{ else }}n/a{{ end }}
+Summary: {{ with index .CommonAnnotations "summary" }}{{ . }}{{ end }}
+Description: {{ with index .CommonAnnotations "description" }}{{ . }}{{ end }}
+{{- if gt (len .Alerts) 1 }}
+Alerts: {{ len .Alerts }}
+{{- end }}
+{{- end }}
+
+{{ define "telegram.critical.message" -}}
+[CRIT] {{ template "telegram.header" . }}
+{{ template "telegram.body" . }}
+{{- end }}
+
+{{ define "telegram.warning.message" -}}
+[WARN] {{ template "telegram.header" . }}
+{{ template "telegram.body" . }}
+{{- end }}
+
+{{ define "telegram.info.message" -}}
+[INFO] {{ template "telegram.header" . }}
+{{ template "telegram.body" . }}
+{{- end }}
+{% endraw %}

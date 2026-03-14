@@ -17,6 +17,7 @@ on:
           - bootstrap
           - deploy
           - lockdown
+          - clean
       limit:
         description: Host aliases list (comma-separated) or all
         required: false
@@ -110,18 +111,38 @@ jobs:
           MODE: ${{ inputs.mode }}
           REMNAWAVE_API_ENDPOINT_TEMPLATE: ${{ vars.REMNAWAVE_API_ENDPOINT_TEMPLATE }}
         run: |
-          .github/scripts/render-fleet-runtime.py \
-            --fleet-config .ansible/runtime/fleet_config.yaml \
-            --mode "${MODE}" \
-            --inventory-out .ansible/runtime/hosts.ini \
-            --vars-out .ansible/runtime/runtime_vars.json \
-            --bootstrap-out .ansible/runtime/bootstrap_map.json
+          runtime_var_files=()
+          if [[ "${MODE}" == "clean" ]]; then
+            .github/scripts/render-fleet-runtime.py \
+              --fleet-config .ansible/runtime/fleet_config.yaml \
+              --mode "bootstrap" \
+              --inventory-out .ansible/runtime/hosts.bootstrap.ini \
+              --vars-out .ansible/runtime/runtime_vars.bootstrap.json \
+              --bootstrap-out .ansible/runtime/bootstrap_map.json
+            .github/scripts/render-fleet-runtime.py \
+              --fleet-config .ansible/runtime/fleet_config.yaml \
+              --mode "lockdown" \
+              --inventory-out .ansible/runtime/hosts.ini \
+              --vars-out .ansible/runtime/runtime_vars.json \
+              --bootstrap-out .ansible/runtime/bootstrap_map.lockdown.json
+            runtime_var_files+=(.ansible/runtime/runtime_vars.bootstrap.json .ansible/runtime/runtime_vars.json)
+          else
+            .github/scripts/render-fleet-runtime.py \
+              --fleet-config .ansible/runtime/fleet_config.yaml \
+              --mode "${MODE}" \
+              --inventory-out .ansible/runtime/hosts.ini \
+              --vars-out .ansible/runtime/runtime_vars.json \
+              --bootstrap-out .ansible/runtime/bootstrap_map.json
+            runtime_var_files+=(.ansible/runtime/runtime_vars.json)
+          fi
           if [[ -n "${REMNAWAVE_API_ENDPOINT_TEMPLATE}" ]]; then
-            jq \
-              --arg endpoint "${REMNAWAVE_API_ENDPOINT_TEMPLATE}" \
-              '. + {remnawave_api_endpoint_template: $endpoint}' \
-              .ansible/runtime/runtime_vars.json > .ansible/runtime/runtime_vars.tmp.json
-            mv .ansible/runtime/runtime_vars.tmp.json .ansible/runtime/runtime_vars.json
+            for vars_file in "${runtime_var_files[@]}"; do
+              jq \
+                --arg endpoint "${REMNAWAVE_API_ENDPOINT_TEMPLATE}" \
+                '. + {remnawave_api_endpoint_template: $endpoint}' \
+                "${vars_file}" > "${vars_file}.tmp"
+              mv "${vars_file}.tmp" "${vars_file}"
+            done
           fi
 
       - name: Decode profile placeholder vars
@@ -206,27 +227,53 @@ jobs:
           : > ~/.ssh/known_hosts
           awk '
             /^[^[]/ {
+              alias=$1;
               host="";
               port="22";
               for (i=1; i<=NF; i++) {
                 if ($i ~ /^ansible_host=/) { split($i, a, "="); host=a[2]; }
                 if ($i ~ /^ansible_port=/) { split($i, a, "="); port=a[2]; }
               }
-              if (host != "") { print host " " port; }
+              if (host != "") { print alias " " host " " port; }
             }
-          ' .ansible/runtime/hosts.ini | sort -u > .ansible/runtime/host_ports.txt
-          if [[ ! -s .ansible/runtime/host_ports.txt ]]; then
+          ' .ansible/runtime/hosts.ini | sort -u > .ansible/runtime/host_targets.txt
+          if [[ ! -s .ansible/runtime/host_targets.txt ]]; then
             echo "No hosts were generated from fleet config." >&2
             exit 1
           fi
-          while read -r host port; do
-            ssh-keyscan -p "${port}" -H "${host}" >> ~/.ssh/known_hosts 2>/dev/null
-          done < .ansible/runtime/host_ports.txt
+          failed_targets=""
+          while read -r alias host port; do
+            success=0
+            log_file=".ansible/runtime/ssh-keyscan-${alias}.log"
+            : > "${log_file}"
+            for attempt in 1 2 3; do
+              if ssh-keyscan -T 10 -t ed25519,ecdsa,rsa -p "${port}" -H "${host}" >> ~/.ssh/known_hosts 2>>"${log_file}"; then
+                success=1
+                break
+              fi
+              sleep 2
+            done
+
+            if [[ "${success}" -ne 1 ]]; then
+              echo "ssh-keyscan failed for ${alias} (${host}:${port})" >&2
+              if [[ -s "${log_file}" ]]; then
+                sed -n '1,120p' "${log_file}" >&2
+              fi
+              failed_targets="${failed_targets}${alias} (${host}:${port})"$'\n'
+            fi
+          done < .ansible/runtime/host_targets.txt
+
+          if [[ -n "${failed_targets}" ]]; then
+            echo "Failed to collect known_hosts for:" >&2
+            printf '%s' "${failed_targets}" >&2
+            exit 1
+          fi
+
           sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
       - name: Bootstrap hosts by password and copy SSH key
-        if: ${{ inputs.mode == 'bootstrap' }}
+        if: ${{ inputs.mode == 'bootstrap' || inputs.mode == 'clean' }}
         env:
           LIMIT: ${{ inputs.limit }}
         run: |
@@ -283,21 +330,61 @@ jobs:
           MODE: ${{ inputs.mode }}
           RW_PANEL_API_TOKEN: ${{ secrets.RW_PANEL_API_TOKEN }}
           REMNAWAVE_API_ENDPOINT_TEMPLATE: ${{ vars.REMNAWAVE_API_ENDPOINT_TEMPLATE }}
+          MONITORING_ALERT_TELEGRAM_BOT_TOKEN: ${{ secrets.MONITORING_ALERT_TELEGRAM_BOT_TOKEN }}
+          MONITORING_ALERT_TELEGRAM_CHAT_ID: ${{ secrets.MONITORING_ALERT_TELEGRAM_CHAT_ID }}
+          MONITORING_ALERT_TELEGRAM_TOPIC_ID: ${{ secrets.MONITORING_ALERT_TELEGRAM_TOPIC_ID }}
         run: |
-          cmd=(ansible-playbook -i .ansible/runtime/hosts.ini playbook.yml --limit "${LIMIT}" --extra-vars @.ansible/runtime/runtime_vars.json)
-          if [[ -n "${TAGS}" ]]; then
-            cmd+=(--tags "${TAGS}")
+          set -euo pipefail
+
+          run_pass() {
+            local inventory_file="$1"
+            local vars_file="$2"
+            local fleet_mode_override="$3"
+            local force_firewall="$4"
+            local output_log="${5:-}"
+            local mode_override_json=""
+            mode_override_json="$(jq -cn \
+              --arg fleet_mode "${fleet_mode_override}" \
+              --argjson force_feature_firewall "${force_firewall}" \
+              '{fleet_mode: $fleet_mode, force_feature_firewall: $force_feature_firewall}')"
+
+            cmd=(ansible-playbook -i "${inventory_file}" playbook.yml --limit "${LIMIT}" --extra-vars @"${vars_file}" --extra-vars "${mode_override_json}")
+            if [[ -n "${TAGS}" ]]; then
+              cmd+=(--tags "${TAGS}")
+            fi
+            if [[ "${CHECK_MODE}" == "true" ]]; then
+              cmd+=(--check --diff)
+            fi
+            if [[ -f .ansible/runtime/vault_pass.txt ]]; then
+              cmd+=(--vault-id "secrets@.ansible/runtime/vault_pass.txt")
+            fi
+
+            if [[ -n "${output_log}" ]]; then
+              "${cmd[@]}" | tee "${output_log}"
+            else
+              "${cmd[@]}"
+            fi
+          }
+
+          if [[ "${MODE}" == "clean" ]]; then
+            if [[ "${CHECK_MODE}" == "true" ]]; then
+              echo "check_mode=true is not supported for mode=clean." >&2
+              exit 1
+            fi
+
+            run_pass .ansible/runtime/hosts.bootstrap.ini .ansible/runtime/runtime_vars.bootstrap.json bootstrap true
+            run_pass .ansible/runtime/hosts.ini .ansible/runtime/runtime_vars.json lockdown true
+            run_pass .ansible/runtime/hosts.ini .ansible/runtime/runtime_vars.json lockdown true .ansible/runtime/idempotence-lockdown.log
+            .github/scripts/assert-ansible-idempotent.py \
+              --log .ansible/runtime/idempotence-lockdown.log \
+              --inventory .ansible/runtime/hosts.ini \
+              --limit "${LIMIT}"
+          else
+            run_pass .ansible/runtime/hosts.ini .ansible/runtime/runtime_vars.json "${MODE}" false
           fi
-          if [[ "${CHECK_MODE}" == "true" ]]; then
-            cmd+=(--check --diff)
-          fi
-          if [[ -f .ansible/runtime/vault_pass.txt ]]; then
-            cmd+=(--vault-id "secrets@.ansible/runtime/vault_pass.txt")
-          fi
-          "${cmd[@]}"
 
       - name: Run post-deploy smoke checks
-        if: ${{ inputs.mode == 'deploy' && inputs.check_mode == 'false' && inputs.run_smoke == 'true' }}
+        if: ${{ (inputs.mode == 'deploy' || inputs.mode == 'clean') && inputs.check_mode == 'false' && inputs.run_smoke == 'true' }}
         env:
           LIMIT: ${{ inputs.limit }}
         run: |
@@ -307,7 +394,7 @@ jobs:
             --limit "${LIMIT}"
 
       - name: Verify deploy-user key access after bootstrap
-        if: ${{ inputs.mode == 'bootstrap' }}
+        if: ${{ inputs.mode == 'bootstrap' || inputs.mode == 'clean' }}
         env:
           LIMIT: ${{ inputs.limit }}
         run: |

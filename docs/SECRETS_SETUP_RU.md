@@ -11,6 +11,7 @@
 
 Шаблоны:
 - `fleet.two-servers.example.yml` — пример для 2 серверов.
+- `fleet.two-nodes-plus-monitoring.example.yml` — пример для 2 нод + отдельного monitoring сервера.
 - `fleet.example.yml` — общий multi-server шаблон.
 - `remnawave/profile-sync.yml` — правила sync профилей/нод в панели.
 - `remnawave/profiles/*.json` — JSON-шаблоны config profile без секретов.
@@ -65,11 +66,14 @@
 1. `RW_FLEET_CONFIG_B64`
 2. `ANSIBLE_SSH_PRIVATE_KEY`
 3. `RW_PANEL_API_TOKEN`
+4. `MONITORING_ALERT_TELEGRAM_BOT_TOKEN` (если включён `feature_monitoring_stack`)
+5. `MONITORING_ALERT_TELEGRAM_CHAT_ID` (если включён `feature_monitoring_stack`)
 
 ### Опциональные Secrets
 
 1. `RW_PROFILE_VARS_B64`
 2. `ANSIBLE_VAULT_PASSWORD`
+3. `MONITORING_ALERT_TELEGRAM_TOPIC_ID`
 
 ### Обязательные Variables
 
@@ -135,7 +139,8 @@ base64 -i profile-vars.json | tr -d '\n'
    - `RW_FLEET_CONFIG_B64`
    - `ANSIBLE_SSH_PRIVATE_KEY`
    - `RW_PANEL_API_TOKEN`
-   - опционально `RW_PROFILE_VARS_B64`, `ANSIBLE_VAULT_PASSWORD`
+   - для stack-host: `MONITORING_ALERT_TELEGRAM_BOT_TOKEN`, `MONITORING_ALERT_TELEGRAM_CHAT_ID`
+   - опционально `RW_PROFILE_VARS_B64`, `ANSIBLE_VAULT_PASSWORD`, `MONITORING_ALERT_TELEGRAM_TOPIC_ID`
 3. В `Environment variables` добавьте:
    - `RW_PANEL_API_BASE_URL`
 
@@ -148,6 +153,9 @@ ENV_NAME="production"
 openssl base64 -A -in fleet.yml | gh secret set RW_FLEET_CONFIG_B64 --repo "$REPO" --env "$ENV_NAME"
 gh secret set ANSIBLE_SSH_PRIVATE_KEY --repo "$REPO" --env "$ENV_NAME" < ~/.ssh/ansible_actions
 gh secret set RW_PANEL_API_TOKEN --repo "$REPO" --env "$ENV_NAME"
+gh secret set MONITORING_ALERT_TELEGRAM_BOT_TOKEN --repo "$REPO" --env "$ENV_NAME"
+gh secret set MONITORING_ALERT_TELEGRAM_CHAT_ID --repo "$REPO" --env "$ENV_NAME"
+gh secret set MONITORING_ALERT_TELEGRAM_TOPIC_ID --repo "$REPO" --env "$ENV_NAME"
 openssl base64 -A -in profile-vars.json | gh secret set RW_PROFILE_VARS_B64 --repo "$REPO" --env "$ENV_NAME"
 
 gh variable set RW_PANEL_API_BASE_URL --repo "$REPO" --env "$ENV_NAME" --body "https://panel.example.com"
@@ -174,3 +182,4 @@ gh variable set RW_PANEL_API_BASE_URL --repo "$REPO" --env "$ENV_NAME" --body "h
 3. После успешного `bootstrap -> lockdown` смените bootstrap-пароли у провайдера.
 4. Если `node_secret_key` пустой, значения всё равно сгенерируются детерминированно из host/profile данных, но предпочтительно держать `node_secret_key` заполненным для более стабильного и предсказуемого seed.
 5. При ошибке `unknown panel_node_uuid` сверяйте UUID ноды в панели и fleet config.
+6. Если в fleet включён monitoring (`feature_monitoring_agent`/`feature_monitoring_stack`), должен быть ровно один host с `feature_monitoring_stack=true`.

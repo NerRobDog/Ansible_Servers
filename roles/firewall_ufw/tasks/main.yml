@@ -1,0 +1,207 @@
+---
+- name: Validate supported OS for firewall role
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+      - ansible_distribution in ["Debian", "Ubuntu"]
+    fail_msg: "Role firewall_ufw supports Debian/Ubuntu only."
+  tags: [firewall, ufw]
+
+- name: Resolve effective firewall variables
+  ansible.builtin.set_fact:
+    firewall_ssh_port_effective: "{{ (ansible_port | default(22)) | int }}"
+    firewall_node_port_effective: "{{ remnawave_node_port_resolved | default(remnawave_node_port, true) | int }}"
+    firewall_panel_allowed_sources_raw: >-
+      {{ remnawave_panel_allowed_sources_resolved | default(remnawave_panel_allowed_sources, true) }}
+  changed_when: false
+  tags: [firewall, ufw]
+
+- name: Validate firewall variable types
+  ansible.builtin.assert:
+    that:
+      - firewall_ssh_allowed_sources is iterable
+      - firewall_ssh_allowed_sources is not string
+      - firewall_panel_allowed_sources_raw is iterable
+      - firewall_panel_allowed_sources_raw is not string
+      - firewall_extra_allowed_tcp_ports is iterable
+      - firewall_extra_allowed_tcp_ports is not string
+      - firewall_extra_allowed_udp_ports is iterable
+      - firewall_extra_allowed_udp_ports is not string
+    fail_msg: >-
+      firewall_ssh_allowed_sources, remnawave.panel_allowed_sources,
+      firewall_extra_allowed_tcp_ports and firewall_extra_allowed_udp_ports must be lists.
+  tags: [firewall, ufw]
+
+- name: Initialize normalized firewall source lists
+  ansible.builtin.set_fact:
+    firewall_ssh_allowed_sources_effective: []
+    firewall_panel_allowed_sources_effective: []
+  changed_when: false
+  tags: [firewall, ufw]
+
+- name: Normalize SSH allowed source list
+  ansible.builtin.set_fact:
+    firewall_ssh_allowed_sources_effective: >-
+      {{
+        firewall_ssh_allowed_sources_effective
+        + [
+          (
+            source if "/" in source
+            else source ~ ("/128" if ":" in source else "/32")
+          )
+        ]
+      }}
+  vars:
+    source: "{{ item | string | trim }}"
+  loop: "{{ firewall_ssh_allowed_sources | default([]) }}"
+  when: source | length > 0
+  changed_when: false
+  tags: [firewall, ufw]
+
+- name: Normalize panel allowed source list
+  ansible.builtin.set_fact:
+    firewall_panel_allowed_sources_effective: >-
+      {{
+        firewall_panel_allowed_sources_effective
+        + [
+          (
+            source if "/" in source
+            else source ~ ("/128" if ":" in source else "/32")
+          )
+        ]
+      }}
+  vars:
+    source: "{{ item | string | trim }}"
+  loop: "{{ firewall_panel_allowed_sources_raw | default([]) }}"
+  when: source | length > 0
+  changed_when: false
+  tags: [firewall, ufw]
+
+- name: De-duplicate normalized firewall source lists
+  ansible.builtin.set_fact:
+    firewall_ssh_allowed_sources_effective: "{{ firewall_ssh_allowed_sources_effective | unique }}"
+    firewall_panel_allowed_sources_effective: "{{ firewall_panel_allowed_sources_effective | unique }}"
+  changed_when: false
+  tags: [firewall, ufw]
+
+- name: Validate normalized firewall sources and ports
+  ansible.builtin.assert:
+    that:
+      - firewall_ssh_allowed_sources_effective | length > 0
+      - firewall_ssh_allowed_sources_effective
+        | select("match", "^[0-9a-fA-F:.]+\\/([0-9]|[12][0-9]|3[0-2]|1[01][0-9]|12[0-8])$")
+        | list
+        | length
+        == firewall_ssh_allowed_sources_effective | length
+      - firewall_panel_allowed_sources_effective
+        | select("match", "^[0-9a-fA-F:.]+\\/([0-9]|[12][0-9]|3[0-2]|1[01][0-9]|12[0-8])$")
+        | list
+        | length
+        == firewall_panel_allowed_sources_effective | length
+      - (firewall_ssh_port_effective | int) > 0
+      - (firewall_ssh_port_effective | int) < 65536
+      - (firewall_node_port_effective | int) > 0
+      - (firewall_node_port_effective | int) < 65536
+      - firewall_extra_allowed_tcp_ports
+        | map("string")
+        | select("match", "^[0-9]+$")
+        | list
+        | length
+        == firewall_extra_allowed_tcp_ports | length
+      - firewall_extra_allowed_udp_ports
+        | map("string")
+        | select("match", "^[0-9]+$")
+        | list
+        | length
+        == firewall_extra_allowed_udp_ports | length
+      - firewall_extra_allowed_tcp_ports
+        | map("int")
+        | reject("lt", 1)
+        | reject("gt", 65535)
+        | list
+        | length
+        == firewall_extra_allowed_tcp_ports | length
+      - firewall_extra_allowed_udp_ports
+        | map("int")
+        | reject("lt", 1)
+        | reject("gt", 65535)
+        | list
+        | length
+        == firewall_extra_allowed_udp_ports | length
+    fail_msg: "Invalid firewall inputs: check CIDRs and port ranges."
+  tags: [firewall, ufw]
+
+- name: Install UFW package
+  ansible.builtin.package:
+    name: ufw
+    state: present
+  tags: [firewall, ufw]
+
+- name: Set UFW incoming default policy to deny
+  community.general.ufw:
+    direction: incoming
+    default: deny
+  tags: [firewall, ufw]
+
+- name: Set UFW outgoing default policy to allow
+  community.general.ufw:
+    direction: outgoing
+    default: allow
+  tags: [firewall, ufw]
+
+- name: Allow SSH from configured sources
+  community.general.ufw:
+    rule: allow
+    proto: tcp
+    from_ip: "{{ item }}"
+    to_port: "{{ firewall_ssh_port_effective | string }}"
+    comment: ansible-ssh
+  loop: "{{ firewall_ssh_allowed_sources_effective }}"
+  tags: [firewall, ufw, ssh]
+
+- name: Allow HTTPS ingress for node/caddy
+  community.general.ufw:
+    rule: allow
+    proto: tcp
+    to_port: "443"
+    comment: remnawave-https
+  when:
+    - effective_feature_remnawave_node | default(false) | bool
+      or effective_feature_caddy_node | default(false) | bool
+  tags: [firewall, ufw]
+
+- name: Allow panel CIDRs to access node API port
+  community.general.ufw:
+    rule: allow
+    proto: tcp
+    from_ip: "{{ item }}"
+    to_port: "{{ firewall_node_port_effective | string }}"
+    comment: remnawave-panel
+  loop: "{{ firewall_panel_allowed_sources_effective }}"
+  when: firewall_panel_allowed_sources_effective | length > 0
+  tags: [firewall, ufw, remnawave]
+
+- name: Allow extra TCP ports
+  community.general.ufw:
+    rule: allow
+    proto: tcp
+    to_port: "{{ item | int }}"
+    comment: ansible-extra-tcp
+  loop: "{{ firewall_extra_allowed_tcp_ports | default([]) | map('int') | unique | list }}"
+  when: firewall_extra_allowed_tcp_ports | length > 0
+  tags: [firewall, ufw]
+
+- name: Allow extra UDP ports
+  community.general.ufw:
+    rule: allow
+    proto: udp
+    to_port: "{{ item | int }}"
+    comment: ansible-extra-udp
+  loop: "{{ firewall_extra_allowed_udp_ports | default([]) | map('int') | unique | list }}"
+  when: firewall_extra_allowed_udp_ports | length > 0
+  tags: [firewall, ufw]
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+  tags: [firewall, ufw]

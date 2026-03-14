@@ -1,0 +1,6 @@
+---
+firewall_ssh_allowed_sources:
+  - "0.0.0.0/0"
+  - "::/0"
+firewall_extra_allowed_tcp_ports: []
+firewall_extra_allowed_udp_ports: []
