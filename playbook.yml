@@ -108,6 +108,8 @@
         remnawave_caddy_domain: "{{ fleet_host_cfg.get('remnawave', {}).get('caddy_domain', remnawave_caddy_domain) }}"
         remnawave_caddy_monitor_port: "{{ fleet_host_cfg.get('remnawave', {}).get('caddy_monitor_port', remnawave_caddy_monitor_port) }}"
         remnawave_ipv6_state: "{{ fleet_host_cfg.get('remnawave', {}).get('ipv6_state', remnawave_ipv6_state) }}"
+        remnawave_panel_allowed_sources: >-
+          {{ fleet_host_cfg.get('remnawave', {}).get('panel_allowed_sources', remnawave_panel_allowed_sources) }}
         monitoring_agent_bind_address: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_bind_address', monitoring_agent_bind_address) }}"
         monitoring_agent_node_exporter_port: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_node_exporter_port', monitoring_agent_node_exporter_port) }}"
         monitoring_agent_cadvisor_port: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_cadvisor_port', monitoring_agent_cadvisor_port) }}"

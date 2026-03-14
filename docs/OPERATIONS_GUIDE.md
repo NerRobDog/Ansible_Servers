@@ -105,6 +105,9 @@ hosts:
       # Optional: if empty, generated deterministically from node_secret_key.
       reality_private_key: ""
       reality_server_name: "node1.example.com"
+      # Optional: allow panel health-check API access to NODE_PORT via UFW.
+      panel_allowed_sources:
+        - "89.23.98.20/32"
       target_inbound_tags: []
     monitoring:
       # Для single-host схемы (node + monitoring на одном VPS) безопасно:
