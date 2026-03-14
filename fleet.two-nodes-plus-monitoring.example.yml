@@ -17,6 +17,7 @@ defaults:
     password: "CHANGE_ME"
   features:
     feature_base: true
+    feature_firewall: true
     feature_docker: true
     feature_remnawave_node: false
     feature_caddy_node: false
@@ -36,7 +37,15 @@ defaults:
     caddy_tls_key_file: ""
     caddy_acme_ca: ""
     reality_target: "127.0.0.1:8443"
+    # panel_allowed_sources:
+    #   - "89.23.98.20/32"
   custom_roles: []
+  firewall:
+    ssh_allowed_sources:
+      - "0.0.0.0/0"
+      - "::/0"
+    extra_allowed_tcp_ports: []
+    extra_allowed_udp_ports: []
   monitoring:
     agent_bind_address: "0.0.0.0"
     agent_node_exporter_port: 9100
@@ -78,6 +87,8 @@ hosts:
       # Optional if node name in panel differs:
       # panel_node_uuid: "GERMANY_PANEL_NODE_UUID"
       reality_target: "127.0.0.1:8443"
+      panel_allowed_sources:
+        - "89.23.98.20/32"
     monitoring:
       agent_bind_address: "0.0.0.0"
       agent_node_exporter_port: 9100
@@ -114,6 +125,8 @@ hosts:
       # Optional if node name in panel differs:
       # panel_node_uuid: "NETHERLANDS_PANEL_NODE_UUID"
       reality_target: "127.0.0.1:8443"
+      panel_allowed_sources:
+        - "89.23.98.20/32"
     monitoring:
       agent_bind_address: "0.0.0.0"
       agent_node_exporter_port: 9100

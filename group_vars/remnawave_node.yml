@@ -1,5 +1,6 @@
 ---
 feature_base: true
+feature_firewall: true
 feature_docker: true
 feature_remnawave_node: true
 feature_caddy_node: true

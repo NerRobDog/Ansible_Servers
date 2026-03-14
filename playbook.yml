@@ -74,7 +74,11 @@
     - name: Resolve effective feature flags
       ansible.builtin.set_fact:
         effective_feature_base: "{{ fleet_host_cfg.get('features', {}).get('feature_base', feature_base) | bool }}"
-        effective_feature_firewall: "{{ fleet_host_cfg.get('features', {}).get('feature_firewall', feature_firewall) | bool }}"
+        effective_feature_firewall: >-
+          {{
+            (force_feature_firewall | bool)
+            or (fleet_host_cfg.get('features', {}).get('feature_firewall', feature_firewall) | bool)
+          }}
         effective_feature_docker: "{{ fleet_host_cfg.get('features', {}).get('feature_docker', feature_docker) | bool }}"
         effective_feature_remnawave_node: "{{ fleet_host_cfg.get('features', {}).get('feature_remnawave_node', feature_remnawave_node) | bool }}"
         effective_feature_caddy_node: "{{ fleet_host_cfg.get('features', {}).get('feature_caddy_node', feature_caddy_node) | bool }}"
@@ -132,6 +136,12 @@
           {{ fleet_host_cfg.get('monitoring', {}).get('stack_grafana_admin_user', monitoring_stack_grafana_admin_user) }}
         monitoring_stack_grafana_admin_password: >-
           {{ fleet_host_cfg.get('monitoring', {}).get('stack_grafana_admin_password', monitoring_stack_grafana_admin_password) }}
+        firewall_ssh_allowed_sources: >-
+          {{ fleet_host_cfg.get('firewall', {}).get('ssh_allowed_sources', firewall_ssh_allowed_sources) }}
+        firewall_extra_allowed_tcp_ports: >-
+          {{ fleet_host_cfg.get('firewall', {}).get('extra_allowed_tcp_ports', firewall_extra_allowed_tcp_ports) }}
+        firewall_extra_allowed_udp_ports: >-
+          {{ fleet_host_cfg.get('firewall', {}).get('extra_allowed_udp_ports', firewall_extra_allowed_udp_ports) }}
       changed_when: false
       tags: [always]
 
@@ -217,9 +227,9 @@
       when: effective_feature_base | bool
       tags: [base]
 
-    - role: firewall
-      when: effective_feature_firewall | bool and (firewall_enabled | bool)
-      tags: [firewall]
+    - role: firewall_ufw
+      when: effective_feature_firewall | bool
+      tags: [firewall, ufw]
 
     - role: docker
       when: effective_feature_docker | bool

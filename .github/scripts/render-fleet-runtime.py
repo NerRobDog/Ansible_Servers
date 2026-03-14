@@ -12,7 +12,7 @@ except Exception:  # pragma: no cover - optional dependency check
 
 FEATURE_DEFAULTS = {
     "feature_base": True,
-    "feature_firewall": True,
+    "feature_firewall": False,
     "feature_docker": True,
     "feature_remnawave_node": False,
     "feature_caddy_node": False,
@@ -20,6 +20,12 @@ FEATURE_DEFAULTS = {
     "feature_monitoring_agent": False,
     "feature_monitoring_stack": False,
     "feature_user_shell": False,
+}
+
+FIREWALL_DEFAULTS = {
+    "ssh_allowed_sources": ["0.0.0.0/0", "::/0"],
+    "extra_allowed_tcp_ports": [],
+    "extra_allowed_udp_ports": [],
 }
 
 REMNAWAVE_DEFAULTS = {
@@ -278,6 +284,48 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
         monitoring_cfg.get("stack_grafana_admin_password", "change_me") or "change_me"
     )
 
+    default_firewall = defaults.get("firewall", {})
+    if default_firewall is None:
+        default_firewall = {}
+    if not isinstance(default_firewall, dict):
+        fail("defaults.firewall must be an object when provided.")
+    host_firewall = host_cfg.get("firewall", {}) or {}
+    if not isinstance(host_firewall, dict):
+        fail(f"Host '{alias}' firewall must be an object when provided.")
+    firewall_cfg = FIREWALL_DEFAULTS.copy()
+    firewall_cfg.update(default_firewall)
+    firewall_cfg.update(host_firewall)
+
+    ssh_allowed_sources = firewall_cfg.get("ssh_allowed_sources", [])
+    if ssh_allowed_sources is None:
+        ssh_allowed_sources = []
+    if not isinstance(ssh_allowed_sources, list):
+        fail(f"Host '{alias}' firewall.ssh_allowed_sources must be a list.")
+    normalized_ssh_allowed_sources = []
+    for source in ssh_allowed_sources:
+        source_text = str(source).strip()
+        if not source_text:
+            fail(f"Host '{alias}' firewall.ssh_allowed_sources contains empty source value.")
+        normalized_ssh_allowed_sources.append(source_text)
+    firewall_cfg["ssh_allowed_sources"] = normalized_ssh_allowed_sources
+
+    for key in ("extra_allowed_tcp_ports", "extra_allowed_udp_ports"):
+        values = firewall_cfg.get(key, [])
+        if values is None:
+            values = []
+        if not isinstance(values, list):
+            fail(f"Host '{alias}' firewall.{key} must be a list.")
+        normalized_ports = []
+        for value in values:
+            try:
+                port = int(value)
+            except Exception:
+                fail(f"Host '{alias}' firewall.{key} contains invalid port: {value!r}")
+            if not (1 <= port <= 65535):
+                fail(f"Host '{alias}' firewall.{key} contains out-of-range port: {port}")
+            normalized_ports.append(port)
+        firewall_cfg[key] = normalized_ports
+
     custom_roles = host_cfg.get("custom_roles", defaults.get("custom_roles", []))
     if custom_roles is None:
         custom_roles = []
@@ -298,6 +346,7 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
         "features": normalized_features,
         "remnawave": remnawave_cfg,
         "monitoring": monitoring_cfg,
+        "firewall": firewall_cfg,
         "custom_roles": custom_roles,
     }
     return normalized
@@ -403,6 +452,9 @@ def main() -> None:
                 "monitoring_stack_loki_ingest_allowed_sources": cfg["monitoring"]["stack_loki_ingest_allowed_sources"],
                 "monitoring_stack_grafana_admin_user": cfg["monitoring"]["stack_grafana_admin_user"],
                 "monitoring_stack_grafana_admin_password": cfg["monitoring"]["stack_grafana_admin_password"],
+                "firewall_ssh_allowed_sources": cfg["firewall"]["ssh_allowed_sources"],
+                "firewall_extra_allowed_tcp_ports": cfg["firewall"]["extra_allowed_tcp_ports"],
+                "firewall_extra_allowed_udp_ports": cfg["firewall"]["extra_allowed_udp_ports"],
             }
             for alias, cfg in normalized_hosts.items()
         },

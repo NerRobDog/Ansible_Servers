@@ -9,13 +9,17 @@
 - Дефолт: включена (`feature_base=true`).
 - Когда выключать: только на хостах с очень специфичным образом ОС.
 
-### `firewall`
-- Назначение: UFW-политика по умолчанию (`deny incoming`, `allow outgoing`) и разрешение только нужных портов.
-- Дефолт: включена (`feature_firewall=true`).
-- Базовые allow-правила:
-  - SSH (`firewall_ssh_port`, обычно 22/tcp)
-  - 443/tcp (Reality/public endpoint)
-- По умолчанию не открывает наружу порт Caddy monitor (`8443`).
+### `firewall_ufw`
+- Назначение: единая UFW-политика для хоста.
+- Требует: `feature_firewall=true`.
+- Основные параметры:
+  - `firewall.ssh_allowed_sources` (CIDR/IP список для SSH на `ansible_port`)
+  - `firewall.extra_allowed_tcp_ports`
+  - `firewall.extra_allowed_udp_ports`
+  - `remnawave.panel_allowed_sources` (CIDR/IP список для доступа панели к `remnawave.node_port`)
+- Политика по умолчанию:
+  - `default deny incoming`, `default allow outgoing`
+  - allow `SSH`, allow `443/tcp`, allow `node_port` только из `panel_allowed_sources`.
 
 ### `docker`
 - Назначение: установка Docker CE и плагинов.
@@ -30,7 +34,7 @@
 - Основные параметры:
   - `remnawave.node_port`
   - `remnawave.node_secret_key`
-  - `remnawave.panel_allowed_sources` (CIDR-список для UFW allow на `node_port`, опционально)
+  - `remnawave.panel_allowed_sources` (используется ролью `firewall_ufw` для allow к `node_port`)
 
 ### `caddy_node`
 - Назначение: TLS decoy для Reality self-steal + health endpoint.
@@ -109,6 +113,7 @@
 ### `ssh_lockdown`
 - Назначение: отключение SSH password auth и root login.
 - Запуск: в режиме `lockdown`.
+- В режиме `clean` выполняется автоматически после bootstrap-pass.
 
 ## Custom roles
 
@@ -132,7 +137,7 @@ hosts:
 ```yaml
 features:
   feature_base: true
-  feature_firewall: true
+  feature_firewall: false
   feature_docker: true
   feature_remnawave_node: false
   feature_caddy_node: false

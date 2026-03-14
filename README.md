@@ -5,7 +5,7 @@
 Главная модель:
 - серверы описываются только в GitHub Environment Secret `RW_FLEET_CONFIG_B64`;
 - профили RemaWave хранятся в git-шаблонах `remnawave/profiles/*.json` и синкаются в панель pre-step'ом;
-- workflow запускается вручную в режимах `bootstrap`, `deploy`, `lockdown`;
+- workflow запускается вручную в режимах `bootstrap`, `deploy`, `lockdown`, `clean`;
 - мониторинг стандартизован как `Prometheus + Alertmanager + Grafana + Loki`, алерты идут в Telegram topic через Alertmanager;
 - push в репозиторий для добавления новых серверов не нужен.
 
@@ -20,7 +20,7 @@
 ## Роли
 
 - `base` — базовые пакеты.
-- `firewall` — UFW политика `deny incoming` + allow для SSH/443.
+- `firewall_ufw` — UFW baseline/policy и allow-правила для SSH/HTTPS/node API.
 - `docker` — установка Docker CE.
 - `remnawave_node` — deploy RemaWave node.
 - `caddy_node` — TLS decoy для self-steal Reality + локальный health endpoint.
@@ -40,8 +40,10 @@
 Inputs:
 - `environment` — GitHub Environment c секретами флота.
 - `mode` — `bootstrap | deploy | lockdown`.
+  - `clean` = one-shot `bootstrap -> lockdown -> idempotence gate`, с принудительным `force_feature_firewall=true`.
 - `limit` — `all` или alias-хостов через запятую.
 - `check_mode` — dry-run.
+  - для `mode=clean` должен быть `false`.
 - `run_smoke` — post-deploy smoke-проверки (`true|false`).
 - `tags` — опциональный фильтр ansible tags.
 - `panel_sync_write` — `true|false` для write/read-only API sync профилей и назначений нод.
@@ -125,7 +127,6 @@ yamllint .
 ## Быстрый operational flow
 
 1. Обновить `RW_FLEET_CONFIG_B64` в нужном Environment.
-2. Запустить `mode=bootstrap` для новых хостов.
-3. Запустить `mode=lockdown` для этих же хостов.
-4. Запускать регулярный `mode=deploy` с `run_smoke=true`.
-5. Включить/запускать `monitor-remnawave-node` для регулярного smoke-контроля; прод-алерты идут из Alertmanager.
+2. Для новых хостов запускать `mode=clean` (one-shot provisioning + UFW + idempotence gate).
+3. Для регулярных обновлений запускать `mode=deploy` с `run_smoke=true`.
+4. Включить/запускать `monitor-remnawave-node` для регулярного smoke-контроля; прод-алерты идут из Alertmanager.

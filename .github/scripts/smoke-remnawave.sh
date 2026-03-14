@@ -77,6 +77,7 @@ if [[ ${#targets[@]} -eq 0 ]]; then
   echo "No target hosts resolved for smoke checks." >&2
   exit 1
 fi
+limit_targets_json="$(printf '%s\n' "${targets[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
 
 run_ansible() {
   local alias="$1"
@@ -202,40 +203,46 @@ for alias in "${targets[@]}"; do
     fi
   fi
 
-	  if [[ "$feature_monitoring_stack" == "true" ]]; then
-	    echo "[smoke][$alias] Check monitoring_stack services"
-	    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-prometheus$ | grep -q monitoring-prometheus" >/dev/null
-	    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-alertmanager$ | grep -q monitoring-alertmanager" >/dev/null
-	    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-grafana$ | grep -q monitoring-grafana" >/dev/null
-	    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-loki$ | grep -q monitoring-loki" >/dev/null
-	    run_ansible_retry "$alias" 12 5 -b -m ansible.builtin.shell -a "curl --silent --show-error --fail --connect-timeout 3 'http://127.0.0.1:9090/-/ready' >/dev/null"
-	    run_ansible_retry "$alias" 12 5 -b -m ansible.builtin.shell -a "curl --silent --show-error --fail --connect-timeout 3 'http://127.0.0.1:9093/-/ready' >/dev/null"
-	    run_ansible_retry "$alias" 12 5 -b -m ansible.builtin.shell -a "curl --silent --show-error --fail --connect-timeout 3 'http://127.0.0.1:3100/ready' >/dev/null"
-	    run_ansible_retry "$alias" 12 5 -b -m ansible.builtin.shell -a "curl --silent --show-error --fail --connect-timeout 3 'http://127.0.0.1:3000/api/health' >/dev/null"
+  if [[ "$feature_monitoring_stack" == "true" ]]; then
+    echo "[smoke][$alias] Check monitoring_stack services"
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-prometheus$ | grep -q monitoring-prometheus" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-alertmanager$ | grep -q monitoring-alertmanager" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-grafana$ | grep -q monitoring-grafana" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-loki$ | grep -q monitoring-loki" >/dev/null
+    run_ansible_retry "$alias" 12 5 -b -m ansible.builtin.shell -a "curl --silent --show-error --fail --connect-timeout 3 'http://127.0.0.1:9090/-/ready' >/dev/null"
+    run_ansible_retry "$alias" 12 5 -b -m ansible.builtin.shell -a "curl --silent --show-error --fail --connect-timeout 3 'http://127.0.0.1:9093/-/ready' >/dev/null"
+    run_ansible_retry "$alias" 12 5 -b -m ansible.builtin.shell -a "curl --silent --show-error --fail --connect-timeout 3 'http://127.0.0.1:3100/ready' >/dev/null"
+    run_ansible_retry "$alias" 12 5 -b -m ansible.builtin.shell -a "curl --silent --show-error --fail --connect-timeout 3 'http://127.0.0.1:3000/api/health' >/dev/null"
 
-	    echo "[smoke][$alias] Check monitoring target coverage, health and duplicates"
-	    expected_node_instances_json="$(
-	      jq -c '
-	        [
-	          .fleet_hosts
-	          | to_entries[]
-	          | select(((.value.features.feature_monitoring_agent // false) | tostring | ascii_downcase) == "true")
-	          | .key
-	        ] | unique | sort
-	      ' "$runtime_vars"
-	    )"
-	    expected_cadvisor_instances_json="$(
-	      jq -c '
-	        [
-	          .fleet_hosts
-	          | to_entries[]
-	          | select(((.value.features.feature_monitoring_agent // false) | tostring | ascii_downcase) == "true")
-	          | .key
-	        ] | unique | sort
-	      ' "$runtime_vars"
-	    )"
-	    prom_targets_check_script="$(
-	      cat <<'PY'
+    echo "[smoke][$alias] Check monitoring target coverage, health and duplicates"
+    expected_node_instances_json="$(
+      jq -c --argjson targets "${limit_targets_json}" '
+        [
+          .fleet_hosts
+          | to_entries[]
+          | select(
+              (((.value.features.feature_monitoring_agent // false) | tostring | ascii_downcase) == "true")
+              and (.key as $host_alias | ($targets | index($host_alias)) != null)
+            )
+          | .key
+        ] | unique | sort
+      ' "$runtime_vars"
+    )"
+    expected_cadvisor_instances_json="$(
+      jq -c --argjson targets "${limit_targets_json}" '
+        [
+          .fleet_hosts
+          | to_entries[]
+          | select(
+              (((.value.features.feature_monitoring_agent // false) | tostring | ascii_downcase) == "true")
+              and (.key as $host_alias | ($targets | index($host_alias)) != null)
+            )
+          | .key
+        ] | unique | sort
+      ' "$runtime_vars"
+    )"
+    prom_targets_check_script="$(
+      cat <<'PY'
 import base64
 import collections
 import json
@@ -271,8 +278,10 @@ for job_name, expected_instances in expected.items():
     observed_instances = [item["instance"] for item in job_targets]
     counts = collections.Counter(observed_instances)
     missing_instances = sorted(set(expected_instances) - set(observed_instances))
-    duplicate_instances = sorted(instance for instance, count in counts.items() if count > 1)
-    unexpected_instances = sorted(set(observed_instances) - set(expected_instances))
+    duplicate_instances = sorted(
+        instance for instance, count in counts.items()
+        if (instance in expected_instances) and count > 1
+    )
     unhealthy_expected = sorted(
         instance
         for instance in expected_instances
@@ -283,8 +292,6 @@ for job_name, expected_instances in expected.items():
         errors.append(f"{job_name}: missing {missing_instances}")
     if duplicate_instances:
         errors.append(f"{job_name}: duplicates {duplicate_instances}")
-    if unexpected_instances:
-        errors.append(f"{job_name}: unexpected {unexpected_instances}")
     if unhealthy_expected:
         errors.append(f"{job_name}: not-up {unhealthy_expected}")
 
@@ -294,16 +301,16 @@ if errors:
 
 print("monitoring-targets-ok")
 PY
-	    )"
-	    prom_targets_check_script="${prom_targets_check_script/__EXPECTED_NODE_JSON__/${expected_node_instances_json}}"
-	    prom_targets_check_script="${prom_targets_check_script/__EXPECTED_CADVISOR_JSON__/${expected_cadvisor_instances_json}}"
-	    prom_targets_check_script_b64="$(printf '%s' "${prom_targets_check_script}" | base64 | tr -d '\n')"
-	    run_ansible_retry "$alias" 8 5 -b -m ansible.builtin.shell -a "python3 -c \"import base64; exec(base64.b64decode('${prom_targets_check_script_b64}'))\"" >/dev/null
+    )"
+    prom_targets_check_script="${prom_targets_check_script/__EXPECTED_NODE_JSON__/${expected_node_instances_json}}"
+    prom_targets_check_script="${prom_targets_check_script/__EXPECTED_CADVISOR_JSON__/${expected_cadvisor_instances_json}}"
+    prom_targets_check_script_b64="$(printf '%s' "${prom_targets_check_script}" | base64 | tr -d '\n')"
+    run_ansible_retry "$alias" 8 5 -b -m ansible.builtin.shell -a "python3 -c \"import base64; exec(base64.b64decode('${prom_targets_check_script_b64}'))\"" >/dev/null
 
-	    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/prometheus/alerts.yml" >/dev/null
-	    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/provisioning/datasources/datasources.yml" >/dev/null
-	    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/dashboards/remna-fleet-overview.json" >/dev/null
-	    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/dashboards/remna-node-drilldown.json" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/prometheus/alerts.yml" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/provisioning/datasources/datasources.yml" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/dashboards/remna-fleet-overview.json" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "test -f /opt/monitoring-stack/grafana/dashboards/remna-node-drilldown.json" >/dev/null
   fi
 
 done

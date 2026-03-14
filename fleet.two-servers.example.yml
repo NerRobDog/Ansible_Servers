@@ -50,6 +50,14 @@ defaults:
     # reality_short_id: "c0d2ed6aa8460e20"
     # reality_private_key: "REPLACE_ME"
     # reality_server_name: "de-node.example.com"
+    # panel_allowed_sources:
+    #   - "89.23.98.20/32"
+  firewall:
+    ssh_allowed_sources:
+      - "0.0.0.0/0"
+      - "::/0"
+    extra_allowed_tcp_ports: []
+    extra_allowed_udp_ports: []
   custom_roles: []
   monitoring:
     agent_bind_address: "0.0.0.0"
@@ -94,6 +102,8 @@ hosts:
       # reality_server_name: "de-node.example.com"
       # reality_short_id: "7642b35f5570246f"
       # reality_private_key: "REPLACE_ME"
+      # panel_allowed_sources:
+      #   - "89.23.98.20/32"
     custom_roles: []
     monitoring:
       agent_bind_address: "0.0.0.0"
@@ -131,6 +141,8 @@ hosts:
       # reality_server_name: "nl-node.example.com"
       # reality_short_id: "c0d2ed6aa8460e20"
       # reality_private_key: "REPLACE_ME"
+      # panel_allowed_sources:
+      #   - "89.23.98.20/32"
     custom_roles: []
     monitoring:
       agent_bind_address: "0.0.0.0"

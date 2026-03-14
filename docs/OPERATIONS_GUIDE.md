@@ -19,6 +19,7 @@ Workflow: `.github/workflows/deploy-remnawave-node.yml`
 - `bootstrap`: первый вход по паролю, копирование SSH-ключа, создание deploy-user.
 - `deploy`: обычный деплой только по SSH-ключу.
 - `lockdown`: отключение SSH входа по паролю и root login.
+- `clean`: one-shot `bootstrap -> lockdown -> idempotence gate` (с принудительным firewall).
 
 Перед `ansible-playbook` workflow выполняет panel pre-step:
 - upsert Config Profiles из `remnawave/profiles/*.json`;
@@ -63,7 +64,7 @@ defaults:
   ansible_port: 22
   features:
     feature_base: true
-    feature_firewall: true
+    feature_firewall: false
     feature_docker: true
     feature_remnawave_node: false
     feature_caddy_node: false
@@ -110,6 +111,12 @@ hosts:
       panel_allowed_sources:
         - "89.23.98.20/32"
       target_inbound_tags: []
+    firewall:
+      ssh_allowed_sources:
+        - "0.0.0.0/0"
+        - "::/0"
+      extra_allowed_tcp_ports: []
+      extra_allowed_udp_ports: []
     monitoring:
       # Для single-host схемы (node + monitoring на одном VPS) безопасно:
       # agent_bind_address: "172.17.0.1"
@@ -196,9 +203,9 @@ base64 -i fleet.yaml | tr -d '\n' | gh secret set RW_FLEET_CONFIG_B64 --env prod
 1. Actions -> `deploy-remnawave-node` -> Run workflow.
 2. Выберите:
    - `environment` (например `production`);
-   - `mode`: `bootstrap`, `deploy` или `lockdown`;
+   - `mode`: `bootstrap`, `deploy`, `lockdown` или `clean`;
    - `limit`: `all` или `host1,host2`;
-   - `check_mode`: сначала `true`, потом `false`;
+   - `check_mode`: сначала `true`, потом `false` (`mode=clean` требует `false`);
    - `panel_sync_write`: `false` для read-only отчёта, `true` для применения изменений в панели.
    - `run_smoke`: `true` для автоматических пост-деплой проверок.
 
@@ -238,9 +245,8 @@ ssh -i ~/.ssh/ansible_actions -L 13000:127.0.0.1:3000 deploy@<host>
 ## 7) Рекомендуемая последовательность для нового хоста
 
 1. Добавить хост в fleet-конфиг и обновить `RW_FLEET_CONFIG_B64`.
-2. Запустить `mode=bootstrap` c `limit=<новый-host>`.
-3. Запустить `mode=lockdown` c `limit=<новый-host>`.
-4. Затем обычный `mode=deploy` для всех с `run_smoke=true`.
+2. Запустить `mode=clean` c `limit=<новый-host>`.
+3. Затем обычный `mode=deploy` для всех с `run_smoke=true`.
 
 ## 8) Smoke-проверки после deploy
 
@@ -252,6 +258,7 @@ ssh -i ~/.ssh/ansible_actions -L 13000:127.0.0.1:3000 deploy@<host>
 - sysctl BBR/IPv6 (если `feature_node_tuning=true`).
 - для `feature_monitoring_agent=true`: контейнеры `node_exporter`, `cadvisor`, `promtail` и доступность `/metrics`.
 - для `feature_monitoring_stack=true`: готовность Prometheus/Alertmanager/Grafana/Loki и наличие provisioning/dashboards файлов.
+- coverage monitoring-targets проверяется только для хостов из `--limit` (limit-scoped).
 
 Ручной запуск того же набора:
 
@@ -266,6 +273,7 @@ ssh -i ~/.ssh/ansible_actions -L 13000:127.0.0.1:3000 deploy@<host>
 
 - `Host alias not found`: в `limit` указан alias, которого нет в fleet-конфиге.
 - `Bootstrap password is missing`: для bootstrap режима не задан пароль.
+- `check_mode=true is not supported for mode=clean`: clean выполняет реальный provisioning и строгий idempotence gate.
 - `Custom role not found`: роль указана в `custom_roles`, но каталога `roles/<name>` нет.
 - `Missing remnawave_node_secret_key`: включена node-роль, но не передан секрет ноды.
 - `Profile ... not found`/`missing inbound tags`: mismatch манифеста sync и профилей в панели.

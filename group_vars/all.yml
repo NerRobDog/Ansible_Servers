@@ -92,6 +92,7 @@ remnawave_caddy_tls_cert_file: ""
 remnawave_caddy_tls_key_file: ""
 remnawave_caddy_local_only: true
 remnawave_caddy_acme_ca: ""
+remnawave_panel_allowed_sources: []
 
 remnawave_bbr_enabled: true
 remnawave_ipv6_state: enabled
@@ -99,7 +100,7 @@ remnawave_warp_enabled: false
 
 # Fleet-driven feature flags
 feature_base: true
-feature_firewall: true
+feature_firewall: false
 feature_docker: true
 feature_remnawave_node: false
 feature_caddy_node: false
@@ -111,6 +112,14 @@ custom_roles: []
 ssh_lockdown_enabled: false
 fleet_mode: deploy
 fleet_hosts: {}
+force_feature_firewall: false
+
+# Firewall defaults
+firewall_ssh_allowed_sources:
+  - "0.0.0.0/0"
+  - "::/0"
+firewall_extra_allowed_tcp_ports: []
+firewall_extra_allowed_udp_ports: []
 
 # Monitoring defaults
 monitoring_agent_bind_address: "0.0.0.0"
