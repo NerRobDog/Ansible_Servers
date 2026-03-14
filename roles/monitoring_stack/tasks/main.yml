@@ -146,10 +146,22 @@
   ansible.builtin.set_fact:
     monitoring_stack_loki_acl_enabled: >-
       {{
-        (monitoring_stack_loki_ingest_allowed_sources | default([]) | length > 0)
-        and ((monitoring_stack_loki_ingest_bind_address | string) not in ['127.0.0.1', 'localhost'])
+        (monitoring_stack_loki_ingest_bind_address | string)
+        not in ['127.0.0.1', 'localhost']
       }}
   changed_when: false
+  tags: [monitoring, metrics, loki, firewall]
+
+- name: Assert Loki ingest allow-list is set when binding to non-loopback address
+  ansible.builtin.assert:
+    that:
+      - (monitoring_stack_loki_ingest_allowed_sources | default([]) | length) > 0
+    fail_msg: >-
+      Loki ingest is bound to a non-loopback address
+      ({{ monitoring_stack_loki_ingest_bind_address | string }}), but
+      monitoring_stack_loki_ingest_allowed_sources is empty. Please configure
+      an allow-list to avoid exposing Loki ingest.
+  when: monitoring_stack_loki_acl_enabled | bool
   tags: [monitoring, metrics, loki, firewall]
 
 - name: Ensure iptables userspace tools are present for monitoring stack Loki ACL
