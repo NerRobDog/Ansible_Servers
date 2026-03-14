@@ -172,6 +172,8 @@ for alias in "${targets[@]}"; do
     node_exporter_port="$(jq -r --arg alias "$alias" '.remnawave_runtime_host_vars[$alias].monitoring_agent_node_exporter_port // 9100' "$runtime_vars")"
     cadvisor_port="$(jq -r --arg alias "$alias" '.remnawave_runtime_host_vars[$alias].monitoring_agent_cadvisor_port // 8080' "$runtime_vars")"
     promtail_enabled="$(jq -r --arg alias "$alias" '.remnawave_runtime_host_vars[$alias].monitoring_agent_promtail_enabled // true' "$runtime_vars")"
+    node_exporter_enabled="$(jq -r --arg alias "$alias" '.remnawave_runtime_host_vars[$alias].monitoring_agent_enable_node_exporter // true' "$runtime_vars")"
+    cadvisor_enabled="$(jq -r --arg alias "$alias" '.remnawave_runtime_host_vars[$alias].monitoring_agent_enable_cadvisor // true' "$runtime_vars")"
     agent_bind_address="$(jq -r --arg alias "$alias" '
       .remnawave_runtime_host_vars[$alias].monitoring_agent_bind_address
       // .fleet_hosts[$alias].monitoring.agent_bind_address
@@ -183,13 +185,21 @@ for alias in "${targets[@]}"; do
     fi
 
     echo "[smoke][$alias] Check monitoring_agent containers and ports"
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-node-exporter$ | grep -q monitoring-node-exporter" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-cadvisor$ | grep -q monitoring-cadvisor" >/dev/null
+    if [[ "$node_exporter_enabled" == "true" ]]; then
+      run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-node-exporter$ | grep -q monitoring-node-exporter" >/dev/null
+    fi
+    if [[ "$cadvisor_enabled" == "true" ]]; then
+      run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-cadvisor$ | grep -q monitoring-cadvisor" >/dev/null
+    fi
     if [[ "$promtail_enabled" == "true" ]]; then
       run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-promtail-agent$ | grep -q monitoring-promtail-agent" >/dev/null
     fi
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://${agent_probe_host}:${node_exporter_port}/metrics' >/dev/null" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://${agent_probe_host}:${cadvisor_port}/metrics' >/dev/null" >/dev/null
+    if [[ "$node_exporter_enabled" == "true" ]]; then
+      run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://${agent_probe_host}:${node_exporter_port}/metrics' >/dev/null" >/dev/null
+    fi
+    if [[ "$cadvisor_enabled" == "true" ]]; then
+      run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://${agent_probe_host}:${cadvisor_port}/metrics' >/dev/null" >/dev/null
+    fi
   fi
 
 	  if [[ "$feature_monitoring_stack" == "true" ]]; then
