@@ -63,8 +63,10 @@
 
 ```bash
 python .github/scripts/test-render-fleet-runtime.py
+python .github/scripts/test-render-openwrt-fleet-runtime.py
 ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
-ansible-lint playbook.yml roles
+ansible-playbook -i hosts.example.ini playbook.openwrt.yml --syntax-check
+ansible-lint playbook.yml playbook.openwrt.yml roles
 yamllint .
 ```
 

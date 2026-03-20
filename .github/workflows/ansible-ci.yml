@@ -37,13 +37,20 @@ jobs:
       - name: Fleet renderer contract tests
         run: python .github/scripts/test-render-fleet-runtime.py
 
-      - name: Syntax check
-        run: |
-          ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
-          ansible-playbook -i hosts.example.ini playbook-yusic-worker.yml --syntax-check
+      - name: OpenWrt fleet renderer contract tests
+        run: python .github/scripts/test-render-openwrt-fleet-runtime.py
+
+      - name: Syntax check playbook.yml
+        run: ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
+
+      - name: Syntax check playbook-yusic-worker.yml
+        run: ansible-playbook -i hosts.example.ini playbook-yusic-worker.yml --syntax-check
+
+      - name: Syntax check playbook.openwrt.yml
+        run: ansible-playbook -i hosts.example.ini playbook.openwrt.yml --syntax-check
 
       - name: ansible-lint
-        run: ansible-lint playbook.yml playbook-yusic-worker.yml roles
+        run: ansible-lint playbook.yml playbook.openwrt.yml playbook-yusic-worker.yml roles
 
       - name: yamllint
         run: yamllint .

@@ -94,6 +94,7 @@ for alias in "${targets[@]}"; do
   run_ansible "$alias" -m ansible.builtin.ping >/dev/null
 
   feature_docker="$(jq -r --arg alias "$alias" '.fleet_hosts[$alias].features.feature_docker // false' "$runtime_vars")"
+  feature_tailscale="$(jq -r --arg alias "$alias" '.fleet_hosts[$alias].features.feature_tailscale // false' "$runtime_vars")"
   feature_remnawave_node="$(jq -r --arg alias "$alias" '.fleet_hosts[$alias].features.feature_remnawave_node // false' "$runtime_vars")"
   feature_caddy_node="$(jq -r --arg alias "$alias" '.fleet_hosts[$alias].features.feature_caddy_node // false' "$runtime_vars")"
   feature_node_tuning="$(jq -r --arg alias "$alias" '.fleet_hosts[$alias].features.feature_node_tuning // false' "$runtime_vars")"
@@ -103,6 +104,11 @@ for alias in "${targets[@]}"; do
   if [[ "$feature_docker" == "true" ]]; then
     echo "[smoke][$alias] Check Docker service"
     run_ansible "$alias" -b -m ansible.builtin.command -a "systemctl is-active docker" >/dev/null
+  fi
+
+  if [[ "$feature_tailscale" == "true" ]]; then
+    echo "[smoke][$alias] Check tailscale backend state"
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "tailscale status --json 2>/dev/null | grep -Eq '\"BackendState\"[[:space:]]*:[[:space:]]*\"(Running|Starting)\"'" >/dev/null
   fi
 
   if [[ "$feature_remnawave_node" == "true" ]]; then

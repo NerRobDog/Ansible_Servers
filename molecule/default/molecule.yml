@@ -21,6 +21,7 @@ provisioner:
     host_vars:
       debian12:
         ansible_python_interpreter: /usr/local/bin/python3
+        ansible_become_method: su
   playbooks:
     converge: converge.yml
 

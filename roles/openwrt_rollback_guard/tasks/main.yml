@@ -1,0 +1,124 @@
+---
+- name: Validate OpenWrt rollback guard settings
+  ansible.builtin.assert:
+    that:
+      - openwrt_rollback_snapshot_dir | trim | length > 0
+      - openwrt_rollback_control_script | trim | length > 0
+      - (openwrt_rollback_timeout_minutes | int) >= 1
+      - (openwrt_rollback_timeout_minutes | int) <= 120
+      - openwrt_rollback_managed_paths is iterable
+      - openwrt_rollback_managed_paths is not string
+      - openwrt_rollback_managed_services is iterable
+      - openwrt_rollback_managed_services is not string
+    fail_msg: "Invalid OpenWrt rollback guard settings."
+  when: openwrt_rollback_guard_active | bool
+  tags: [openwrt, rollback]
+
+- name: Resolve rollback run id
+  ansible.builtin.set_fact:
+    openwrt_rollback_run_id: >-
+      {{ lookup('pipe', 'date +%Y%m%d%H%M%S') }}-{{ inventory_hostname | regex_replace('[^A-Za-z0-9_.-]', '_') }}
+  changed_when: false
+  when: openwrt_rollback_guard_active | bool
+  tags: [openwrt, rollback]
+
+- name: Ensure rollback root directory exists
+  ansible.builtin.raw: "mkdir -p {{ openwrt_rollback_snapshot_dir }}"
+  changed_when: false
+  when: openwrt_rollback_guard_active | bool
+  tags: [openwrt, rollback]
+
+- name: Install rollback guard control helper
+  ansible.builtin.raw: |
+    set -eu
+    mkdir -p "$(dirname {{ openwrt_rollback_control_script | quote }})"
+    cat <<'EOF_GUARD' > {{ openwrt_rollback_control_script | quote }}
+    {{ lookup('template', 'openwrt-rollback-guard.sh.j2') | trim }}
+    EOF_GUARD
+    chmod 700 {{ openwrt_rollback_control_script | quote }}
+  changed_when: true
+  when: openwrt_rollback_guard_active | bool
+  tags: [openwrt, rollback]
+
+- name: Prepare rollback snapshot and arm watchdog
+  ansible.builtin.raw: |
+    set -eu
+    base_dir="{{ openwrt_rollback_snapshot_dir }}"
+    run_id="{{ openwrt_rollback_run_id }}"
+    run_dir="${base_dir}/${run_id}"
+    files_dir="${run_dir}/files"
+    meta_dir="${run_dir}/meta"
+    current_link="${base_dir}/current"
+    timeout_seconds="$(({{ openwrt_rollback_timeout_minutes | int }} * 60))"
+
+    mkdir -p "${files_dir}" "${meta_dir}"
+
+    if [ -L "${current_link}" ]; then
+      prev_dir="$(readlink -f "${current_link}" 2>/dev/null || true)"
+      if [ -n "${prev_dir}" ] && [ -d "${prev_dir}/meta" ]; then
+        touch "${prev_dir}/meta/confirmed"
+        date -u '+%Y-%m-%dT%H:%M:%SZ' > "${prev_dir}/meta/confirmed_at"
+        echo "confirmed_by_new_run" > "${prev_dir}/meta/state"
+        if [ -f "${prev_dir}/meta/watchdog.pid" ]; then
+          old_pid="$(cat "${prev_dir}/meta/watchdog.pid" 2>/dev/null || true)"
+          if [ -n "${old_pid}" ]; then
+            kill "${old_pid}" >/dev/null 2>&1 || true
+          fi
+        fi
+      fi
+    fi
+
+    cat <<'EOF_ROLLBACK' > "${run_dir}/rollback.sh"
+    {{ lookup('template', 'openwrt-rollback-run.sh.j2') | trim }}
+    EOF_ROLLBACK
+    chmod 700 "${run_dir}/rollback.sh"
+
+    : > "${meta_dir}/managed_paths.txt"
+    {% for managed_path in openwrt_rollback_managed_paths %}
+    echo "{{ managed_path }}" >> "${meta_dir}/managed_paths.txt"
+    {% endfor %}
+
+    while IFS= read -r target; do
+      [ -n "${target}" ] || continue
+      backup="${files_dir}${target}"
+      if [ -e "${target}" ] || [ -L "${target}" ]; then
+        mkdir -p "$(dirname "${backup}")"
+        cp -a "${target}" "${backup}"
+      fi
+    done < "${meta_dir}/managed_paths.txt"
+
+    opkg list-installed | awk '{print $1}' | sort -u > "${meta_dir}/packages_before.txt"
+    uci export > "${meta_dir}/uci_before.export" 2>/dev/null || true
+
+    cat <<'EOF_SERVICES' > "${meta_dir}/managed_services.txt"
+    {% for managed_service in openwrt_rollback_managed_services %}
+    {{ managed_service }}
+    {% endfor %}
+    EOF_SERVICES
+
+    date -u '+%Y-%m-%dT%H:%M:%SZ' > "${meta_dir}/armed_at"
+    echo "armed" > "${meta_dir}/state"
+    rm -f "${meta_dir}/confirmed" "${meta_dir}/confirmed_at" "${meta_dir}/rolling_back" "${meta_dir}/rolled_back_at"
+
+    ln -sfn "${run_dir}" "${current_link}"
+
+    (
+      sleep "${timeout_seconds}"
+      if [ ! -f "${meta_dir}/confirmed" ]; then
+        "${run_dir}/rollback.sh" auto
+      fi
+    ) >/dev/null 2>&1 &
+
+    echo "$!" > "${meta_dir}/watchdog.pid"
+    echo "ARMED ${run_id}"
+  register: openwrt_rollback_prepare
+  changed_when: true
+  failed_when: openwrt_rollback_prepare.rc != 0
+  when: openwrt_rollback_guard_active | bool
+  tags: [openwrt, rollback]
+
+- name: Verify rollback guard state is armed
+  ansible.builtin.raw: "{{ openwrt_rollback_control_script }} status | grep -q '^ARMED '"
+  changed_when: false
+  when: openwrt_rollback_guard_active | bool
+  tags: [openwrt, rollback]

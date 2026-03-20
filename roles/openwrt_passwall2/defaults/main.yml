@@ -1,0 +1,59 @@
+---
+passwall2_enabled: true
+passwall2_feed_name: openwrt_kiddin9
+passwall2_feed_url: "https://master.dl.sourceforge.net/project/openwrt-passwall-build/releases/packages-24.10/aarch64_cortex-a53/passwall2"
+passwall2_dep_feed_name: openwrt_passwall2_deps
+passwall2_dep_feed_url: "https://downloads.immortalwrt.org/releases/23.05.3/packages/aarch64_cortex-a53/packages"
+passwall2_download_timeout: 20
+passwall2_download_retries: 2
+passwall2_subscribe_url: ""
+passwall2_probe_url: https://www.gstatic.com/generate_204
+passwall2_socks_port: 1070
+passwall2_profile_overrides: {}
+passwall2_auto_enable_when_nodes: false
+passwall2_require_nodes_for_enable: true
+
+passwall2_geoip_url_v2ray: https://github.com/hydraponique/roscomvpn-geoip/releases/download/202510180601/geoip.dat
+passwall2_geosite_url_v2ray: https://github.com/hydraponique/roscomvpn-geosite/releases/download/202510180849/geosite.dat
+passwall2_geoip_url_singbox: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.db
+passwall2_geosite_url_singbox: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.db
+
+passwall2_packages:
+  - luci-app-passwall2
+  - sing-box
+  - xray-core
+  - chinadns-ng
+  - dns2socks
+  - ipt2socks
+  - microsocks
+  - naiveproxy
+
+passwall2_profile_defaults:
+  enabled: "0"
+  acl_enable: "1"
+  loglevel: error
+  tcp_redir_ports: 22,25,53,143,465,587,853,993,995,80,443
+  udp_redir_ports: 1:65535
+  remote_dns_doh: https://1.1.1.1/dns-query
+  dns_hosts:
+    - cloudflare-dns.com 1.1.1.1
+    - dns.google.com 8.8.8.8
+  direct_domains:
+    - geosite:private
+    - geosite:category-ru
+    - geosite:microsoft
+    - geosite:apple
+    - geosite:twitch
+    - geosite:steam
+    - geosite:sony
+    - geosite:playstation
+    - geosite:category-games
+  proxy_domains:
+    - geosite:tiktok
+    - geosite:signal
+  ban_ru_domains:
+    - "#geosite:category-ban-ru"
+    - geosite:discord
+    - geosite:youtube
+  direct_ip_list: geoip:private
+  proxy_ip_list: "#geoip:proxy"

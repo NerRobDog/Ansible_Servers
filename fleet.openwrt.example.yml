@@ -1,0 +1,113 @@
+---
+# OpenWrt fleet template for OPENWRT_FLEET_CONFIG_B64 (GitHub Environment Secret).
+# Model:
+# - bootstrap: first run via LAN (fallback ZT), copy SSH key
+# - deploy/lockdown: prefer ZT endpoint (fallback LAN)
+# - passwall2 is fully managed; usually only subscribe_url differs per host
+
+defaults:
+  deploy_user: root
+  ansible_port: 22
+  bootstrap:
+    username: root
+    password: "CHANGE_ME_BOOTSTRAP_PASSWORD"
+  access:
+    # Optional multi-jump fallback if ZT endpoint is reachable only through jump.
+    proxy_jumps: []
+    # SSH key used by local wrapper and runtime inventory for deploy/lockdown.
+    ssh_private_key_file: "~/.ssh/id_ed25519"
+  features:
+    feature_openwrt_base: true
+    feature_openwrt_wan: true
+    feature_openwrt_zerotier: true
+    feature_tailscale: false
+    feature_openwrt_passwall2: true
+    feature_openwrt_homeproxy_cleanup: true
+    feature_openwrt_docker_stacks: true
+    feature_openwrt_monitoring_agent: true
+    feature_openwrt_ssh_lockdown: false
+  zerotier:
+    enabled: true
+    network_id: "a84ac5c10a8906ee"
+    manage_secret: false
+    secret: ""
+  passwall2:
+    enabled: true
+    subscribe_url: ""
+    probe_url: "https://www.gstatic.com/generate_204"
+    socks_port: 1070
+    profile_overrides: {}
+  monitoring:
+    openwrt_monitoring_enabled: true
+    openwrt_node_exporter_port: 9100
+    openwrt_probe_interval_minutes: 1
+  docker:
+    manage_runtime: true
+    compose_command: docker-compose
+    stacks: []
+  custom_roles: []
+  wan:
+    enabled: true
+    proto: dhcp
+    device: eth0
+    ipaddr: ""
+    netmask: ""
+    gateway: ""
+    dns: []
+    pppoe_username: ""
+    pppoe_password: ""
+    pppoe_ipv6: auto
+
+hosts:
+  wrt_de:
+    access:
+      lan_host: 192.168.88.1
+      zt_host: 172.23.11.10
+      lan_port: 22
+      zt_port: 22
+    bootstrap:
+      username: root
+      password: "CHANGE_ME_DE_BOOTSTRAP_PASSWORD"
+    wan:
+      proto: pppoe
+      device: eth0
+      pppoe_username: "CHANGE_ME_PPPoE_USER"
+      pppoe_password: "CHANGE_ME_PPPoE_PASSWORD"
+      pppoe_ipv6: auto
+    passwall2:
+      subscribe_url: "https://provider.example/sub/de"
+    docker:
+      stacks:
+        - name: dns-stack
+          compose_content: |
+            services:
+              adguardhome:
+                image: adguard/adguardhome:latest
+                restart: unless-stopped
+                network_mode: host
+    custom_roles: []
+
+  wrt_nl:
+    access:
+      lan_host: 192.168.89.1
+      zt_host: 172.23.11.11
+      lan_port: 22
+      zt_port: 22
+    bootstrap:
+      username: root
+      password: "CHANGE_ME_NL_BOOTSTRAP_PASSWORD"
+    wan:
+      proto: static
+      device: eth0
+      ipaddr: 192.0.2.10
+      netmask: 255.255.255.0
+      gateway: 192.0.2.1
+      dns:
+        - 1.1.1.1
+        - 8.8.8.8
+    passwall2:
+      subscribe_url: "https://provider.example/sub/nl"
+    features:
+      # Example: this host runs base/zerotier/passwall2/monitoring only.
+      feature_openwrt_docker_stacks: false
+    custom_roles: []

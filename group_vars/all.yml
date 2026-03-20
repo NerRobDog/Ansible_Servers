@@ -101,6 +101,7 @@ remnawave_warp_enabled: false
 feature_base: true
 feature_firewall: true
 feature_docker: true
+feature_tailscale: false
 feature_remnawave_node: false
 feature_caddy_node: false
 feature_node_tuning: false
@@ -111,6 +112,122 @@ custom_roles: []
 ssh_lockdown_enabled: false
 fleet_mode: deploy
 fleet_hosts: {}
+openwrt_fleet_hosts: {}
+
+# OpenWrt fleet defaults
+feature_openwrt_base: true
+feature_openwrt_wan: false
+feature_openwrt_zerotier: true
+feature_openwrt_passwall2: true
+feature_openwrt_homeproxy_cleanup: true
+feature_openwrt_docker_stacks: true
+feature_openwrt_monitoring_agent: true
+feature_openwrt_ssh_lockdown: false
+
+openwrt_base_packages:
+  - ca-bundle
+  - curl
+  - jq
+  - coreutils-timeout
+  - openssh-sftp-server
+
+openwrt_bootstrap_public_key: ""
+
+openwrt_wan_enabled: true
+openwrt_wan_proto: dhcp
+openwrt_wan_device: eth0
+openwrt_wan_ipaddr: ""
+openwrt_wan_netmask: ""
+openwrt_wan_gateway: ""
+openwrt_wan_dns: []
+openwrt_wan_pppoe_username: ""
+openwrt_wan_pppoe_password: ""
+openwrt_wan_pppoe_ipv6: auto
+
+zerotier_enabled: true
+zerotier_package: zerotier
+zerotier_service_name: zerotier
+zerotier_network_id: ""
+zerotier_manage_secret: false
+zerotier_secret: ""
+
+passwall2_enabled: true
+passwall2_feed_name: openwrt_kiddin9
+passwall2_feed_url: "https://master.dl.sourceforge.net/project/openwrt-passwall-build/releases/packages-24.10/aarch64_cortex-a53/passwall2"
+passwall2_dep_feed_name: openwrt_passwall2_deps
+passwall2_dep_feed_url: "https://downloads.immortalwrt.org/releases/23.05.3/packages/aarch64_cortex-a53/packages"
+passwall2_download_timeout: 20
+passwall2_download_retries: 2
+passwall2_subscribe_url: ""
+passwall2_probe_url: https://www.gstatic.com/generate_204
+passwall2_socks_port: 1070
+passwall2_profile_overrides: {}
+passwall2_geoip_url_v2ray: https://github.com/hydraponique/roscomvpn-geoip/releases/download/202510180601/geoip.dat
+passwall2_geosite_url_v2ray: https://github.com/hydraponique/roscomvpn-geosite/releases/download/202510180849/geosite.dat
+passwall2_geoip_url_singbox: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.db
+passwall2_geosite_url_singbox: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.db
+passwall2_packages:
+  - luci-app-passwall2
+  - sing-box
+  - xray-core
+  - chinadns-ng
+  - dns2socks
+  - ipt2socks
+  - microsocks
+  - naiveproxy
+
+openwrt_homeproxy_cleanup_packages:
+  - luci-app-homeproxy
+  - homeproxy
+
+openwrt_docker_manage_runtime: true
+openwrt_docker_compose_command: docker-compose
+openwrt_docker_stacks: []
+
+openwrt_monitoring_enabled: true
+openwrt_node_exporter_port: 9100
+openwrt_probe_interval_minutes: 1
+openwrt_probe_timeout_seconds: 12
+openwrt_probe_script_path: /usr/local/bin/openwrt-connectivity-probe.sh
+
+openwrt_ssh_lockdown_enabled: false
+openwrt_ssh_password_authentication: "off"
+openwrt_ssh_root_password_authentication: "off"
+
+openwrt_rollback_enabled: true
+openwrt_rollback_timeout_minutes: 10
+openwrt_rollback_reboot_on_restore: true
+openwrt_rollback_snapshot_dir: /root/.ansible-rollback
+openwrt_rollback_control_script: /usr/local/sbin/openwrt-rollback-guard
+openwrt_rollback_managed_paths:
+  - /etc/config/dropbear
+  - /etc/config/network
+  - /etc/dropbear/authorized_keys
+  - /etc/config/zerotier
+  - /etc/config/passwall2
+  - /etc/config/homeproxy
+  - /etc/config/prometheus-node-exporter-lua
+  - /etc/crontabs/root
+  - /usr/local/bin/openwrt-connectivity-probe.sh
+  - /opt/docker-stacks
+openwrt_rollback_managed_services:
+  - dropbear
+  - network
+  - zerotier
+  - passwall2
+  - prometheus-node-exporter-lua
+  - cron
+  - dockerd
+
+# Tailscale defaults (shared for server + OpenWrt role)
+tailscale_enabled: true
+tailscale_state: present
+tailscale_auth_key_env: TAILSCALE_AUTH_KEY
+tailscale_extra_args: []
+tailscale_package: tailscale
+tailscale_service_name: tailscaled
+tailscale_openwrt_service_name: tailscale
+tailscale_openwrt_prereq_packages: []
 
 # Monitoring defaults
 monitoring_agent_bind_address: "0.0.0.0"
@@ -131,3 +248,4 @@ monitoring_stack_alertmanager_port: 9093
 monitoring_stack_grafana_port: 3000
 monitoring_stack_loki_port: 3100
 monitoring_stack_scrape_fleet_agents: true
+monitoring_stack_scrape_openwrt_agents: true

@@ -2,6 +2,9 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+rule_files:
+  - /etc/prometheus/openwrt-alerts.yml
+
 scrape_configs:
   - job_name: prometheus
     static_configs:
@@ -34,6 +37,21 @@ scrape_configs:
     static_configs:
 {% for host in monitoring_stack_scrape_hosts %}
       - targets: ["{{ host.value.ansible_host }}:{{ host.value.monitoring.agent_cadvisor_port | default(monitoring_agent_cadvisor_port) }}"]
+        labels:
+          instance: "{{ host.key }}"
+{% endfor %}
+{% else %}
+    static_configs: []
+{% endif %}
+{% endif %}
+
+{% if monitoring_stack_scrape_openwrt_agents | bool %}
+  - job_name: monitoring-openwrt-node-exporter
+{% if monitoring_stack_openwrt_scrape_hosts | length > 0 %}
+    metrics_path: /metrics
+    static_configs:
+{% for host in monitoring_stack_openwrt_scrape_hosts %}
+      - targets: ["{{ host.value.ansible_host }}:{{ host.value.monitoring.openwrt_node_exporter_port | default(openwrt_node_exporter_port) }}"]
         labels:
           instance: "{{ host.key }}"
 {% endfor %}

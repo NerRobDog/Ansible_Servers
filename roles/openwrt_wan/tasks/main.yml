@@ -1,0 +1,105 @@
+---
+- name: Validate OpenWrt WAN settings
+  ansible.builtin.assert:
+    that:
+      - openwrt_wan_proto in ['dhcp', 'static', 'pppoe']
+      - openwrt_wan_device | trim | length > 0
+      - (openwrt_wan_proto != 'static') or (openwrt_wan_ipaddr | trim | length > 0)
+      - (openwrt_wan_proto != 'static') or (openwrt_wan_netmask | trim | length > 0)
+      - (openwrt_wan_proto != 'pppoe') or (openwrt_wan_pppoe_username | trim | length > 0)
+      - (openwrt_wan_proto != 'pppoe') or (openwrt_wan_pppoe_password | trim | length > 0)
+      - openwrt_wan_pppoe_ipv6 in ['auto', '0', '1']
+      - openwrt_wan_dns is iterable
+      - openwrt_wan_dns is not string
+    fail_msg: "Invalid OpenWrt WAN config. Check wan proto/device/static/pppoe fields."
+  tags: [openwrt, wan, network]
+
+- name: Configure OpenWrt WAN interface
+  ansible.builtin.raw: |
+    set -eu
+
+    proto='{{ openwrt_wan_proto }}'
+    changed='0'
+
+    ensure_set() {
+      key="$1"
+      val="$2"
+      current="$(uci -q get "$key" || true)"
+      if [ "$current" != "$val" ]; then
+        uci set "$key=$val"
+        changed='1'
+      fi
+    }
+
+    ensure_delete() {
+      key="$1"
+      if uci -q get "$key" >/dev/null 2>&1; then
+        uci -q delete "$key"
+        changed='1'
+      fi
+    }
+
+    if [ "$(uci -q get network.wan || true)" != "interface" ]; then
+      uci -q delete network.wan || true
+      uci set network.wan='interface'
+      changed='1'
+    fi
+
+    ensure_set network.wan.device '{{ openwrt_wan_device }}'
+    ensure_set network.wan.proto "$proto"
+
+    if [ "$proto" = "dhcp" ]; then
+      ensure_delete network.wan.ipaddr
+      ensure_delete network.wan.netmask
+      ensure_delete network.wan.gateway
+      ensure_delete network.wan.username
+      ensure_delete network.wan.password
+      ensure_delete network.wan.ipv6
+      ensure_delete network.wan.dns
+    fi
+
+    if [ "$proto" = "static" ]; then
+      ensure_set network.wan.ipaddr '{{ openwrt_wan_ipaddr }}'
+      ensure_set network.wan.netmask '{{ openwrt_wan_netmask }}'
+      if [ '{{ openwrt_wan_gateway | trim }}' = '' ]; then
+        ensure_delete network.wan.gateway
+      else
+        ensure_set network.wan.gateway '{{ openwrt_wan_gateway }}'
+      fi
+      ensure_delete network.wan.username
+      ensure_delete network.wan.password
+      ensure_delete network.wan.ipv6
+      current_dns="$(uci -q get network.wan.dns 2>/dev/null | sed 's/[[:space:]]*$//')"
+      desired_dns='{{ openwrt_wan_dns | map("trim") | reject("equalto", "") | join(" ") }}'
+      if [ "$current_dns" != "$desired_dns" ]; then
+        ensure_delete network.wan.dns
+        {% for dns in openwrt_wan_dns %}
+        {% if dns | trim | length > 0 %}
+        uci add_list network.wan.dns='{{ dns }}'
+        {% endif %}
+        {% endfor %}
+        changed='1'
+      fi
+    fi
+
+    if [ "$proto" = "pppoe" ]; then
+      ensure_set network.wan.username '{{ openwrt_wan_pppoe_username }}'
+      ensure_set network.wan.password '{{ openwrt_wan_pppoe_password }}'
+      ensure_set network.wan.ipv6 '{{ openwrt_wan_pppoe_ipv6 }}'
+      ensure_delete network.wan.ipaddr
+      ensure_delete network.wan.netmask
+      ensure_delete network.wan.gateway
+      ensure_delete network.wan.dns
+    fi
+
+    if [ "$changed" = "1" ]; then
+      uci commit network
+      /etc/init.d/network reload >/dev/null 2>&1 || /etc/init.d/network restart
+      echo CHANGED
+    else
+      echo NOCHANGE
+    fi
+  register: openwrt_wan_configure
+  changed_when: "'CHANGED' in openwrt_wan_configure.stdout"
+  failed_when: openwrt_wan_configure.rc != 0
+  tags: [openwrt, wan, network]

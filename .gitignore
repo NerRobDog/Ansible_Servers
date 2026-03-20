@@ -1,5 +1,6 @@
 .DS_Store
 .venv/
+.venv*/
 .ansible/
 __pycache__/
 *.pyc
@@ -9,5 +10,8 @@ hosts.plain.ini
 
 # Local/operator-only files
 fleet.yml
+fleet.openwrt.yml
+openwrt-fleet.yml
+openwrt-fleet.yaml
 VLESS_TCP.txt
 VLESS_with_nginx.txt

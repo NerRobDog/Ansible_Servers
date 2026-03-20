@@ -1,0 +1,39 @@
+---
+- name: Apply Dropbear SSH lockdown options
+  ansible.builtin.raw: |
+    CHANGED=0
+
+    sections="$(uci show dropbear 2>/dev/null | sed -n "s/^dropbear\.\([^=]*\)=dropbear/\1/p")"
+    if [ -z "${sections}" ]; then
+      uci set dropbear.main='dropbear'
+      sections="main"
+      CHANGED=1
+    fi
+
+    for section in ${sections}; do
+      current_pw="$(uci -q get dropbear.${section}.PasswordAuth || echo on)"
+      current_root="$(uci -q get dropbear.${section}.RootPasswordAuth || echo on)"
+
+      if [ "${current_pw}" != "{{ openwrt_ssh_password_authentication }}" ]; then
+        uci set dropbear.${section}.PasswordAuth='{{ openwrt_ssh_password_authentication }}'
+        CHANGED=1
+      fi
+
+      if [ "${current_root}" != "{{ openwrt_ssh_root_password_authentication }}" ]; then
+        uci set dropbear.${section}.RootPasswordAuth='{{ openwrt_ssh_root_password_authentication }}'
+        CHANGED=1
+      fi
+    done
+
+    if [ "$CHANGED" -eq 1 ]; then
+      uci commit dropbear
+      /etc/init.d/dropbear restart
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  when: openwrt_ssh_lockdown_enabled | bool
+  register: openwrt_ssh_lockdown_result
+  changed_when: "'CHANGED' in openwrt_ssh_lockdown_result.stdout"
+  failed_when: openwrt_ssh_lockdown_result.rc != 0
+  tags: [openwrt, ssh, lockdown]

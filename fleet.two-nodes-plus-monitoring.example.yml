@@ -18,6 +18,7 @@ defaults:
   features:
     feature_base: true
     feature_docker: true
+    feature_tailscale: false
     feature_remnawave_node: false
     feature_caddy_node: false
     feature_node_tuning: false

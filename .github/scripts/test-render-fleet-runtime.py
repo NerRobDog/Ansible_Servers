@@ -111,17 +111,22 @@ def test_valid_json_input() -> None:
                 "ansible_host": "198.51.100.20",
                 "deploy_user": "ops",
                 "bootstrap": {"username": "root", "password": "pw"},
-                "features": {"feature_docker": True},
+                "features": {"feature_docker": True, "feature_tailscale": True},
                 "remnawave": {"node_secret_key": "secret-from-json"},
             }
         }
     }
 
-    proc, inv_path, _, _ = run_renderer(json.dumps(config), "deploy", suffix=".json")
+    proc, inv_path, vars_path, _ = run_renderer(json.dumps(config), "deploy", suffix=".json")
     assert_true(proc.returncode == 0, f"JSON input failed: {proc.stderr or proc.stdout}")
     inv_text = inv_path.read_text(encoding="utf-8")
     line = parse_inventory_line(inv_text, "nl_node")
     assert_true("ansible_user=ops" in line, f"deploy_user from JSON not applied: {line}")
+    runtime_vars = json.loads(vars_path.read_text(encoding="utf-8"))
+    assert_true(
+        runtime_vars["fleet_hosts"]["nl_node"]["features"]["feature_tailscale"] is True,
+        "feature_tailscale from JSON not applied",
+    )
 
 
 def test_invalid_missing_ansible_host() -> None:

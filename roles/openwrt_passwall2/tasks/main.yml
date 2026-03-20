@@ -1,0 +1,276 @@
+---
+- name: Validate passwall2 subscribe url when enabled
+  ansible.builtin.assert:
+    that:
+      - passwall2_subscribe_url | trim | length > 0
+    fail_msg: "passwall2_subscribe_url is required when passwall2 is enabled"
+  when: passwall2_enabled | bool
+  tags: [openwrt, passwall2]
+
+- name: Ensure passwall2 feeds are present and normalized
+  ansible.builtin.raw: |
+    set -eu
+    file="/etc/opkg/customfeeds.conf"
+    old_sum="$(md5sum "$file" 2>/dev/null | awk '{print $1}')"
+
+    tmp_file="$(mktemp)"
+    awk '
+      BEGIN { main_printed=0; dep_printed=0 }
+      $1=="src/gz" && ($2=="passwall2" || $2=="fw876" || $2 ~ /^immortalwrt_/) {
+        next
+      }
+      $1=="src/gz" && $2=="{{ passwall2_feed_name }}" {
+        if (main_printed==0) {
+          print "src/gz {{ passwall2_feed_name }} {{ passwall2_feed_url }}"
+          main_printed=1
+        }
+        next
+      }
+      $1=="src/gz" && $2=="{{ passwall2_dep_feed_name }}" {
+        if (dep_printed==0) {
+          print "src/gz {{ passwall2_dep_feed_name }} {{ passwall2_dep_feed_url }}"
+          dep_printed=1
+        }
+        next
+      }
+      { print }
+      END {
+        if (main_printed==0) {
+          print "src/gz {{ passwall2_feed_name }} {{ passwall2_feed_url }}"
+        }
+        if (dep_printed==0) {
+          print "src/gz {{ passwall2_dep_feed_name }} {{ passwall2_dep_feed_url }}"
+        }
+      }
+    ' "$file" > "$tmp_file"
+
+    mv "$tmp_file" "$file"
+    new_sum="$(md5sum "$file" | awk '{print $1}')"
+
+    if [ "$old_sum" != "$new_sum" ]; then
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  when: passwall2_enabled | bool
+  register: openwrt_passwall2_feed
+  changed_when: "'CHANGED' in openwrt_passwall2_feed.stdout"
+  failed_when: openwrt_passwall2_feed.rc != 0
+  tags: [openwrt, passwall2]
+
+- name: Install passwall2 packages
+  ansible.builtin.raw: |
+    set -eu
+    missing=""
+    for pkg in {{ passwall2_packages | join(' ') }}; do
+      opkg list-installed | grep -q "^${pkg} " || missing="${missing} ${pkg}"
+    done
+
+    if [ -z "${missing}" ]; then
+      echo "NOCHANGE"
+      exit 0
+    fi
+
+    workdir="$(mktemp -d)"
+    trap 'rm -rf "${workdir}"' EXIT INT TERM
+
+    fetch_feed_index() {
+      feed_name="$1"
+      feed_url="$2"
+      feed_gz="${workdir}/${feed_name}.Packages.gz"
+      feed_txt="${workdir}/${feed_name}.Packages"
+
+      wget -q -T {{ passwall2_download_timeout | int }} -t {{ passwall2_download_retries | int }} -O "${feed_gz}" "${feed_url}/Packages.gz"
+      gzip -dc "${feed_gz}" > "${feed_txt}"
+    }
+
+    find_pkg_url() {
+      pkg="$1"
+      feed_name="$2"
+      feed_url="$3"
+      feed_txt="${workdir}/${feed_name}.Packages"
+
+      rel="$(awk -v pkg="${pkg}" '
+        BEGIN { in_pkg=0; filename="" }
+        /^Package:[[:space:]]*/ {
+          split($0, a, ":")
+          name=substr($0, index($0, ":")+1)
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
+          in_pkg=(name==pkg)
+          filename=""
+          next
+        }
+        in_pkg && /^Filename:[[:space:]]*/ {
+          filename=substr($0, index($0, ":")+1)
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", filename)
+          print filename
+          exit
+        }
+      ' "${feed_txt}")"
+
+      if [ -n "${rel}" ]; then
+        echo "${feed_url}/${rel}"
+        return 0
+      fi
+      return 1
+    }
+
+    fetch_feed_index "{{ passwall2_feed_name }}" "{{ passwall2_feed_url }}"
+    fetch_feed_index "{{ passwall2_dep_feed_name }}" "{{ passwall2_dep_feed_url }}"
+
+    changed=0
+    for pkg in ${missing}; do
+      pkg_url=""
+      if pkg_url="$(find_pkg_url "${pkg}" "{{ passwall2_feed_name }}" "{{ passwall2_feed_url }}")"; then
+        :
+      elif pkg_url="$(find_pkg_url "${pkg}" "{{ passwall2_dep_feed_name }}" "{{ passwall2_dep_feed_url }}")"; then
+        :
+      else
+        echo "Package '${pkg}' not found in configured passwall feeds." >&2
+        exit 1
+      fi
+
+      pkg_file="${workdir}/${pkg}.ipk"
+      wget -q -T {{ passwall2_download_timeout | int }} -t {{ passwall2_download_retries | int }} -O "${pkg_file}" "${pkg_url}"
+      opkg install "${pkg_file}"
+      changed=1
+    done
+
+    if [ "${changed}" -eq 1 ]; then
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  when: passwall2_enabled | bool
+  register: openwrt_passwall2_install
+  changed_when: "'CHANGED' in openwrt_passwall2_install.stdout"
+  failed_when: openwrt_passwall2_install.rc != 0
+  tags: [openwrt, passwall2]
+
+- name: Build effective passwall2 profile options
+  ansible.builtin.set_fact:
+    passwall2_profile_effective: "{{ passwall2_profile_defaults | combine(passwall2_profile_overrides | default({}), recursive=True) }}"
+  when: passwall2_enabled | bool
+  changed_when: false
+  tags: [openwrt, passwall2]
+
+- name: Deploy managed passwall2 config
+  ansible.builtin.raw: |
+    set -eu
+    old_sum="$(md5sum /etc/config/passwall2 2>/dev/null | awk '{print $1}')"
+    cat <<'EOF_CONFIG' > /etc/config/passwall2
+    {{ lookup('template', 'passwall2.j2') | trim }}
+    EOF_CONFIG
+    new_sum="$(md5sum /etc/config/passwall2 | awk '{print $1}')"
+
+    if [ "${old_sum}" != "${new_sum}" ]; then
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  when: passwall2_enabled | bool
+  register: openwrt_passwall2_config
+  changed_when: "'CHANGED' in openwrt_passwall2_config.stdout"
+  failed_when: openwrt_passwall2_config.rc != 0
+  notify: Restart passwall2
+  tags: [openwrt, passwall2]
+
+- name: Detect available Passwall2 runtime nodes
+  ansible.builtin.raw: |
+    sh -c "uci show passwall2 | grep '=nodes' | grep -v \"protocol='_'\" | wc -l"
+  when: passwall2_enabled | bool
+  register: openwrt_passwall2_nodes_count_raw
+  changed_when: false
+  failed_when: openwrt_passwall2_nodes_count_raw.rc != 0
+  tags: [openwrt, passwall2]
+
+- name: Parse Passwall2 runtime nodes count
+  ansible.builtin.set_fact:
+    openwrt_passwall2_nodes_count: "{{ (openwrt_passwall2_nodes_count_raw.stdout | regex_search('([0-9]+)', '\\1') | first | default('0')) | int }}"
+  when: passwall2_enabled | bool
+  changed_when: false
+  tags: [openwrt, passwall2]
+
+- name: Disable Passwall2 global switch by default (safe mode)
+  ansible.builtin.raw: |
+    set -eu
+    current="$(uci -q get passwall2.global.enabled || echo 0)"
+    if [ "${current}" = "0" ]; then
+      echo "NOCHANGE"
+    else
+      uci set passwall2.global.enabled='0'
+      uci commit passwall2
+      echo "CHANGED"
+    fi
+  when:
+    - passwall2_enabled | bool
+    - not (passwall2_auto_enable_when_nodes | bool)
+  register: openwrt_passwall2_safe_mode
+  changed_when: "'CHANGED' in openwrt_passwall2_safe_mode.stdout"
+  failed_when: openwrt_passwall2_safe_mode.rc != 0
+  notify: Restart passwall2
+  tags: [openwrt, passwall2]
+
+- name: Enable Passwall2 global switch when nodes are present and auto-enable is on
+  ansible.builtin.raw: |
+    set -eu
+    current="$(uci -q get passwall2.global.enabled || echo 0)"
+    if [ "${current}" = "1" ]; then
+      echo "NOCHANGE"
+    else
+      uci set passwall2.global.enabled='1'
+      uci commit passwall2
+      echo "CHANGED"
+    fi
+  when:
+    - passwall2_enabled | bool
+    - passwall2_auto_enable_when_nodes | bool
+    - (not passwall2_require_nodes_for_enable | bool) or (openwrt_passwall2_nodes_count | int > 0)
+  register: openwrt_passwall2_auto_enable
+  changed_when: "'CHANGED' in openwrt_passwall2_auto_enable.stdout"
+  failed_when: openwrt_passwall2_auto_enable.rc != 0
+  notify: Restart passwall2
+  tags: [openwrt, passwall2]
+
+- name: Warn when Passwall2 auto-enable is requested but no runtime nodes found
+  ansible.builtin.debug:
+    msg: >-
+      passwall2_auto_enable_when_nodes=true but no runtime nodes found.
+      Keeping passwall2.global.enabled=0 (safe mode).
+  when:
+    - passwall2_enabled | bool
+    - passwall2_auto_enable_when_nodes | bool
+    - passwall2_require_nodes_for_enable | bool
+    - openwrt_passwall2_nodes_count | int == 0
+  tags: [openwrt, passwall2]
+
+- name: Detect passwall2 init service
+  ansible.builtin.raw: |
+    if [ -x /etc/init.d/passwall2 ]; then
+      echo PRESENT
+    else
+      echo ABSENT
+    fi
+  when: passwall2_enabled | bool
+  register: openwrt_passwall2_service_probe
+  changed_when: false
+  failed_when: openwrt_passwall2_service_probe.rc != 0
+  tags: [openwrt, passwall2]
+
+- name: Enable passwall2 at boot
+  ansible.builtin.raw: "/etc/init.d/passwall2 enable"
+  when:
+    - passwall2_enabled | bool
+    - "'PRESENT' in (openwrt_passwall2_service_probe.stdout | default(''))"
+  changed_when: false
+  tags: [openwrt, passwall2]
+
+- name: Warn when passwall2 init service is missing
+  ansible.builtin.debug:
+    msg: >-
+      passwall2 package set is incomplete: /etc/init.d/passwall2 is missing.
+      Check feed compatibility and dependencies (tcping/geoview) for this host.
+  when:
+    - passwall2_enabled | bool
+    - "'ABSENT' in (openwrt_passwall2_service_probe.stdout | default(''))"
+  tags: [openwrt, passwall2]

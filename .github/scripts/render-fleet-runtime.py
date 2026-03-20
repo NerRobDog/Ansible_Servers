@@ -19,6 +19,7 @@ FEATURE_DEFAULTS = {
     "feature_base": True,
     "feature_firewall": True,
     "feature_docker": True,
+    "feature_tailscale": False,
     "feature_remnawave_node": False,
     "feature_caddy_node": False,
     "feature_node_tuning": False,

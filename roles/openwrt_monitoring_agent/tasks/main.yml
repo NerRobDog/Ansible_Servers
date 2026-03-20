@@ -1,0 +1,134 @@
+---
+- name: Validate OpenWrt monitoring settings
+  ansible.builtin.assert:
+    that:
+      - (openwrt_node_exporter_port | int) > 0
+      - (openwrt_node_exporter_port | int) < 65536
+      - (openwrt_probe_interval_minutes | int) > 0
+      - (openwrt_probe_interval_minutes | int) <= 60
+      - (openwrt_probe_timeout_seconds | int) > 0
+      - passwall2_probe_url | trim | length > 0
+    fail_msg: "Invalid OpenWrt monitoring settings"
+  when: openwrt_monitoring_enabled | bool
+  tags: [openwrt, monitoring]
+
+- name: Install OpenWrt monitoring packages
+  ansible.builtin.raw: |
+    missing=""
+    for pkg in {{ openwrt_monitoring_packages | join(' ') }}; do
+      opkg list-installed | grep -q "^${pkg} " || missing="${missing} ${pkg}"
+    done
+
+    if [ -n "${missing}" ]; then
+      opkg update >/dev/null 2>&1 || opkg update
+      opkg install ${missing}
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  when: openwrt_monitoring_enabled | bool
+  register: openwrt_monitoring_packages_install
+  changed_when: "'CHANGED' in openwrt_monitoring_packages_install.stdout"
+  failed_when: openwrt_monitoring_packages_install.rc != 0
+  tags: [openwrt, monitoring]
+
+- name: Deploy prometheus-node-exporter-lua config
+  ansible.builtin.raw: |
+    set -eu
+    old_sum="$(md5sum /etc/config/prometheus-node-exporter-lua 2>/dev/null | awk '{print $1}')"
+    cat <<'EOF_CONFIG' > /etc/config/prometheus-node-exporter-lua
+    {{ lookup('template', 'prometheus-node-exporter-lua.j2') | trim }}
+    EOF_CONFIG
+    new_sum="$(md5sum /etc/config/prometheus-node-exporter-lua | awk '{print $1}')"
+
+    if [ "${old_sum}" != "${new_sum}" ]; then
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  when: openwrt_monitoring_enabled | bool
+  register: openwrt_exporter_config
+  changed_when: "'CHANGED' in openwrt_exporter_config.stdout"
+  failed_when: openwrt_exporter_config.rc != 0
+  tags: [openwrt, monitoring]
+
+- name: Enable and restart prometheus-node-exporter-lua service when config changed
+  ansible.builtin.raw: |
+    /etc/init.d/prometheus-node-exporter-lua enable >/dev/null 2>&1 || true
+    if [ "{{ '1' if openwrt_exporter_config.changed else '0' }}" = "1" ]; then
+      /etc/init.d/prometheus-node-exporter-lua restart
+    else
+      /etc/init.d/prometheus-node-exporter-lua start >/dev/null 2>&1 || true
+    fi
+    echo "OK"
+  when: openwrt_monitoring_enabled | bool
+  changed_when: false
+  tags: [openwrt, monitoring]
+
+- name: Ensure Prometheus textfile directory exists
+  ansible.builtin.raw: "mkdir -p /var/prometheus"
+  when: openwrt_monitoring_enabled | bool
+  changed_when: false
+  tags: [openwrt, monitoring]
+
+- name: Deploy OpenWrt connectivity probe script
+  ansible.builtin.raw: |
+    set -eu
+    old_sum="$(md5sum {{ openwrt_probe_script_path }} 2>/dev/null | awk '{print $1}')"
+    mkdir -p "$(dirname {{ openwrt_probe_script_path }})"
+    cat <<'EOF_SCRIPT' > {{ openwrt_probe_script_path }}
+    {{ lookup('template', 'openwrt-connectivity-probe.sh.j2') | trim }}
+    EOF_SCRIPT
+    chmod 755 {{ openwrt_probe_script_path }}
+    new_sum="$(md5sum {{ openwrt_probe_script_path }} | awk '{print $1}')"
+
+    if [ "${old_sum}" != "${new_sum}" ]; then
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  when: openwrt_monitoring_enabled | bool
+  register: openwrt_probe_script
+  changed_when: "'CHANGED' in openwrt_probe_script.stdout"
+  failed_when: openwrt_probe_script.rc != 0
+  tags: [openwrt, monitoring]
+
+- name: Run connectivity probe once
+  ansible.builtin.raw: "{{ openwrt_probe_script_path }}"
+  when: openwrt_monitoring_enabled | bool
+  changed_when: false
+  tags: [openwrt, monitoring]
+
+- name: Ensure root crontab has OpenWrt probe entry
+  ansible.builtin.raw: |
+    set -eu
+    line="*/{{ openwrt_probe_interval_minutes }} * * * * {{ openwrt_probe_script_path }} >/dev/null 2>&1"
+
+    mkdir -p /etc/crontabs
+    touch /etc/crontabs/root
+
+    if grep -Fq "{{ openwrt_probe_script_path }}" /etc/crontabs/root; then
+      current="$(grep -F "{{ openwrt_probe_script_path }}" /etc/crontabs/root | head -n1)"
+      if [ "${current}" = "${line}" ]; then
+        echo "NOCHANGE"
+      else
+        sed -i "\\|{{ openwrt_probe_script_path }}|c\\${line}" /etc/crontabs/root
+        echo "CHANGED"
+      fi
+    else
+      echo "${line}" >> /etc/crontabs/root
+      echo "CHANGED"
+    fi
+  when: openwrt_monitoring_enabled | bool
+  register: openwrt_probe_cron
+  changed_when: "'CHANGED' in openwrt_probe_cron.stdout"
+  failed_when: openwrt_probe_cron.rc != 0
+  tags: [openwrt, monitoring]
+
+- name: Restart cron when probe schedule changed
+  ansible.builtin.raw: "/etc/init.d/cron restart"
+  when:
+    - openwrt_monitoring_enabled | bool
+    - openwrt_probe_cron.changed
+  changed_when: false
+  tags: [openwrt, monitoring]

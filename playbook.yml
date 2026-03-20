@@ -22,6 +22,7 @@
         effective_feature_base: "{{ fleet_host_cfg.get('features', {}).get('feature_base', feature_base) | bool }}"
         effective_feature_firewall: "{{ fleet_host_cfg.get('features', {}).get('feature_firewall', feature_firewall) | bool }}"
         effective_feature_docker: "{{ fleet_host_cfg.get('features', {}).get('feature_docker', feature_docker) | bool }}"
+        effective_feature_tailscale: "{{ fleet_host_cfg.get('features', {}).get('feature_tailscale', feature_tailscale) | bool }}"
         effective_feature_remnawave_node: "{{ fleet_host_cfg.get('features', {}).get('feature_remnawave_node', feature_remnawave_node) | bool }}"
         effective_feature_caddy_node: "{{ fleet_host_cfg.get('features', {}).get('feature_caddy_node', feature_caddy_node) | bool }}"
         effective_feature_node_tuning: "{{ fleet_host_cfg.get('features', {}).get('feature_node_tuning', feature_node_tuning) | bool }}"
@@ -104,6 +105,10 @@
     - role: docker
       when: effective_feature_docker | bool
       tags: [docker]
+
+    - role: tailscale
+      when: effective_feature_tailscale | bool
+      tags: [tailscale]
 
     - role: monitoring_agent
       when: effective_feature_monitoring_agent | bool

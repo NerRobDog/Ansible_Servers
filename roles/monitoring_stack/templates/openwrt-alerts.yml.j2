@@ -1,0 +1,62 @@
+groups:
+  - name: openwrt-fleet
+    rules:
+      - alert: OpenWrtExporterDown
+        expr: up{job="monitoring-openwrt-node-exporter"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          scope: openwrt
+        annotations:
+          summary: "OpenWrt exporter is down on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "Prometheus cannot scrape OpenWrt exporter endpoint for instance {% raw %}{{ $labels.instance }}{% endraw %}."
+
+      - alert: OpenWrtDirectProbeDown
+        expr: openwrt_probe_direct_up{job="monitoring-openwrt-node-exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          scope: openwrt
+        annotations:
+          summary: "OpenWrt direct internet probe failed on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "Router {% raw %}{{ $labels.instance }}{% endraw %} cannot reach the direct probe URL."
+
+      - alert: OpenWrtPasswallProbeDown
+        expr: openwrt_probe_passwall2_up{job="monitoring-openwrt-node-exporter"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          scope: openwrt
+        annotations:
+          summary: "OpenWrt Passwall2 probe failed on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "Router {% raw %}{{ $labels.instance }}{% endraw %} cannot reach the probe URL via Passwall2 SOCKS proxy."
+
+      - alert: OpenWrtHighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes{job="monitoring-openwrt-node-exporter"} / node_memory_MemTotal_bytes{job="monitoring-openwrt-node-exporter"})) > 0.90
+        for: 10m
+        labels:
+          severity: warning
+          scope: openwrt
+        annotations:
+          summary: "OpenWrt memory usage is high on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "Memory usage exceeds 90% for router {% raw %}{{ $labels.instance }}{% endraw %}."
+
+      - alert: OpenWrtHighLoad
+        expr: node_load1{job="monitoring-openwrt-node-exporter"} > 4
+        for: 10m
+        labels:
+          severity: warning
+          scope: openwrt
+        annotations:
+          summary: "OpenWrt load average is high on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "Load average (1m) is above threshold for router {% raw %}{{ $labels.instance }}{% endraw %}."
+
+      - alert: OpenWrtHighThermalZoneTemp
+        expr: max by (instance) (node_thermal_zone_temp{job="monitoring-openwrt-node-exporter"}) > 80
+        for: 10m
+        labels:
+          severity: warning
+          scope: openwrt
+        annotations:
+          summary: "OpenWrt thermal zone temperature is high on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "Thermal zone temperature is above 80C on router {% raw %}{{ $labels.instance }}{% endraw %}."

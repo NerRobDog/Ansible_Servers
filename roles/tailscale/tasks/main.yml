@@ -1,0 +1,310 @@
+---
+- name: Validate tailscale settings
+  ansible.builtin.assert:
+    that:
+      - tailscale_state == "present"
+      - tailscale_auth_key_env | trim | length > 0
+      - tailscale_extra_args is iterable
+      - tailscale_extra_args is not string
+    fail_msg: "Invalid tailscale settings. Supported tailscale_state: present"
+  when: tailscale_enabled | bool
+  tags: [tailscale]
+
+- name: Detect OpenWrt target
+  ansible.builtin.raw: "test -f /etc/openwrt_release && echo OPENWRT || echo NON_OPENWRT"
+  register: tailscale_openwrt_probe
+  changed_when: false
+  failed_when: false
+  when: tailscale_enabled | bool
+  tags: [tailscale]
+
+- name: Set tailscale host flavor
+  ansible.builtin.set_fact:
+    tailscale_is_openwrt: "{{ 'OPENWRT' in (tailscale_openwrt_probe.stdout | default('')) }}"
+  changed_when: false
+  when: tailscale_enabled | bool
+  tags: [tailscale]
+
+- name: Validate supported server OS for tailscale role
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian" or (ansible_os_family == "RedHat" and (ansible_distribution_major_version | int) >= 9)
+    fail_msg: "tailscale role supports Debian/Ubuntu and RHEL9-compatible hosts in server contour."
+  when:
+    - tailscale_enabled | bool
+    - not (tailscale_is_openwrt | bool)
+  tags: [tailscale]
+
+- name: Install tailscale prerequisites on Debian family
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+  when:
+    - tailscale_enabled | bool
+    - not (tailscale_is_openwrt | bool)
+    - ansible_os_family == "Debian"
+  tags: [tailscale]
+
+- name: Ensure tailscale keyring directory exists
+  ansible.builtin.file:
+    path: /usr/share/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when:
+    - tailscale_enabled | bool
+    - not (tailscale_is_openwrt | bool)
+    - ansible_os_family == "Debian"
+  tags: [tailscale]
+
+- name: Install tailscale apt keyring
+  ansible.builtin.get_url:
+    url: "https://pkgs.tailscale.com/stable/{{ ansible_distribution | lower }}/{{ ansible_distribution_release }}.noarmor.gpg"
+    dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+    owner: root
+    group: root
+    mode: "0644"
+    force: true
+  when:
+    - tailscale_enabled | bool
+    - not (tailscale_is_openwrt | bool)
+    - ansible_os_family == "Debian"
+  tags: [tailscale]
+
+- name: Configure tailscale apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg]
+      https://pkgs.tailscale.com/stable/{{ ansible_distribution | lower }}
+      {{ ansible_distribution_release }} main
+    filename: tailscale
+    state: present
+    update_cache: true
+  when:
+    - tailscale_enabled | bool
+    - not (tailscale_is_openwrt | bool)
+    - ansible_os_family == "Debian"
+  tags: [tailscale]
+
+- name: Configure tailscale yum repository for RHEL9-compatible hosts
+  ansible.builtin.yum_repository:
+    name: tailscale-stable
+    description: Tailscale stable
+    baseurl: "https://pkgs.tailscale.com/stable/rhel/{{ ansible_distribution_major_version | int }}/$basearch"
+    enabled: true
+    gpgcheck: true
+    repo_gpgcheck: false
+    gpgkey: "https://pkgs.tailscale.com/stable/rhel/{{ ansible_distribution_major_version | int }}/repo.gpg"
+  when:
+    - tailscale_enabled | bool
+    - not (tailscale_is_openwrt | bool)
+    - ansible_os_family == "RedHat"
+  tags: [tailscale]
+
+- name: Install tailscale package on server hosts
+  ansible.builtin.package:
+    name: "{{ tailscale_package }}"
+    state: present
+  when:
+    - tailscale_enabled | bool
+    - not (tailscale_is_openwrt | bool)
+  tags: [tailscale]
+
+- name: Install optional OpenWrt tailscale prerequisites
+  ansible.builtin.raw: |
+    missing=""
+    for pkg in {{ tailscale_openwrt_prereq_packages | join(' ') }}; do
+      opkg list-installed | grep -q "^${pkg} " || missing="${missing} ${pkg}"
+    done
+
+    if [ -n "${missing}" ]; then
+      opkg update >/dev/null 2>&1 || opkg update
+      opkg install ${missing}
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  register: tailscale_openwrt_prereq_install
+  changed_when: "'CHANGED' in tailscale_openwrt_prereq_install.stdout"
+  failed_when: tailscale_openwrt_prereq_install.rc != 0
+  when:
+    - tailscale_enabled | bool
+    - tailscale_is_openwrt | bool
+    - tailscale_openwrt_prereq_packages | length > 0
+  tags: [tailscale]
+
+- name: Install tailscale package on OpenWrt
+  ansible.builtin.raw: |
+    if opkg list-installed | grep -q "^{{ tailscale_package }} "; then
+      echo "NOCHANGE"
+    else
+      opkg update >/dev/null 2>&1 || opkg update
+      opkg install {{ tailscale_package }}
+      echo "CHANGED"
+    fi
+  register: tailscale_openwrt_install
+  changed_when: "'CHANGED' in tailscale_openwrt_install.stdout"
+  failed_when: tailscale_openwrt_install.rc != 0
+  when:
+    - tailscale_enabled | bool
+    - tailscale_is_openwrt | bool
+  tags: [tailscale]
+
+- name: Enable and start tailscale service on server hosts
+  ansible.builtin.service:
+    name: "{{ tailscale_service_name }}"
+    state: started
+    enabled: true
+  when:
+    - tailscale_enabled | bool
+    - not (tailscale_is_openwrt | bool)
+  tags: [tailscale]
+
+- name: Enable tailscale service at boot on OpenWrt
+  ansible.builtin.raw: "/etc/init.d/{{ tailscale_openwrt_service_name }} enable"
+  changed_when: false
+  when:
+    - tailscale_enabled | bool
+    - tailscale_is_openwrt | bool
+  tags: [tailscale]
+
+- name: Start tailscale service on OpenWrt
+  ansible.builtin.raw: "/etc/init.d/{{ tailscale_openwrt_service_name }} start"
+  changed_when: false
+  when:
+    - tailscale_enabled | bool
+    - tailscale_is_openwrt | bool
+  tags: [tailscale]
+
+- name: Read tailscale backend state on server hosts
+  ansible.builtin.command: tailscale status --json
+  register: tailscale_backend_state_cmd
+  changed_when: false
+  failed_when: false
+  when:
+    - tailscale_enabled | bool
+    - not (tailscale_is_openwrt | bool)
+  tags: [tailscale]
+
+- name: Read tailscale backend state on OpenWrt
+  ansible.builtin.raw: "tailscale status --json 2>/dev/null || true"
+  register: tailscale_backend_state_cmd
+  changed_when: false
+  failed_when: false
+  when:
+    - tailscale_enabled | bool
+    - tailscale_is_openwrt | bool
+  tags: [tailscale]
+
+- name: Resolve tailscale auth status
+  ansible.builtin.set_fact:
+    tailscale_status_json: >-
+      {{
+        (
+          tailscale_backend_state_cmd.stdout | default('') | trim | regex_search('^\{')
+        ) | ternary((tailscale_backend_state_cmd.stdout | from_json), {})
+      }}
+    tailscale_backend_state: "{{ tailscale_status_json.BackendState | default('NoState') }}"
+    tailscale_is_authenticated: "{{ tailscale_backend_state not in ['NoState', 'NeedsLogin', 'NeedsMachineAuth', 'Stopped', ''] }}"
+  changed_when: false
+  when: tailscale_enabled | bool
+  tags: [tailscale]
+
+- name: Read tailscale auth key from environment
+  ansible.builtin.set_fact:
+    tailscale_auth_key_value: "{{ lookup('env', tailscale_auth_key_env) | default('', true) | trim }}"
+  no_log: true
+  changed_when: false
+  when:
+    - tailscale_enabled | bool
+    - tailscale_state == "present"
+    - not (tailscale_is_authenticated | bool)
+  tags: [tailscale]
+
+- name: Require tailscale auth key when host is not authenticated
+  ansible.builtin.assert:
+    that:
+      - tailscale_auth_key_value | length > 0
+    fail_msg: >-
+      Tailscale is not authenticated on host {{ inventory_hostname }}.
+      Provide {{ tailscale_auth_key_env }} in workflow environment.
+  when:
+    - tailscale_enabled | bool
+    - tailscale_state == "present"
+    - not (tailscale_is_authenticated | bool)
+  tags: [tailscale]
+
+- name: Join tailnet on server hosts when not authenticated
+  ansible.builtin.command:
+    argv: "{{ ['tailscale', 'up', '--auth-key=' ~ tailscale_auth_key_value] + (tailscale_extra_args | default([])) }}"
+  register: tailscale_up_cmd
+  changed_when: tailscale_up_cmd.rc == 0
+  failed_when: tailscale_up_cmd.rc != 0
+  no_log: true
+  when:
+    - tailscale_enabled | bool
+    - tailscale_state == "present"
+    - not (tailscale_is_openwrt | bool)
+    - not (tailscale_is_authenticated | bool)
+  tags: [tailscale]
+
+- name: Join tailnet on OpenWrt when not authenticated
+  ansible.builtin.raw: "tailscale up --auth-key='{{ tailscale_auth_key_value }}' {{ tailscale_extra_args | join(' ') }}"
+  register: tailscale_up_cmd
+  changed_when: tailscale_up_cmd.rc == 0
+  failed_when: tailscale_up_cmd.rc != 0
+  no_log: true
+  when:
+    - tailscale_enabled | bool
+    - tailscale_state == "present"
+    - tailscale_is_openwrt | bool
+    - not (tailscale_is_authenticated | bool)
+  tags: [tailscale]
+
+- name: Read tailscale backend state after join on server hosts
+  ansible.builtin.command: tailscale status --json
+  register: tailscale_backend_state_after_cmd
+  changed_when: false
+  failed_when: false
+  when:
+    - tailscale_enabled | bool
+    - not (tailscale_is_openwrt | bool)
+  tags: [tailscale]
+
+- name: Read tailscale backend state after join on OpenWrt
+  ansible.builtin.raw: "tailscale status --json 2>/dev/null || true"
+  register: tailscale_backend_state_after_cmd
+  changed_when: false
+  failed_when: false
+  when:
+    - tailscale_enabled | bool
+    - tailscale_is_openwrt | bool
+  tags: [tailscale]
+
+- name: Resolve tailscale post-join status
+  ansible.builtin.set_fact:
+    tailscale_status_after_json: >-
+      {{
+        (
+          tailscale_backend_state_after_cmd.stdout | default('') | trim | regex_search('^\{')
+        ) | ternary((tailscale_backend_state_after_cmd.stdout | from_json), {})
+      }}
+    tailscale_backend_state_after: "{{ tailscale_status_after_json.BackendState | default('NoState') }}"
+  changed_when: false
+  when: tailscale_enabled | bool
+  tags: [tailscale]
+
+- name: Assert tailscale backend state is healthy
+  ansible.builtin.assert:
+    that:
+      - tailscale_backend_state_after not in ['NoState', 'NeedsLogin', 'NeedsMachineAuth', 'Stopped', '']
+    fail_msg: >-
+      Tailscale backend state is {{ tailscale_backend_state_after | default('unknown') }}
+      on host {{ inventory_hostname }}.
+  when: tailscale_enabled | bool
+  tags: [tailscale]
