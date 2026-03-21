@@ -19,6 +19,7 @@
 
     - name: Resolve effective feature flags
       ansible.builtin.set_fact:
+        effective_run_main_stack: "{{ fleet_mode_effective == 'deploy' }}"
         effective_feature_base: "{{ fleet_host_cfg.get('features', {}).get('feature_base', feature_base) | bool }}"
         effective_feature_firewall: "{{ fleet_host_cfg.get('features', {}).get('feature_firewall', feature_firewall) | bool }}"
         effective_feature_docker: "{{ fleet_host_cfg.get('features', {}).get('feature_docker', feature_docker) | bool }}"
@@ -82,27 +83,27 @@
 
   roles:
     - role: base
-      when: effective_feature_base | bool
+      when: effective_run_main_stack | bool and (effective_feature_base | bool)
       tags: [base]
 
     - role: firewall
-      when: effective_feature_firewall | bool and (firewall_enabled | bool)
+      when: effective_run_main_stack | bool and (effective_feature_firewall | bool) and (firewall_enabled | bool)
       tags: [firewall]
 
     - role: docker
-      when: effective_feature_docker | bool
+      when: effective_run_main_stack | bool and (effective_feature_docker | bool)
       tags: [docker]
 
     - role: remnawave_node
-      when: effective_feature_remnawave_node | bool
+      when: effective_run_main_stack | bool and (effective_feature_remnawave_node | bool)
       tags: [remnawave, node]
 
     - role: caddy_node
-      when: effective_feature_caddy_node | bool
+      when: effective_run_main_stack | bool and (effective_feature_caddy_node | bool)
       tags: [remnawave, caddy]
 
     - role: node_tuning
-      when: effective_feature_node_tuning | bool
+      when: effective_run_main_stack | bool and (effective_feature_node_tuning | bool)
       tags: [remnawave, bbr, ipv6]
 
     - role: user_shell
@@ -121,6 +122,7 @@
       register: custom_roles_stats
       delegate_to: localhost
       become: false
+      when: effective_run_main_stack | bool
       tags: [custom]
 
     - name: Assert all custom roles exist
@@ -130,10 +132,12 @@
           - item.stat.isdir
         fail_msg: "Custom role '{{ item.item }}' not found under roles/."
       loop: "{{ custom_roles_stats.results | default([]) }}"
+      when: effective_run_main_stack | bool
       tags: [custom]
 
     - name: Run custom local roles
       ansible.builtin.include_role:
         name: "{{ item }}"
       loop: "{{ effective_custom_roles }}"
+      when: effective_run_main_stack | bool
       tags: [custom]

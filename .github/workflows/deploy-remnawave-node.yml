@@ -182,7 +182,7 @@ jobs:
 
       - name: Sync RemaWave profiles and node assignments
         id: panel_sync
-        if: ${{ inputs.target == 'remnawave' }}
+        if: ${{ inputs.target == 'remnawave' && inputs.mode == 'deploy' }}
         continue-on-error: ${{ inputs.panel_sync_enforce == 'false' }}
         env:
           LIMIT: ${{ inputs.limit }}
@@ -217,7 +217,7 @@ jobs:
             ${write_flag}
 
       - name: Warn when panel sync drift is ignored
-        if: ${{ inputs.target == 'remnawave' && steps.panel_sync.outcome == 'failure' && inputs.panel_sync_enforce == 'false' }}
+        if: ${{ inputs.target == 'remnawave' && inputs.mode == 'deploy' && steps.panel_sync.outcome == 'failure' && inputs.panel_sync_enforce == 'false' }}
         run: |
           echo "::warning::Panel sync drift detected but ignored because panel_sync_enforce=false. Ansible deploy continues without panel writes."
 
