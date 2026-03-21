@@ -8,5 +8,6 @@ hosts.plain.ini
 
 # Local/operator-only files
 fleet.yml
+fleet.remna-yusic.deploy.yml
 VLESS_TCP.txt
 VLESS_with_nginx.txt
