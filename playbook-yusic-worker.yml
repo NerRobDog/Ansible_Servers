@@ -144,7 +144,7 @@
         that:
           - worker_image_tag is defined
           - worker_image_tag | string | length > 0
-          - worker_image_tag | regex_search('^sha-[0-9a-f]{7,64}$')
+          - (worker_image_tag | string) is match('^sha-[0-9a-f]{7,64}$')
         fail_msg: "worker_image_tag is required for deploy/update and must match sha-<hex>."
       when: worker_mode_effective in ['deploy', 'update']
       tags: [always]
