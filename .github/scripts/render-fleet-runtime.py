@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -68,6 +69,10 @@ YUSIC_WORKER_DEFAULTS = {
     "container_name": "yusic_download_worker",
     "selfcheck_command": "python services/download-worker/selfcheck.py",
 }
+
+WORKER_ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+WORKER_CONTAINER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+WORKER_WORKDIR_RE = re.compile(r"^/[A-Za-z0-9._/\-]+$")
 
 
 def fail(message: str) -> None:
@@ -298,6 +303,11 @@ def normalize_yusic_defaults(defaults: dict) -> dict:
 def normalize_worker(alias: str, worker_cfg: dict, worker_defaults: dict, host_aliases: set[str], strict_required: bool) -> dict:
     if not isinstance(worker_cfg, dict):
         fail(f"Worker '{alias}' config must be an object.")
+    if not WORKER_ALIAS_RE.match(alias) or ".." in alias:
+        fail(
+            f"Worker alias '{alias}' is invalid. Allowed: [A-Za-z0-9_.-], "
+            "must start with alnum, max 64 chars, no '..'."
+        )
     merged = deep_merge(worker_defaults, worker_cfg)
     merged["enabled"] = parse_bool(merged.get("enabled", True))
     merged["relay_host_alias"] = str(merged.get("relay_host_alias", "") or "").strip()
@@ -331,6 +341,16 @@ def normalize_worker(alias: str, worker_cfg: dict, worker_defaults: dict, host_a
     merged["container_name"] = str(merged.get("container_name", "yusic_download_worker") or "").strip()
     merged["selfcheck_command"] = str(merged.get("selfcheck_command", "python services/download-worker/selfcheck.py") or "").strip()
     merged["alias"] = alias
+    if not WORKER_WORKDIR_RE.match(merged["workdir"]) or ".." in merged["workdir"]:
+        fail(
+            f"Worker '{alias}' workdir is invalid. "
+            "Use absolute POSIX path with [A-Za-z0-9._/-] and without '..'."
+        )
+    if not WORKER_CONTAINER_NAME_RE.match(merged["container_name"]):
+        fail(
+            f"Worker '{alias}' container_name is invalid. "
+            "Allowed: [A-Za-z0-9_.-], must start with alnum, max 128 chars."
+        )
 
     if merged["enabled"] and strict_required:
         if not merged["relay_host_alias"]:

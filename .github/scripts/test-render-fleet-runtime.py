@@ -288,6 +288,44 @@ def test_remnawave_target_ignores_invalid_yusic_contract() -> None:
     assert_true("yusic_worker_runtime" in runtime_vars, "yusic_worker_runtime should stay present in runtime vars")
 
 
+def test_yusic_worker_invalid_alias_rejected() -> None:
+    config = {
+        "defaults": {
+            "yusic_worker": {
+                "relay_host_alias": "relay_ru",
+                "image_repo": "ghcr.io/example/download-worker",
+                "redis_url": "redis://127.0.0.1:6379/0",
+                "cache_bot_token": "token",
+                "inline_cache_chat_id": "-1001",
+            }
+        },
+        "hosts": {"relay_ru": {"ansible_host": "203.0.113.10"}},
+        "workers": {"../bad": {"ssh": {"host": "100.64.0.10", "user": "root"}}},
+    }
+    proc, _, _, _ = run_renderer(json.dumps(config), "deploy", suffix=".json", target="yusic_worker")
+    assert_true(proc.returncode != 0, "Renderer should fail for invalid worker alias")
+    assert_true("alias" in (proc.stderr + proc.stdout), "Error should mention alias")
+
+
+def test_yusic_worker_invalid_workdir_rejected() -> None:
+    config = {
+        "defaults": {
+            "yusic_worker": {
+                "relay_host_alias": "relay_ru",
+                "image_repo": "ghcr.io/example/download-worker",
+                "redis_url": "redis://127.0.0.1:6379/0",
+                "cache_bot_token": "token",
+                "inline_cache_chat_id": "-1001",
+            }
+        },
+        "hosts": {"relay_ru": {"ansible_host": "203.0.113.10"}},
+        "workers": {"wrt_me": {"workdir": "/opt/yusic'worker", "ssh": {"host": "100.64.0.10", "user": "root"}}},
+    }
+    proc, _, _, _ = run_renderer(json.dumps(config), "deploy", suffix=".json", target="yusic_worker")
+    assert_true(proc.returncode != 0, "Renderer should fail for unsafe workdir")
+    assert_true("workdir" in (proc.stderr + proc.stdout), "Error should mention workdir")
+
+
 def main() -> int:
     tests = [
         test_valid_yaml_modes,
@@ -299,6 +337,8 @@ def main() -> int:
         test_yusic_worker_invalid_relay_alias,
         test_yusic_worker_requires_enabled_workers_for_target,
         test_remnawave_target_ignores_invalid_yusic_contract,
+        test_yusic_worker_invalid_alias_rejected,
+        test_yusic_worker_invalid_workdir_rejected,
     ]
 
     for test in tests:
