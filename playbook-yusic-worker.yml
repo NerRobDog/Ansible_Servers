@@ -164,6 +164,8 @@
                 (
                   item.ssh.private_key
                   | default(yusic_worker_default_private_key | default(''))
+                  | regex_replace('\\\\r', '')
+                  | regex_replace('\\\\n', '\n')
                   | regex_replace('\r', '')
                   | regex_replace('\n?$', '\n')
                 )
