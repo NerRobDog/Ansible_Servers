@@ -9,7 +9,6 @@ env:
   ANSIBLE_LOCAL_TEMP: .ansible/tmp
   ANSIBLE_REMOTE_TEMP: .ansible/tmp
   ANSIBLE_COLLECTIONS_PATH: .ansible/collections:/usr/share/ansible/collections
-  ANSIBLE_COLLECTIONS_PATHS: .ansible/collections:/usr/share/ansible/collections
   PY_COLORS: "1"
 
 jobs:

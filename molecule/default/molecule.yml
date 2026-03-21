@@ -17,7 +17,6 @@ provisioner:
   env:
     ANSIBLE_ROLES_PATH: ${MOLECULE_PROJECT_DIRECTORY}/roles
     ANSIBLE_COLLECTIONS_PATH: ${MOLECULE_PROJECT_DIRECTORY}/.ansible/collections:${HOME}/.ansible/collections:/usr/share/ansible/collections
-    ANSIBLE_COLLECTIONS_PATHS: ${MOLECULE_PROJECT_DIRECTORY}/.ansible/collections:${HOME}/.ansible/collections:/usr/share/ansible/collections
   inventory:
     host_vars:
       debian12:
