@@ -190,7 +190,7 @@
 
             - name: Fail deploy after rollback
               ansible.builtin.fail:
-                msg: "yusic worker deploy/update failed and rollback was applied."
+                msg: "yusic worker deploy/update failed; rollback was attempted for workers with backup images (if any)."
 
         - name: Run smoke-only mode
           ansible.builtin.include_role:
