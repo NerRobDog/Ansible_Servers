@@ -52,6 +52,7 @@ YUSIC_WORKER_DEFAULTS = {
         "user": "root",
         "password": "",
         "private_key": "",
+        "private_key_b64": "",
     },
     "tags": [],
     "max_concurrent_jobs": 1,
@@ -281,6 +282,7 @@ def normalize_yusic_defaults(defaults: dict) -> dict:
     merged["ssh"]["user"] = str(merged["ssh"].get("user", "root") or "").strip()
     merged["ssh"]["password"] = str(merged["ssh"].get("password", "") or "")
     merged["ssh"]["private_key"] = str(merged["ssh"].get("private_key", "") or "")
+    merged["ssh"]["private_key_b64"] = str(merged["ssh"].get("private_key_b64", "") or "")
     merged["tags"] = parse_string_list(merged.get("tags", []), "defaults.yusic_worker.tags")
     merged["max_concurrent_jobs"] = parse_int(
         merged.get("max_concurrent_jobs", 1), "defaults.yusic_worker.max_concurrent_jobs", 1, 128
@@ -323,6 +325,7 @@ def normalize_worker(alias: str, worker_cfg: dict, worker_defaults: dict, host_a
         "user": str(ssh_cfg.get("user", "root") or "").strip(),
         "password": str(ssh_cfg.get("password", "") or ""),
         "private_key": str(ssh_cfg.get("private_key", "") or ""),
+        "private_key_b64": str(ssh_cfg.get("private_key_b64", "") or ""),
     }
     merged["tags"] = parse_string_list(merged.get("tags", []), f"Worker '{alias}' tags")
     merged["max_concurrent_jobs"] = parse_int(merged.get("max_concurrent_jobs", 1), f"Worker '{alias}' max_concurrent_jobs", 1, 128)
