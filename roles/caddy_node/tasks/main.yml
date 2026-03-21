@@ -52,7 +52,14 @@
     that:
       - remnawave_panel_allowed_sources_effective is iterable
       - remnawave_panel_allowed_sources_effective is not string
-      - (remnawave_panel_allowed_sources_effective | map('string') | select('match', '^[0-9a-fA-F:.]+\\/([0-9]|[12][0-9]|3[0-2]|1[01][0-9]|12[0-8])$') | list | length) == (remnawave_panel_allowed_sources_effective | length)
+      - >-
+        (
+          remnawave_panel_allowed_sources_effective
+          | map('string')
+          | select('match', '^[0-9a-fA-F:.]+\/([0-9]|[12][0-9]|3[0-2]|1[01][0-9]|12[0-8])$')
+          | list
+          | length
+        ) == (remnawave_panel_allowed_sources_effective | length)
     fail_msg: "remnawave.panel_allowed_sources must be a list of IPv4/IPv6 CIDRs."
   tags: [remnawave, caddy]
 
