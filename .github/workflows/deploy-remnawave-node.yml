@@ -8,6 +8,14 @@ on:
         description: GitHub Environment containing fleet secrets
         required: true
         default: production
+      target:
+        description: Deployment target
+        required: true
+        type: choice
+        default: remnawave
+        options:
+          - remnawave
+          - yusic_worker
       mode:
         description: Deployment mode
         required: true
@@ -17,6 +25,20 @@ on:
           - bootstrap
           - deploy
           - lockdown
+      worker_mode:
+        description: Worker lifecycle mode (used only for target=yusic_worker)
+        required: true
+        type: choice
+        default: deploy
+        options:
+          - bootstrap
+          - deploy
+          - update
+          - smoke
+      worker_image_tag:
+        description: Worker image tag (required for worker deploy/update, format sha-*)
+        required: false
+        default: ""
       limit:
         description: Host aliases list (comma-separated) or all
         required: false
@@ -108,11 +130,17 @@ jobs:
       - name: Render runtime inventory and vars
         env:
           MODE: ${{ inputs.mode }}
+          TARGET: ${{ inputs.target }}
           REMNAWAVE_API_ENDPOINT_TEMPLATE: ${{ vars.REMNAWAVE_API_ENDPOINT_TEMPLATE }}
         run: |
+          render_mode="${MODE}"
+          if [[ "${TARGET}" == "yusic_worker" ]]; then
+            render_mode="deploy"
+          fi
           .github/scripts/render-fleet-runtime.py \
             --fleet-config .ansible/runtime/fleet_config.yaml \
-            --mode "${MODE}" \
+            --mode "${render_mode}" \
+            --target "${TARGET}" \
             --inventory-out .ansible/runtime/hosts.ini \
             --vars-out .ansible/runtime/runtime_vars.json \
             --bootstrap-out .ansible/runtime/bootstrap_map.json
@@ -122,6 +150,23 @@ jobs:
               '. + {remnawave_api_endpoint_template: $endpoint}' \
               .ansible/runtime/runtime_vars.json > .ansible/runtime/runtime_vars.tmp.json
             mv .ansible/runtime/runtime_vars.tmp.json .ansible/runtime/runtime_vars.json
+          fi
+
+      - name: Validate yusic worker dispatch inputs
+        if: ${{ inputs.target == 'yusic_worker' }}
+        env:
+          WORKER_MODE: ${{ inputs.worker_mode }}
+          WORKER_IMAGE_TAG: ${{ inputs.worker_image_tag }}
+        run: |
+          if [[ "${WORKER_MODE}" == "deploy" || "${WORKER_MODE}" == "update" ]]; then
+            if [[ -z "${WORKER_IMAGE_TAG}" ]]; then
+              echo "worker_image_tag is required for worker_mode=${WORKER_MODE}." >&2
+              exit 1
+            fi
+            if [[ ! "${WORKER_IMAGE_TAG}" =~ ^sha-[0-9a-f]{7,64}$ ]]; then
+              echo "worker_image_tag must match immutable format sha-<hex>, got '${WORKER_IMAGE_TAG}'." >&2
+              exit 1
+            fi
           fi
 
       - name: Decode profile placeholder vars
@@ -137,6 +182,7 @@ jobs:
 
       - name: Sync RemaWave profiles and node assignments
         id: panel_sync
+        if: ${{ inputs.target == 'remnawave' }}
         continue-on-error: ${{ inputs.panel_sync_enforce == 'false' }}
         env:
           LIMIT: ${{ inputs.limit }}
@@ -171,7 +217,7 @@ jobs:
             ${write_flag}
 
       - name: Warn when panel sync drift is ignored
-        if: ${{ steps.panel_sync.outcome == 'failure' && inputs.panel_sync_enforce == 'false' }}
+        if: ${{ inputs.target == 'remnawave' && steps.panel_sync.outcome == 'failure' && inputs.panel_sync_enforce == 'false' }}
         run: |
           echo "::warning::Panel sync drift detected but ignored because panel_sync_enforce=false. Ansible deploy continues without panel writes."
 
@@ -226,7 +272,7 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
 
       - name: Bootstrap hosts by password and copy SSH key
-        if: ${{ inputs.mode == 'bootstrap' }}
+        if: ${{ inputs.target == 'remnawave' && inputs.mode == 'bootstrap' }}
         env:
           LIMIT: ${{ inputs.limit }}
         run: |
@@ -267,8 +313,14 @@ jobs:
           done
 
       - name: Syntax check
+        env:
+          TARGET: ${{ inputs.target }}
         run: |
-          cmd=(ansible-playbook -i .ansible/runtime/hosts.ini playbook.yml --syntax-check --extra-vars @.ansible/runtime/runtime_vars.json)
+          playbook_file="playbook.yml"
+          if [[ "${TARGET}" == "yusic_worker" ]]; then
+            playbook_file="playbook-yusic-worker.yml"
+          fi
+          cmd=(ansible-playbook -i .ansible/runtime/hosts.ini "${playbook_file}" --syntax-check --extra-vars @.ansible/runtime/runtime_vars.json)
           if [[ -f .ansible/runtime/vault_pass.txt ]]; then
             cmd+=(--vault-id "secrets@.ansible/runtime/vault_pass.txt")
           fi
@@ -276,20 +328,51 @@ jobs:
 
       - name: Run playbook
         env:
+          TARGET: ${{ inputs.target }}
           LIMIT: ${{ inputs.limit }}
           CHECK_MODE: ${{ inputs.check_mode }}
           TAGS: ${{ inputs.tags }}
           CI_DEPLOY_PUBLIC_KEY: ${{ steps.ssh_key.outputs.public_key }}
           MODE: ${{ inputs.mode }}
+          WORKER_MODE: ${{ inputs.worker_mode }}
+          WORKER_IMAGE_TAG: ${{ inputs.worker_image_tag }}
+          RUN_SMOKE: ${{ inputs.run_smoke }}
           RW_PANEL_API_TOKEN: ${{ secrets.RW_PANEL_API_TOKEN }}
           REMNAWAVE_API_ENDPOINT_TEMPLATE: ${{ vars.REMNAWAVE_API_ENDPOINT_TEMPLATE }}
         run: |
-          cmd=(ansible-playbook -i .ansible/runtime/hosts.ini playbook.yml --limit "${LIMIT}" --extra-vars @.ansible/runtime/runtime_vars.json)
-          if [[ -n "${TAGS}" ]]; then
-            cmd+=(--tags "${TAGS}")
-          fi
-          if [[ "${CHECK_MODE}" == "true" ]]; then
-            cmd+=(--check --diff)
+          if [[ "${TARGET}" == "remnawave" ]]; then
+            cmd=(ansible-playbook -i .ansible/runtime/hosts.ini playbook.yml --limit "${LIMIT}" --extra-vars @.ansible/runtime/runtime_vars.json)
+            if [[ -n "${TAGS}" ]]; then
+              cmd+=(--tags "${TAGS}")
+            fi
+            if [[ "${CHECK_MODE}" == "true" ]]; then
+              cmd+=(--check --diff)
+            fi
+          else
+            relay_alias="$(jq -r '.yusic_worker_runtime.relay_host_alias // empty' .ansible/runtime/runtime_vars.json)"
+            if [[ -z "${relay_alias}" ]]; then
+              echo "yusic_worker_runtime.relay_host_alias is missing in runtime vars." >&2
+              exit 1
+            fi
+            cmd=(
+              ansible-playbook
+              -i .ansible/runtime/hosts.ini
+              playbook-yusic-worker.yml
+              --limit "${relay_alias}"
+              --extra-vars @.ansible/runtime/runtime_vars.json
+            )
+            cmd+=(--extra-vars "worker_mode=${WORKER_MODE}")
+            cmd+=(--extra-vars "worker_limit=${LIMIT}")
+            cmd+=(--extra-vars "worker_run_smoke=${RUN_SMOKE}")
+            if [[ "${WORKER_MODE}" == "deploy" || "${WORKER_MODE}" == "update" ]]; then
+              cmd+=(--extra-vars "worker_image_tag=${WORKER_IMAGE_TAG}")
+            fi
+            if [[ -n "${TAGS}" ]]; then
+              cmd+=(--tags "${TAGS}")
+            fi
+            if [[ "${CHECK_MODE}" == "true" ]]; then
+              cmd+=(--check --diff)
+            fi
           fi
           if [[ -f .ansible/runtime/vault_pass.txt ]]; then
             cmd+=(--vault-id "secrets@.ansible/runtime/vault_pass.txt")
@@ -297,7 +380,7 @@ jobs:
           "${cmd[@]}"
 
       - name: Run post-deploy smoke checks
-        if: ${{ inputs.mode == 'deploy' && inputs.check_mode == 'false' && inputs.run_smoke == 'true' }}
+        if: ${{ inputs.target == 'remnawave' && inputs.mode == 'deploy' && inputs.check_mode == 'false' && inputs.run_smoke == 'true' }}
         env:
           LIMIT: ${{ inputs.limit }}
         run: |
@@ -307,7 +390,7 @@ jobs:
             --limit "${LIMIT}"
 
       - name: Verify deploy-user key access after bootstrap
-        if: ${{ inputs.mode == 'bootstrap' }}
+        if: ${{ inputs.target == 'remnawave' && inputs.mode == 'bootstrap' }}
         env:
           LIMIT: ${{ inputs.limit }}
         run: |

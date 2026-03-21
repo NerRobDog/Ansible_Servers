@@ -1,0 +1,9 @@
+---
+- name: Rollback selected workers with available backup image
+  ansible.builtin.include_tasks: rollback_one.yml
+  loop: "{{ yusic_selected_workers }}"
+  loop_control:
+    loop_var: yusic_worker
+    label: "{{ yusic_worker.alias }}"
+  when:
+    - (yusic_worker_backup_images | default({})).get(yusic_worker.alias, '') | length > 0

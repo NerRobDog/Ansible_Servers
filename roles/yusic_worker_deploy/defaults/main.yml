@@ -1,0 +1,6 @@
+---
+yusic_worker_relay_root_dir: /opt/yusic-worker-relay
+yusic_worker_relay_archive_dir: "{{ yusic_worker_relay_root_dir }}/archives"
+yusic_worker_relay_stage_dir: "{{ yusic_worker_relay_root_dir }}/stage"
+yusic_worker_ssh_connect_timeout_seconds: 15
+yusic_worker_ssh_strict_host_key_checking: accept-new

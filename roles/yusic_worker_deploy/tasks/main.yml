@@ -1,0 +1,12 @@
+---
+- name: Initialize rollback backup map
+  ansible.builtin.set_fact:
+    yusic_worker_backup_images: {}
+  changed_when: false
+
+- name: Deploy selected workers through relay path
+  ansible.builtin.include_tasks: deploy_one.yml
+  loop: "{{ yusic_selected_workers }}"
+  loop_control:
+    loop_var: yusic_worker
+    label: "{{ yusic_worker.alias }}"

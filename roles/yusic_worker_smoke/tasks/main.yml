@@ -1,0 +1,7 @@
+---
+- name: Run smoke checks for selected workers
+  ansible.builtin.include_tasks: smoke_one.yml
+  loop: "{{ yusic_selected_workers }}"
+  loop_control:
+    loop_var: yusic_worker
+    label: "{{ yusic_worker.alias }}"

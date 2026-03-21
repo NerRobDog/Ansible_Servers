@@ -1,0 +1,173 @@
+---
+- name: Resolve per-worker deploy paths
+  ansible.builtin.set_fact:
+    yusic_worker_stage_path: "{{ yusic_worker_relay_stage_dir }}/{{ yusic_worker.alias }}"
+    yusic_worker_archive_path: "{{ yusic_worker_relay_archive_dir }}/{{ yusic_worker.alias }}-{{ worker_image_tag }}.tar"
+    yusic_worker_target: "{{ yusic_worker.ssh.user }}@{{ yusic_worker.ssh.host }}"
+    yusic_worker_image_ref: "{{ yusic_worker.image_repo }}:{{ worker_image_tag }}"
+  changed_when: false
+
+- name: Ensure relay staging directory exists for worker
+  ansible.builtin.file:
+    path: "{{ yusic_worker_stage_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Write temporary private key for worker SSH (optional)
+  ansible.builtin.copy:
+    dest: "{{ yusic_worker_stage_path }}/id_worker"
+    content: "{{ yusic_worker.ssh.private_key }}"
+    owner: root
+    group: root
+    mode: "0600"
+  when: yusic_worker.ssh.private_key | default('') | length > 0
+  no_log: true
+
+- name: Render yusic worker compose file on relay
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/docker-compose.yusic-worker.yml.j2"
+    dest: "{{ yusic_worker_stage_path }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+  vars:
+    yusic_worker_image_ref: "{{ yusic_worker_image_ref }}"
+
+- name: Render yusic worker env file on relay
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/yusic-worker.env.j2"
+    dest: "{{ yusic_worker_stage_path }}/yusic-worker.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  vars:
+    yusic_worker_image_ref: "{{ yusic_worker_image_ref }}"
+
+- name: Read previous worker image from worker env file (for rollback)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    ssh_args=(
+      -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking }}
+      -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds }}
+      -p {{ yusic_worker.ssh.port }}
+    )
+    if [ -f "{{ yusic_worker_stage_path }}/id_worker" ]; then
+      ssh_args+=(-i "{{ yusic_worker_stage_path }}/id_worker")
+    fi
+    if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
+      sshpass -p "{{ yusic_worker.ssh.password }}" ssh "${ssh_args[@]}" "{{ yusic_worker_target }}" \
+        "if [ -f '{{ yusic_worker.workdir }}/yusic-worker.env' ]; then \
+        grep '^WORKER_IMAGE=' '{{ yusic_worker.workdir }}/yusic-worker.env' | head -n1 | cut -d= -f2-; \
+        fi"
+    else
+      ssh "${ssh_args[@]}" "{{ yusic_worker_target }}" \
+        "if [ -f '{{ yusic_worker.workdir }}/yusic-worker.env' ]; then \
+        grep '^WORKER_IMAGE=' '{{ yusic_worker.workdir }}/yusic-worker.env' | head -n1 | cut -d= -f2-; \
+        fi"
+    fi
+  args:
+    executable: /bin/bash
+  register: yusic_worker_previous_image_cmd
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Save backup image reference for rollback
+  ansible.builtin.set_fact:
+    yusic_worker_backup_images: >-
+      {{
+        (yusic_worker_backup_images | default({}))
+        | combine({ yusic_worker.alias: (yusic_worker_previous_image_cmd.stdout | trim) })
+      }}
+  changed_when: false
+
+- name: Mirror worker image to relay archive (immutable tag)
+  ansible.builtin.command: >-
+    skopeo copy
+    --override-arch {{ yusic_worker.arch }}
+    docker://{{ yusic_worker_image_ref }}
+    docker-archive:{{ yusic_worker_archive_path }}:{{ yusic_worker_image_ref }}
+  changed_when: true
+
+- name: Ensure remote worker workdir exists
+  ansible.builtin.shell: |
+    set -euo pipefail
+    ssh_args=(
+      -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking }}
+      -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds }}
+      -p {{ yusic_worker.ssh.port }}
+    )
+    if [ -f "{{ yusic_worker_stage_path }}/id_worker" ]; then
+      ssh_args+=(-i "{{ yusic_worker_stage_path }}/id_worker")
+    fi
+    if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
+      sshpass -p "{{ yusic_worker.ssh.password }}" ssh "${ssh_args[@]}" "{{ yusic_worker_target }}" "mkdir -p '{{ yusic_worker.workdir }}'"
+    else
+      ssh "${ssh_args[@]}" "{{ yusic_worker_target }}" "mkdir -p '{{ yusic_worker.workdir }}'"
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+  no_log: true
+
+- name: Upload image archive and compose assets to worker
+  ansible.builtin.shell: |
+    set -euo pipefail
+    scp_args=(
+      -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking }}
+      -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds }}
+      -P {{ yusic_worker.ssh.port }}
+    )
+    if [ -f "{{ yusic_worker_stage_path }}/id_worker" ]; then
+      scp_args+=(-i "{{ yusic_worker_stage_path }}/id_worker")
+    fi
+    if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
+      sshpass -p "{{ yusic_worker.ssh.password }}" scp "${scp_args[@]}" \
+        "{{ yusic_worker_archive_path }}" \
+        "{{ yusic_worker_stage_path }}/docker-compose.yml" \
+        "{{ yusic_worker_stage_path }}/yusic-worker.env" \
+        "{{ yusic_worker_target }}:{{ yusic_worker.workdir }}/"
+    else
+      scp "${scp_args[@]}" \
+        "{{ yusic_worker_archive_path }}" \
+        "{{ yusic_worker_stage_path }}/docker-compose.yml" \
+        "{{ yusic_worker_stage_path }}/yusic-worker.env" \
+        "{{ yusic_worker_target }}:{{ yusic_worker.workdir }}/"
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: true
+  no_log: true
+
+- name: Apply worker update on target host
+  ansible.builtin.shell: |
+    set -euo pipefail
+    archive_basename="$(basename "{{ yusic_worker_archive_path }}")"
+    ssh_args=(
+      -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking }}
+      -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds }}
+      -p {{ yusic_worker.ssh.port }}
+    )
+    if [ -f "{{ yusic_worker_stage_path }}/id_worker" ]; then
+      ssh_args+=(-i "{{ yusic_worker_stage_path }}/id_worker")
+    fi
+    if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
+      sshpass -p "{{ yusic_worker.ssh.password }}" ssh "${ssh_args[@]}" "{{ yusic_worker_target }}" \
+        "cd '{{ yusic_worker.workdir }}' && \
+        docker load -i \"${archive_basename}\" && \
+        docker compose --env-file yusic-worker.env -f docker-compose.yml up -d && \
+        rm -f \"${archive_basename}\""
+    else
+      ssh "${ssh_args[@]}" "{{ yusic_worker_target }}" \
+        "cd '{{ yusic_worker.workdir }}' && \
+        docker load -i \"${archive_basename}\" && \
+        docker compose --env-file yusic-worker.env -f docker-compose.yml up -d && \
+        rm -f \"${archive_basename}\""
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: true
+  no_log: true

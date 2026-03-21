@@ -37,7 +37,9 @@ jobs:
         run: python .github/scripts/test-render-fleet-runtime.py
 
       - name: Syntax check
-        run: ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
+        run: |
+          ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
+          ansible-playbook -i hosts.example.ini playbook-yusic-worker.yml --syntax-check
 
       - name: ansible-lint
         run: ansible-lint playbook.yml roles

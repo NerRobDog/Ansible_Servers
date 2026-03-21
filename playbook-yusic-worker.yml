@@ -1,0 +1,134 @@
+---
+- name: Manage Yusic external workers via relay host
+  hosts: all
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Resolve yusic worker runtime map
+      ansible.builtin.set_fact:
+        yusic_runtime: "{{ yusic_worker_runtime | default({}) }}"
+        worker_mode_effective: "{{ worker_mode | default('deploy') | string }}"
+        worker_limit_effective: "{{ worker_limit | default('all') | string }}"
+        worker_run_smoke_effective: "{{ worker_run_smoke | default(true) | bool }}"
+      changed_when: false
+      tags: [always]
+
+    - name: Validate worker mode
+      ansible.builtin.assert:
+        that:
+          - worker_mode_effective in ['bootstrap', 'deploy', 'update', 'smoke']
+        fail_msg: "worker_mode must be one of: bootstrap, deploy, update, smoke."
+      tags: [always]
+
+    - name: Validate yusic worker runtime structure
+      ansible.builtin.assert:
+        that:
+          - yusic_runtime is mapping
+          - yusic_runtime.get('workers', {}) is mapping
+          - yusic_runtime.get('enabled_workers', []) is iterable
+          - yusic_runtime.get('relay_host_alias', '') | string | length > 0
+        fail_msg: "yusic_worker_runtime is missing required fields (workers/enabled_workers/relay_host_alias)."
+      tags: [always]
+
+    - name: Ensure play runs on configured relay host alias
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == (yusic_runtime.get('relay_host_alias') | string)
+        fail_msg: >-
+          playbook-yusic-worker must run on relay host '{{ yusic_runtime.get("relay_host_alias") }}'
+          but current host is '{{ inventory_hostname }}'.
+      tags: [always]
+
+    - name: Resolve selected worker aliases
+      ansible.builtin.set_fact:
+        selected_worker_aliases: >-
+          {{
+            (
+              worker_limit_effective | lower == 'all'
+            )
+            | ternary(
+              yusic_runtime.get('enabled_workers', []),
+              worker_limit_effective.split(',') | map('trim') | reject('equalto', '') | list
+            )
+          }}
+      changed_when: false
+      tags: [always]
+
+    - name: Validate selected aliases exist in runtime map
+      ansible.builtin.assert:
+        that:
+          - item in yusic_runtime.get('workers', {})
+        fail_msg: "Worker alias '{{ item }}' is not defined in workers map."
+      loop: "{{ selected_worker_aliases }}"
+      tags: [always]
+
+    - name: Build selected worker list
+      ansible.builtin.set_fact:
+        yusic_selected_workers: >-
+          {{
+            yusic_runtime.get('workers', {})
+            | dict2items
+            | selectattr('key', 'in', selected_worker_aliases)
+            | selectattr('value.enabled', 'equalto', true)
+            | map(attribute='value')
+            | list
+          }}
+      changed_when: false
+      tags: [always]
+
+    - name: Ensure selected workers are enabled
+      ansible.builtin.assert:
+        that:
+          - yusic_selected_workers | length > 0
+        fail_msg: "No enabled workers selected by worker_limit={{ worker_limit_effective }}."
+      tags: [always]
+
+    - name: Validate immutable image tag for deploy/update
+      ansible.builtin.assert:
+        that:
+          - worker_image_tag is defined
+          - worker_image_tag | string | length > 0
+          - worker_image_tag | regex_search('^sha-[0-9a-f]{7,64}$')
+        fail_msg: "worker_image_tag is required for deploy/update and must match sha-<hex>."
+      when: worker_mode_effective in ['deploy', 'update']
+      tags: [always]
+
+  roles:
+    - role: yusic_worker_relay
+      tags: [yusic_worker, relay]
+
+  tasks:
+    - name: Deploy/update workers and smoke with rollback on failure
+      when: worker_mode_effective in ['deploy', 'update']
+      block:
+        - name: Deploy worker payload
+          ansible.builtin.include_role:
+            name: yusic_worker_deploy
+          vars:
+            yusic_selected_workers: "{{ yusic_selected_workers }}"
+            worker_image_tag: "{{ worker_image_tag }}"
+
+        - name: Run smoke checks after deploy/update
+          ansible.builtin.include_role:
+            name: yusic_worker_smoke
+          vars:
+            yusic_selected_workers: "{{ yusic_selected_workers }}"
+          when: worker_run_smoke_effective
+      rescue:
+        - name: Rollback workers to previous image on failed deploy/update
+          ansible.builtin.include_role:
+            name: yusic_worker_rollback
+          vars:
+            yusic_selected_workers: "{{ yusic_selected_workers }}"
+            yusic_worker_backup_images: "{{ yusic_worker_backup_images | default({}) }}"
+
+        - name: Fail deploy after rollback
+          ansible.builtin.fail:
+            msg: "yusic worker deploy/update failed and rollback was applied."
+
+    - name: Run smoke-only mode
+      ansible.builtin.include_role:
+        name: yusic_worker_smoke
+      vars:
+        yusic_selected_workers: "{{ yusic_selected_workers }}"
+      when: worker_mode_effective == 'smoke'

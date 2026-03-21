@@ -1,0 +1,16 @@
+---
+services:
+  download-worker:
+    image: "{{ yusic_worker_image_ref }}"
+    container_name: "{{ yusic_worker.container_name }}"
+    restart: unless-stopped
+    env_file:
+      - ./yusic-worker.env
+    network_mode: "{{ yusic_worker.network_mode }}"
+{% if yusic_worker.dns | length > 0 %}
+    dns:
+{% for dns_server in yusic_worker.dns %}
+      - "{{ dns_server }}"
+{% endfor %}
+{% endif %}
+

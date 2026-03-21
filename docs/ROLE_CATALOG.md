@@ -65,6 +65,27 @@
 - Назначение: отключение SSH password auth и root login.
 - Запуск: в режиме `lockdown`.
 
+## Yusic worker roles
+
+### `yusic_worker_relay`
+- Назначение: подготовка relay-ноды для lifecycle внешних `download-worker` (пакеты `skopeo`, `sshpass`, staging dirs).
+- Используется в `playbook-yusic-worker.yml`.
+
+### `yusic_worker_deploy`
+- Назначение: deploy/update воркеров через relay:
+  - mirror immutable image (`sha-*`) в docker-archive,
+  - transfer на worker,
+  - `docker load` + `docker compose up -d`.
+- Дополнительно: сохраняет backup image ref для rollback.
+
+### `yusic_worker_smoke`
+- Назначение: smoke-проверки на worker:
+  - контейнер запущен,
+  - `python services/download-worker/selfcheck.py` внутри контейнера проходит.
+
+### `yusic_worker_rollback`
+- Назначение: rollback worker на backup image, если deploy/update + smoke завершились ошибкой.
+
 ## Custom roles
 
 ### `custom_roles`

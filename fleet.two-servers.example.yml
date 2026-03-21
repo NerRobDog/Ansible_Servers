@@ -48,6 +48,20 @@ defaults:
     # reality_private_key: "REPLACE_ME"
     # reality_server_name: "de-node.example.com"
   custom_roles: []
+  yusic_worker:
+    relay_host_alias: de_node
+    image_repo: ghcr.io/OWNER/Yusic_bot/download-worker
+    enabled: true
+    arch: arm64
+    tags:
+      - provider:soundcloud
+      - region:nl
+      - cpu:low
+    max_concurrent_jobs: 1
+    network_mode: host
+    redis_url: redis://100.64.0.10:6379/0
+    cache_bot_token: CHANGE_ME_CACHE_BOT_TOKEN
+    inline_cache_chat_id: "-1001234567890"
 
 hosts:
   de_node:
@@ -101,3 +115,16 @@ hosts:
       # reality_short_id: "c0d2ed6aa8460e20"
       # reality_private_key: "REPLACE_ME"
     custom_roles: []
+
+workers:
+  wrt_me:
+    enabled: true
+    arch: arm64
+    ssh:
+      host: 100.112.10.20
+      port: 22
+      user: root
+    tags:
+      - provider:soundcloud
+      - region:nl
+      - cpu:low

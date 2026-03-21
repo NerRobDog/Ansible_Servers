@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import argparse
+import copy
 import json
 import sys
 from pathlib import Path
+from typing import Optional
 
 try:
     import yaml
@@ -36,6 +40,35 @@ REMNAWAVE_DEFAULTS = {
     "target_inbound_tags": [],
 }
 
+YUSIC_WORKER_DEFAULTS = {
+    "relay_host_alias": "",
+    "image_repo": "",
+    "enabled": True,
+    "arch": "amd64",
+    "ssh": {
+        "host": "",
+        "port": 22,
+        "user": "root",
+        "password": "",
+        "private_key": "",
+    },
+    "tags": [],
+    "max_concurrent_jobs": 1,
+    "network_mode": "host",
+    "dns": [],
+    "proxy": {
+        "http_proxy": "",
+        "https_proxy": "",
+        "no_proxy": "",
+    },
+    "redis_url": "",
+    "cache_bot_token": "",
+    "inline_cache_chat_id": "",
+    "workdir": "/opt/yusic-worker",
+    "container_name": "yusic_download_worker",
+    "selfcheck_command": "python services/download-worker/selfcheck.py",
+}
+
 
 def fail(message: str) -> None:
     print(f"ERROR: {message}", file=sys.stderr)
@@ -54,6 +87,49 @@ def parse_bool(value) -> bool:
         if lowered in {"0", "false", "no", "off"}:
             return False
     fail(f"Cannot parse boolean value: {value!r}")
+
+
+def ensure_mapping(value, context: str):
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        fail(f"{context} must be an object.")
+    return value
+
+
+def parse_int(value, context: str, min_value: Optional[int] = None, max_value: Optional[int] = None) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        fail(f"{context} must be an integer: {value!r}")
+    if min_value is not None and parsed < min_value:
+        fail(f"{context} must be >= {min_value}.")
+    if max_value is not None and parsed > max_value:
+        fail(f"{context} must be <= {max_value}.")
+    return parsed
+
+
+def parse_string_list(value, context: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        fail(f"{context} must be a list.")
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            fail(f"{context} contains invalid item: {item!r}")
+        result.append(item.strip())
+    return result
+
+
+def deep_merge(base: dict, override: dict) -> dict:
+    result = copy.deepcopy(base)
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = deep_merge(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
 
 
 def load_fleet_config(path: Path):
@@ -76,13 +152,9 @@ def load_fleet_config(path: Path):
     if "hosts" not in data or not isinstance(data["hosts"], dict) or not data["hosts"]:
         fail("Fleet config must contain non-empty object field 'hosts'.")
 
-    defaults = data.get("defaults", {})
-    if defaults is None:
-        defaults = {}
-    if not isinstance(defaults, dict):
-        fail("Field 'defaults' must be an object when provided.")
-
-    return data["hosts"], defaults
+    defaults = ensure_mapping(data.get("defaults", {}), "Field 'defaults'")
+    workers = ensure_mapping(data.get("workers", {}), "Field 'workers'")
+    return data["hosts"], defaults, workers
 
 
 def normalize_host(alias: str, host_cfg: dict, defaults: dict):
@@ -93,29 +165,14 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
     if not isinstance(ansible_host, str) or not ansible_host.strip():
         fail(f"Host '{alias}' requires non-empty string 'ansible_host'.")
 
-    ansible_port = host_cfg.get("ansible_port", defaults.get("ansible_port", 22))
-    try:
-        ansible_port = int(ansible_port)
-    except Exception:
-        fail(f"Host '{alias}' has invalid ansible_port: {ansible_port!r}")
-    if not (1 <= ansible_port <= 65535):
-        fail(f"Host '{alias}' ansible_port must be in range 1..65535.")
+    ansible_port = parse_int(host_cfg.get("ansible_port", defaults.get("ansible_port", 22)), f"Host '{alias}' ansible_port", 1, 65535)
 
     deploy_user = host_cfg.get("deploy_user", defaults.get("deploy_user", "deploy"))
     if not isinstance(deploy_user, str) or not deploy_user.strip():
         fail(f"Host '{alias}' requires string deploy_user.")
 
-    default_bootstrap = defaults.get("bootstrap", {})
-    if default_bootstrap is None:
-        default_bootstrap = {}
-    if not isinstance(default_bootstrap, dict):
-        fail("defaults.bootstrap must be an object when provided.")
-
-    bootstrap = host_cfg.get("bootstrap", {})
-    if bootstrap is None:
-        bootstrap = {}
-    if not isinstance(bootstrap, dict):
-        fail(f"Host '{alias}' bootstrap must be an object.")
+    default_bootstrap = ensure_mapping(defaults.get("bootstrap", {}), "defaults.bootstrap")
+    bootstrap = ensure_mapping(host_cfg.get("bootstrap", {}), f"Host '{alias}' bootstrap")
     bootstrap_username = bootstrap.get("username", default_bootstrap.get("username", "root"))
     bootstrap_password = bootstrap.get("password", default_bootstrap.get("password", ""))
     if bootstrap_password is None:
@@ -126,31 +183,22 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
     if not isinstance(bootstrap_password, str):
         fail(f"Host '{alias}' bootstrap.password must be a string when provided.")
 
-    default_features = defaults.get("features", {})
-    if default_features is None:
-        default_features = {}
-    if not isinstance(default_features, dict):
-        fail("defaults.features must be an object when provided.")
+    default_features = ensure_mapping(defaults.get("features", {}), "defaults.features")
     features = FEATURE_DEFAULTS.copy()
     features.update(default_features)
-    features.update(host_cfg.get("features", {}) or {})
+    features.update(ensure_mapping(host_cfg.get("features", {}), f"Host '{alias}' features"))
     normalized_features = {}
     for key in FEATURE_DEFAULTS:
         normalized_features[key] = parse_bool(features.get(key, FEATURE_DEFAULTS[key]))
 
-    default_remnawave = defaults.get("remnawave", {})
-    if default_remnawave is None:
-        default_remnawave = {}
-    if not isinstance(default_remnawave, dict):
-        fail("defaults.remnawave must be an object when provided.")
+    default_remnawave = ensure_mapping(defaults.get("remnawave", {}), "defaults.remnawave")
     remnawave_cfg = REMNAWAVE_DEFAULTS.copy()
     remnawave_cfg.update(default_remnawave)
-    remnawave_cfg.update(host_cfg.get("remnawave", {}) or {})
-    try:
-        remnawave_cfg["node_port"] = int(remnawave_cfg["node_port"])
-        remnawave_cfg["caddy_monitor_port"] = int(remnawave_cfg["caddy_monitor_port"])
-    except Exception:
-        fail(f"Host '{alias}' remnawave ports must be numbers.")
+    remnawave_cfg.update(ensure_mapping(host_cfg.get("remnawave", {}), f"Host '{alias}' remnawave"))
+    remnawave_cfg["node_port"] = parse_int(remnawave_cfg["node_port"], f"Host '{alias}' remnawave.node_port", 1, 65535)
+    remnawave_cfg["caddy_monitor_port"] = parse_int(
+        remnawave_cfg["caddy_monitor_port"], f"Host '{alias}' remnawave.caddy_monitor_port", 1, 65535
+    )
     if remnawave_cfg["ipv6_state"] not in {"enabled", "disabled"}:
         fail(f"Host '{alias}' remnawave.ipv6_state must be enabled|disabled.")
     remnawave_cfg["caddy_tls_mode"] = str(remnawave_cfg.get("caddy_tls_mode", "public")).strip().lower()
@@ -163,15 +211,7 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
     remnawave_cfg["panel_node_uuid"] = str(remnawave_cfg.get("panel_node_uuid", "") or "").strip()
     remnawave_cfg["target_profile_name"] = str(remnawave_cfg.get("target_profile_name", "") or "").strip()
 
-    inbound_tags = remnawave_cfg.get("target_inbound_tags", [])
-    if inbound_tags is None:
-        inbound_tags = []
-    if not isinstance(inbound_tags, list):
-        fail(f"Host '{alias}' remnawave.target_inbound_tags must be a list.")
-    for tag in inbound_tags:
-        if not isinstance(tag, str) or not tag.strip():
-            fail(f"Host '{alias}' remnawave.target_inbound_tags contains invalid tag: {tag!r}")
-    remnawave_cfg["target_inbound_tags"] = [tag.strip() for tag in inbound_tags]
+    remnawave_cfg["target_inbound_tags"] = parse_string_list(remnawave_cfg.get("target_inbound_tags", []), f"Host '{alias}' remnawave.target_inbound_tags")
     if remnawave_cfg["caddy_tls_mode"] == "files":
         if not remnawave_cfg["caddy_tls_cert_file"].strip() or not remnawave_cfg["caddy_tls_key_file"].strip():
             fail(f"Host '{alias}' remnawave.caddy_tls_mode=files requires caddy_tls_cert_file and caddy_tls_key_file.")
@@ -185,7 +225,7 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
         if not isinstance(role_name, str) or not role_name.strip():
             fail(f"Host '{alias}' custom_roles contains invalid item: {role_name!r}")
 
-    normalized = {
+    return {
         "ansible_host": ansible_host.strip(),
         "ansible_port": ansible_port,
         "deploy_user": deploy_user.strip(),
@@ -197,22 +237,141 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
         "remnawave": remnawave_cfg,
         "custom_roles": custom_roles,
     }
-    return normalized
+
+
+def normalize_yusic_defaults(defaults: dict) -> dict:
+    worker_defaults = ensure_mapping(defaults.get("yusic_worker", {}), "defaults.yusic_worker")
+    merged = deep_merge(YUSIC_WORKER_DEFAULTS, worker_defaults)
+    merged["relay_host_alias"] = str(merged.get("relay_host_alias", "") or "").strip()
+    merged["image_repo"] = str(merged.get("image_repo", "") or "").strip()
+    merged["enabled"] = parse_bool(merged.get("enabled", True))
+    merged["arch"] = str(merged.get("arch", "amd64") or "").strip().lower()
+    if merged["arch"] not in {"amd64", "arm64"}:
+        fail("defaults.yusic_worker.arch must be one of: amd64, arm64.")
+    merged["ssh"] = ensure_mapping(merged.get("ssh", {}), "defaults.yusic_worker.ssh")
+    merged["ssh"]["host"] = str(merged["ssh"].get("host", "") or "").strip()
+    merged["ssh"]["port"] = parse_int(merged["ssh"].get("port", 22), "defaults.yusic_worker.ssh.port", 1, 65535)
+    merged["ssh"]["user"] = str(merged["ssh"].get("user", "root") or "").strip()
+    merged["ssh"]["password"] = str(merged["ssh"].get("password", "") or "")
+    merged["ssh"]["private_key"] = str(merged["ssh"].get("private_key", "") or "")
+    merged["tags"] = parse_string_list(merged.get("tags", []), "defaults.yusic_worker.tags")
+    merged["max_concurrent_jobs"] = parse_int(
+        merged.get("max_concurrent_jobs", 1), "defaults.yusic_worker.max_concurrent_jobs", 1, 128
+    )
+    merged["network_mode"] = str(merged.get("network_mode", "host") or "").strip()
+    merged["dns"] = parse_string_list(merged.get("dns", []), "defaults.yusic_worker.dns")
+    merged["proxy"] = ensure_mapping(merged.get("proxy", {}), "defaults.yusic_worker.proxy")
+    merged["proxy"]["http_proxy"] = str(merged["proxy"].get("http_proxy", "") or "")
+    merged["proxy"]["https_proxy"] = str(merged["proxy"].get("https_proxy", "") or "")
+    merged["proxy"]["no_proxy"] = str(merged["proxy"].get("no_proxy", "") or "")
+    merged["redis_url"] = str(merged.get("redis_url", "") or "").strip()
+    merged["cache_bot_token"] = str(merged.get("cache_bot_token", "") or "").strip()
+    merged["inline_cache_chat_id"] = str(merged.get("inline_cache_chat_id", "") or "").strip()
+    merged["workdir"] = str(merged.get("workdir", "/opt/yusic-worker") or "").strip()
+    merged["container_name"] = str(merged.get("container_name", "yusic_download_worker") or "").strip()
+    merged["selfcheck_command"] = str(merged.get("selfcheck_command", "python services/download-worker/selfcheck.py") or "").strip()
+    return merged
+
+
+def normalize_worker(alias: str, worker_cfg: dict, worker_defaults: dict, host_aliases: set[str], strict_required: bool) -> dict:
+    if not isinstance(worker_cfg, dict):
+        fail(f"Worker '{alias}' config must be an object.")
+    merged = deep_merge(worker_defaults, worker_cfg)
+    merged["enabled"] = parse_bool(merged.get("enabled", True))
+    merged["relay_host_alias"] = str(merged.get("relay_host_alias", "") or "").strip()
+    merged["image_repo"] = str(merged.get("image_repo", "") or "").strip()
+    merged["arch"] = str(merged.get("arch", "amd64") or "").strip().lower()
+    if merged["arch"] not in {"amd64", "arm64"}:
+        fail(f"Worker '{alias}' arch must be one of: amd64, arm64.")
+
+    ssh_cfg = ensure_mapping(merged.get("ssh", {}), f"Worker '{alias}' ssh")
+    merged["ssh"] = {
+        "host": str(ssh_cfg.get("host", "") or "").strip(),
+        "port": parse_int(ssh_cfg.get("port", 22), f"Worker '{alias}' ssh.port", 1, 65535),
+        "user": str(ssh_cfg.get("user", "root") or "").strip(),
+        "password": str(ssh_cfg.get("password", "") or ""),
+        "private_key": str(ssh_cfg.get("private_key", "") or ""),
+    }
+    merged["tags"] = parse_string_list(merged.get("tags", []), f"Worker '{alias}' tags")
+    merged["max_concurrent_jobs"] = parse_int(merged.get("max_concurrent_jobs", 1), f"Worker '{alias}' max_concurrent_jobs", 1, 128)
+    merged["network_mode"] = str(merged.get("network_mode", "host") or "").strip()
+    merged["dns"] = parse_string_list(merged.get("dns", []), f"Worker '{alias}' dns")
+    proxy = ensure_mapping(merged.get("proxy", {}), f"Worker '{alias}' proxy")
+    merged["proxy"] = {
+        "http_proxy": str(proxy.get("http_proxy", "") or ""),
+        "https_proxy": str(proxy.get("https_proxy", "") or ""),
+        "no_proxy": str(proxy.get("no_proxy", "") or ""),
+    }
+    merged["redis_url"] = str(merged.get("redis_url", "") or "").strip()
+    merged["cache_bot_token"] = str(merged.get("cache_bot_token", "") or "").strip()
+    merged["inline_cache_chat_id"] = str(merged.get("inline_cache_chat_id", "") or "").strip()
+    merged["workdir"] = str(merged.get("workdir", "/opt/yusic-worker") or "").strip()
+    merged["container_name"] = str(merged.get("container_name", "yusic_download_worker") or "").strip()
+    merged["selfcheck_command"] = str(merged.get("selfcheck_command", "python services/download-worker/selfcheck.py") or "").strip()
+    merged["alias"] = alias
+
+    if merged["enabled"] and strict_required:
+        if not merged["relay_host_alias"]:
+            fail(f"Worker '{alias}' must define relay_host_alias (or defaults.yusic_worker.relay_host_alias).")
+        if merged["relay_host_alias"] not in host_aliases:
+            fail(f"Worker '{alias}' relay_host_alias '{merged['relay_host_alias']}' is not present in fleet hosts.")
+        if not merged["image_repo"]:
+            fail(f"Worker '{alias}' must define image_repo.")
+        if not merged["ssh"]["host"]:
+            fail(f"Worker '{alias}' must define ssh.host.")
+        if not merged["ssh"]["user"]:
+            fail(f"Worker '{alias}' must define ssh.user.")
+        if not merged["redis_url"]:
+            fail(f"Worker '{alias}' must define redis_url.")
+        if not merged["cache_bot_token"]:
+            fail(f"Worker '{alias}' must define cache_bot_token.")
+        if not merged["inline_cache_chat_id"]:
+            fail(f"Worker '{alias}' must define inline_cache_chat_id.")
+    return merged
+
+
+def normalize_workers(workers_raw: dict, defaults: dict, host_aliases: set[str], target: str):
+    strict_required = target == "yusic_worker"
+    worker_defaults = normalize_yusic_defaults(defaults)
+    normalized = {
+        alias: normalize_worker(alias, cfg, worker_defaults, host_aliases, strict_required)
+        for alias, cfg in workers_raw.items()
+    }
+    enabled_aliases = sorted(alias for alias, cfg in normalized.items() if cfg.get("enabled", False))
+    if strict_required and not enabled_aliases:
+        fail("target=yusic_worker requires at least one enabled worker in 'workers'.")
+
+    relay_host_alias = worker_defaults.get("relay_host_alias", "")
+    if strict_required and enabled_aliases:
+        if not relay_host_alias:
+            relay_host_alias = normalized[enabled_aliases[0]]["relay_host_alias"]
+        if relay_host_alias not in host_aliases:
+            fail(f"Global relay_host_alias '{relay_host_alias}' is not present in fleet hosts.")
+        for alias in enabled_aliases:
+            if normalized[alias]["relay_host_alias"] != relay_host_alias:
+                fail(
+                    f"Worker '{alias}' relay_host_alias='{normalized[alias]['relay_host_alias']}' differs from global relay_host_alias='{relay_host_alias}'. "
+                    "Current contract supports one global relay host alias."
+                )
+
+    return {
+        "defaults": worker_defaults,
+        "workers": normalized,
+        "enabled_workers": enabled_aliases,
+        "relay_host_alias": relay_host_alias,
+    }
 
 
 def build_inventory(hosts: dict, mode: str) -> str:
     lines = ["[all]"]
     for alias, cfg in hosts.items():
-        if mode == "bootstrap":
-            ansible_user = cfg["bootstrap"]["username"]
-        else:
-            ansible_user = cfg["deploy_user"]
+        ansible_user = cfg["bootstrap"]["username"] if mode == "bootstrap" else cfg["deploy_user"]
         lines.append(
             f"{alias} "
             f"ansible_host={cfg['ansible_host']} "
             f"ansible_port={cfg['ansible_port']} "
             f"ansible_user={ansible_user} "
-            f"ansible_ssh_private_key_file=~/.ssh/id_ed25519"
+            "ansible_ssh_private_key_file=~/.ssh/id_ed25519"
         )
     lines.append("")
     return "\n".join(lines)
@@ -222,19 +381,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Render runtime inventory and vars from fleet config.")
     parser.add_argument("--fleet-config", required=True, help="Path to decoded fleet config (JSON or YAML).")
     parser.add_argument("--mode", required=True, choices=["bootstrap", "deploy", "lockdown"])
+    parser.add_argument("--target", required=False, default="remnawave", choices=["remnawave", "yusic_worker"])
     parser.add_argument("--inventory-out", required=True)
     parser.add_argument("--vars-out", required=True)
     parser.add_argument("--bootstrap-out", required=True)
     args = parser.parse_args()
 
-    hosts_raw, defaults = load_fleet_config(Path(args.fleet_config))
-    normalized_hosts = {
-        alias: normalize_host(alias, cfg, defaults)
-        for alias, cfg in hosts_raw.items()
-    }
+    hosts_raw, defaults, workers_raw = load_fleet_config(Path(args.fleet_config))
+    normalized_hosts = {alias: normalize_host(alias, cfg, defaults) for alias, cfg in hosts_raw.items()}
+    yusic_runtime = normalize_workers(workers_raw, defaults, set(normalized_hosts.keys()), args.target)
 
     runtime_vars = {
         "fleet_mode": args.mode,
+        "fleet_target": args.target,
         "fleet_hosts": normalized_hosts,
         "remnawave_runtime_host_vars": {
             alias: {
@@ -254,6 +413,7 @@ def main() -> None:
             }
             for alias, cfg in normalized_hosts.items()
         },
+        "yusic_worker_runtime": yusic_runtime,
     }
 
     bootstrap_map = {
