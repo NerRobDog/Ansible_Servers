@@ -134,7 +134,7 @@ defaults:
     inline_cache_chat_id: "-1001234567890"
 
 workers:
-  wrt-me:
+  wrt_me:
     ssh:
       host: 100.112.10.20
       port: 22

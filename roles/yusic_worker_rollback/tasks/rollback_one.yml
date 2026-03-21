@@ -16,7 +16,7 @@
     target="{{ yusic_worker.ssh.user }}@{{ yusic_worker.ssh.host }}"
     if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
       SSHPASS="{{ yusic_worker.ssh.password }}" sshpass -e ssh "${ssh_args[@]}" "${target}" <<'EOSH'
-    set -euo pipefail
+    set -eu
     cd "{{ yusic_worker.workdir }}"
     if [ ! -f yusic-worker.env ]; then
       exit 0
@@ -31,7 +31,7 @@
     EOSH
     else
       ssh "${ssh_args[@]}" "${target}" <<'EOSH'
-    set -euo pipefail
+    set -eu
     cd "{{ yusic_worker.workdir }}"
     if [ ! -f yusic-worker.env ]; then
       exit 0

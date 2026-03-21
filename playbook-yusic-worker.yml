@@ -128,20 +128,6 @@
       changed_when: false
       tags: [always]
 
-    - name: Write temporary private key for selected worker SSH (optional)
-      ansible.builtin.copy:
-        dest: "{{ yusic_worker_relay_stage_dir_effective }}/{{ item.alias }}/id_worker"
-        content: "{{ item.ssh.private_key }}"
-        owner: root
-        group: root
-        mode: "0600"
-      loop: "{{ yusic_selected_workers }}"
-      loop_control:
-        label: "{{ item.alias }}"
-      when: item.ssh.private_key | default('') | length > 0
-      no_log: true
-      tags: [always]
-
     - name: Validate immutable image tag for deploy/update
       ansible.builtin.assert:
         that:
@@ -152,13 +138,26 @@
       when: worker_mode_effective in ['deploy', 'update']
       tags: [always]
 
-  roles:
-    - role: yusic_worker_relay
-      tags: [yusic_worker, relay]
-
   tasks:
     - name: Execute selected worker lifecycle mode
       block:
+        - name: Ensure relay prerequisites for yusic worker lifecycle
+          ansible.builtin.include_role:
+            name: yusic_worker_relay
+
+        - name: Write temporary private key for selected worker SSH (optional)
+          ansible.builtin.copy:
+            dest: "{{ yusic_worker_relay_stage_dir_effective }}/{{ item.alias }}/id_worker"
+            content: "{{ item.ssh.private_key }}"
+            owner: root
+            group: root
+            mode: "0600"
+          loop: "{{ yusic_selected_workers }}"
+          loop_control:
+            label: "{{ item.alias }}"
+          when: item.ssh.private_key | default('') | length > 0
+          no_log: true
+
         - name: Deploy/update workers and smoke with rollback on failure
           when: worker_mode_effective in ['deploy', 'update']
           block:
@@ -209,7 +208,7 @@
               ssh_args+=(-i "{{ yusic_worker_relay_stage_dir_effective }}/{{ yusic_worker.alias }}/id_worker")
             fi
             target="{{ yusic_worker.ssh.user }}@{{ yusic_worker.ssh.host }}"
-            remote_cmd="set -euo pipefail; docker --version >/dev/null; docker compose version >/dev/null;"
+            remote_cmd="set -eu; docker --version >/dev/null; docker compose version >/dev/null;"
             remote_cmd="${remote_cmd} if [ ! -d '{{ yusic_worker.workdir }}' ]; then"
             remote_cmd="${remote_cmd} mkdir -p '{{ yusic_worker.workdir }}';"
             remote_cmd="${remote_cmd} echo __WORKDIR_CREATED__;"
