@@ -170,8 +170,9 @@
           no_log: true
 
         - name: Validate temporary worker SSH key format
-          ansible.builtin.command:
-            cmd: "ssh-keygen -l -f {{ yusic_worker_relay_stage_dir_effective }}/{{ item.alias }}/id_worker"
+          ansible.builtin.shell: |
+            set -euo pipefail
+            ssh-keygen -y -f "{{ yusic_worker_relay_stage_dir_effective }}/{{ item.alias }}/id_worker" >/dev/null
           loop: "{{ yusic_selected_workers }}"
           loop_control:
             label: "{{ item.alias }}"
