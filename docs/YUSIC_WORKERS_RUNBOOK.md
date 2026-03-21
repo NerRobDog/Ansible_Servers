@@ -38,7 +38,7 @@ defaults:
     selfcheck_command: python services/download-worker/selfcheck.py
 
 workers:
-  wrt-me:
+  wrt_me:
     enabled: true
     arch: arm64
     ssh:
@@ -64,7 +64,7 @@ workers:
 ### Bootstrap relay dependencies / connectivity check
 - `target=yusic_worker`
 - `worker_mode=bootstrap`
-- `limit=all` или `limit=wrt-me,worker2`
+- `limit=all` или `limit=wrt_me,worker2`
 
 ### Deploy new worker image
 - `target=yusic_worker`
@@ -116,4 +116,3 @@ workers:
 
 4. Проверить heartbeat/coordinator:
 - `GET /v1/workers` на coordinator.
-

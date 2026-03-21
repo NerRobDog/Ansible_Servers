@@ -107,6 +107,7 @@
   ansible.builtin.shell: |
     set -euo pipefail
     scp_args=(
+      -p
       -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking }}
       -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds }}
       -P {{ yusic_worker.ssh.port }}
@@ -130,6 +131,29 @@
   args:
     executable: /bin/bash
   changed_when: true
+  no_log: true
+
+- name: Enforce restrictive mode for yusic-worker.env on worker
+  ansible.builtin.shell: |
+    set -euo pipefail
+    ssh_args=(
+      -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking }}
+      -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds }}
+      -p {{ yusic_worker.ssh.port }}
+    )
+    if [ -f "{{ yusic_worker_stage_path }}/id_worker" ]; then
+      ssh_args+=(-i "{{ yusic_worker_stage_path }}/id_worker")
+    fi
+    if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
+      SSHPASS="{{ yusic_worker.ssh.password }}" sshpass -e ssh "${ssh_args[@]}" "{{ yusic_worker_target }}" \
+        "chmod 600 '{{ yusic_worker.workdir }}/yusic-worker.env'"
+    else
+      ssh "${ssh_args[@]}" "{{ yusic_worker_target }}" \
+        "chmod 600 '{{ yusic_worker.workdir }}/yusic-worker.env'"
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
   no_log: true
 
 - name: Apply worker update on target host

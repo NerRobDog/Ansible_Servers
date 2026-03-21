@@ -354,6 +354,10 @@ jobs:
               echo "yusic_worker_runtime.relay_host_alias is missing in runtime vars." >&2
               exit 1
             fi
+            if [[ "${CHECK_MODE}" == "true" ]]; then
+              echo "ERROR: CHECK_MODE is not supported for target=yusic_worker because this path is not safe in Ansible check mode." >&2
+              exit 1
+            fi
             cmd=(
               ansible-playbook
               -i .ansible/runtime/hosts.ini
@@ -369,9 +373,6 @@ jobs:
             fi
             if [[ -n "${TAGS}" ]]; then
               cmd+=(--tags "${TAGS}")
-            fi
-            if [[ "${CHECK_MODE}" == "true" ]]; then
-              cmd+=(--check --diff)
             fi
           fi
           if [[ -f .ansible/runtime/vault_pass.txt ]]; then

@@ -24,6 +24,7 @@
       printf '%s\n' "WORKER_IMAGE={{ (yusic_worker_backup_images | default({})).get(yusic_worker.alias, '') }}" >> yusic-worker.env
     fi
     docker compose --env-file yusic-worker.env -f docker-compose.yml up -d
+    echo "__ROLLBACK_APPLIED__"
     EOSH
     else
       ssh "${ssh_args[@]}" "${target}" <<'EOSH'
@@ -38,9 +39,11 @@
       printf '%s\n' "WORKER_IMAGE={{ (yusic_worker_backup_images | default({})).get(yusic_worker.alias, '') }}" >> yusic-worker.env
     fi
     docker compose --env-file yusic-worker.env -f docker-compose.yml up -d
+    echo "__ROLLBACK_APPLIED__"
     EOSH
     fi
   args:
     executable: /bin/bash
-  changed_when: true
+  register: yusic_worker_rollback_cmd
+  changed_when: "'__ROLLBACK_APPLIED__' in (yusic_worker_rollback_cmd.stdout | default(''))"
   no_log: true

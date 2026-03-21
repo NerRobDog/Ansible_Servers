@@ -172,7 +172,7 @@
           ansible.builtin.shell: |
             set -euo pipefail
             ssh_args=(
-              -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking | default('accept-new') }}
+              -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking | default('yes') }}
               -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds | default(15) }}
               -p {{ yusic_worker.ssh.port }}
             )

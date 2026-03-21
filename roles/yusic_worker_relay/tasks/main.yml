@@ -11,10 +11,6 @@
     state: present
     update_cache: true
 
-- name: Ensure docker command is available on relay
-  ansible.builtin.command: docker --version
-  changed_when: false
-
 - name: Ensure skopeo command is available on relay
   ansible.builtin.command: skopeo --version
   changed_when: false
