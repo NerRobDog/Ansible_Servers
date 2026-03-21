@@ -1,0 +1,137 @@
+---
+# fleet.remna-yusic.yml
+# Safe sample: placeholders only.
+
+defaults:
+  ansible_port: 22
+  deploy_user: deploy
+  bootstrap:
+    username: root
+    password: "CHANGE_ME_BOOTSTRAP_PASSWORD"
+  features:
+    feature_base: true
+    feature_firewall: true
+    feature_docker: true
+    feature_remnawave_node: false
+    feature_caddy_node: false
+    feature_node_tuning: false
+    feature_user_shell: true
+  firewall:
+    manage_redis_rules: true
+    allow_tailnet_redis_only: true
+    tailnet_cidr: 100.64.0.0/10
+  remnawave:
+    node_secret_key: ""
+    node_port: 3001
+    caddy_domain: ""
+    caddy_monitor_port: 8443
+    ipv6_state: enabled
+    caddy_tls_mode: public
+    caddy_local_only: true
+    caddy_tls_cert_file: ""
+    caddy_tls_key_file: ""
+    caddy_acme_ca: ""
+    reality_target: "127.0.0.1:8443"
+  custom_roles: []
+
+  # Yusic external workers defaults (required for target=yusic_worker)
+  yusic_worker:
+    relay_host_alias: tw-germ-1
+    image_repo: ghcr.io/OWNER/Yusic_bot/download-worker
+    enabled: true
+    arch: amd64
+    tags:
+      - provider:soundcloud
+      - region:ru
+      - cpu:mid
+    max_concurrent_jobs: 2
+    network_mode: host
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    redis_url: redis://CHANGE_ME_REDIS_HOST:6379/0
+    cache_bot_token: CHANGE_ME_CACHE_BOT_TOKEN
+    inline_cache_chat_id: "-1000000000000"
+    workdir: /opt/yusic-worker
+    container_name: yusic_download_worker
+    selfcheck_command: python services/download-worker/selfcheck.py
+
+hosts:
+  # Relay + optional RU infra
+  tw-germ-1:
+    ansible_host: "CHANGE_ME_TW_GERM_1_IP"
+    bootstrap:
+      username: root
+      password: "CHANGE_ME_TW_GERM_1_BOOTSTRAP"
+    features:
+      feature_remnawave_node: false
+      feature_caddy_node: true
+      feature_node_tuning: true
+    remnawave:
+      node_secret_key: "CHANGE_ME_TW_GERM_1_NODE_SECRET"
+      caddy_domain: "CHANGE_ME_TW_GERM_1_DOMAIN"
+      ipv6_state: disabled
+      reality_target: "127.0.0.1:8443"
+
+  # VPS #1 (also worker candidate)
+  tw-neth-1:
+    ansible_host: "CHANGE_ME_TW_NETH_1_IP"
+    bootstrap:
+      username: root
+      password: "CHANGE_ME_TW_NETH_1_BOOTSTRAP"
+    features:
+      feature_remnawave_node: true
+      feature_caddy_node: true
+      feature_node_tuning: true
+    remnawave:
+      node_secret_key: "CHANGE_ME_TW_NETH_1_NODE_SECRET"
+      node_port: 3001
+      caddy_domain: "CHANGE_ME_TW_NETH_1_DOMAIN"
+      caddy_monitor_port: 8443
+      ipv6_state: disabled
+      reality_target: "127.0.0.1:8443"
+
+  # VPS #2 (also worker candidate)
+  dh-neth-2:
+    ansible_host: "CHANGE_ME_DH_NETH_2_IP"
+    bootstrap:
+      username: root
+      password: "CHANGE_ME_DH_NETH_2_BOOTSTRAP"
+    features:
+      feature_remnawave_node: false
+      feature_caddy_node: true
+      feature_node_tuning: true
+    remnawave:
+      node_secret_key: "CHANGE_ME_DH_NETH_2_NODE_SECRET"
+      caddy_domain: "CHANGE_ME_DH_NETH_2_DOMAIN"
+      caddy_monitor_port: 8443
+      ipv6_state: disabled
+      reality_target: "127.0.0.1:8443"
+
+# Worker scope: only VPS (as selected)
+workers:
+  tw_neth_1_worker:
+    enabled: true
+    arch: amd64
+    ssh:
+      host: "CHANGE_ME_TW_NETH_1_TAILNET_OR_PRIVATE_IP"
+      port: 22
+      user: root
+    tags:
+      - provider:soundcloud
+      - region:nl
+      - cpu:high
+    max_concurrent_jobs: 3
+
+  dh_neth_2_worker:
+    enabled: true
+    arch: amd64
+    ssh:
+      host: "CHANGE_ME_DH_NETH_2_TAILNET_OR_PRIVATE_IP"
+      port: 22
+      user: root
+    tags:
+      - provider:soundcloud
+      - region:nl
+      - cpu:mid
+    max_concurrent_jobs: 2

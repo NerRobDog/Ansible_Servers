@@ -1,1 +1,7 @@
 ---
+yusic_worker_tailnet_required_for_non_ru: true
+yusic_worker_tailscale_status_command: "tailscale status --json"
+yusic_worker_verify_redis_reachability: true
+yusic_worker_verify_worker_heartbeat: true
+yusic_worker_coordinator_url: ""
+yusic_worker_smoke_heartbeat_timeout_seconds: 15

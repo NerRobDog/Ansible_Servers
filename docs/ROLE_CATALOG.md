@@ -17,6 +17,11 @@
   - 443/tcp (Reality/public endpoint)
 - При `feature_remnawave_node=true` автоматически открывает `remnawave.node_port`.
 - По умолчанию не открывает наружу порт Caddy monitor (`8443`).
+- Source-aware guardrails:
+  - `firewall_manage_redis_rules=true` включает управление Redis-правилами в UFW;
+  - `firewall_allow_tailnet_redis_only=true` (с `firewall_manage_redis_rules=true`) включает Redis allow только из `firewall_tailnet_cidr` (по умолчанию `100.64.0.0/10`);
+  - `firewall_allowlist_redis_sources` добавляет точечные источники для Redis;
+  - при включенном source-scoped Redis публичное правило `allow 6379/tcp` удаляется.
 
 ### `docker`
 - Назначение: установка Docker CE и плагинов.

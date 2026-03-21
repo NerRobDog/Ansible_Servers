@@ -41,6 +41,14 @@ REMNAWAVE_DEFAULTS = {
     "target_inbound_tags": [],
 }
 
+FIREWALL_DEFAULTS = {
+    "manage_redis_rules": False,
+    "allow_tailnet_redis_only": True,
+    "tailnet_cidr": "100.64.0.0/10",
+    "allowlist_redis_sources": [],
+    "source_tcp_rules": [],
+}
+
 YUSIC_WORKER_DEFAULTS = {
     "relay_host_alias": "",
     "image_repo": "",
@@ -244,6 +252,37 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
         if not remnawave_cfg["caddy_tls_cert_file"].strip() or not remnawave_cfg["caddy_tls_key_file"].strip():
             fail(f"Host '{alias}' remnawave.caddy_tls_mode=files requires caddy_tls_cert_file and caddy_tls_key_file.")
 
+    default_firewall = ensure_mapping(defaults.get("firewall", {}), "defaults.firewall")
+    firewall_cfg = FIREWALL_DEFAULTS.copy()
+    firewall_cfg.update(default_firewall)
+    firewall_cfg.update(ensure_mapping(host_cfg.get("firewall", {}), f"Host '{alias}' firewall"))
+    firewall_cfg["manage_redis_rules"] = parse_bool(firewall_cfg.get("manage_redis_rules", False))
+    firewall_cfg["allow_tailnet_redis_only"] = parse_bool(firewall_cfg.get("allow_tailnet_redis_only", True))
+    firewall_cfg["tailnet_cidr"] = str(firewall_cfg.get("tailnet_cidr", "100.64.0.0/10") or "100.64.0.0/10").strip()
+    firewall_cfg["allowlist_redis_sources"] = parse_string_list(
+        firewall_cfg.get("allowlist_redis_sources", []),
+        f"Host '{alias}' firewall.allowlist_redis_sources",
+    )
+    source_tcp_rules_raw = firewall_cfg.get("source_tcp_rules", [])
+    if source_tcp_rules_raw is None:
+        source_tcp_rules_raw = []
+    if not isinstance(source_tcp_rules_raw, list):
+        fail(f"Host '{alias}' firewall.source_tcp_rules must be a list.")
+    source_tcp_rules: list[dict] = []
+    for idx, raw_rule in enumerate(source_tcp_rules_raw):
+        if not isinstance(raw_rule, dict):
+            fail(f"Host '{alias}' firewall.source_tcp_rules[{idx}] must be an object.")
+        rule = dict(raw_rule)
+        rule["port"] = parse_int(rule.get("port", 0), f"Host '{alias}' firewall.source_tcp_rules[{idx}].port", 1, 65535)
+        rule["proto"] = str(rule.get("proto", "tcp") or "tcp").strip().lower()
+        if rule["proto"] not in {"tcp", "udp"}:
+            fail(f"Host '{alias}' firewall.source_tcp_rules[{idx}].proto must be tcp|udp.")
+        rule["from_ip"] = str(rule.get("from_ip", "") or "").strip()
+        if not rule["from_ip"]:
+            fail(f"Host '{alias}' firewall.source_tcp_rules[{idx}].from_ip is required.")
+        source_tcp_rules.append(rule)
+    firewall_cfg["source_tcp_rules"] = source_tcp_rules
+
     custom_roles = host_cfg.get("custom_roles", defaults.get("custom_roles", []))
     if custom_roles is None:
         custom_roles = []
@@ -263,6 +302,7 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
         },
         "features": normalized_features,
         "remnawave": remnawave_cfg,
+        "firewall": firewall_cfg,
         "custom_roles": custom_roles,
     }
 

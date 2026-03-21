@@ -5,6 +5,12 @@ firewall_public_tcp_ports:
   - 443
 firewall_allowed_tcp_ports: []
 firewall_allowed_udp_ports: []
+firewall_source_tcp_rules: []
+firewall_tailnet_cidr: 100.64.0.0/10
+firewall_redis_port: 6379
+firewall_manage_redis_rules: false
+firewall_allow_tailnet_redis_only: true
+firewall_allowlist_redis_sources: []
 firewall_auto_allow_remnawave_node_port: true
 firewall_open_caddy_monitor_port: false
 firewall_caddy_monitor_port: "{{ remnawave_caddy_monitor_port | default(8443) }}"

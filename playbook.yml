@@ -55,6 +55,16 @@
       changed_when: false
       tags: [always]
 
+    - name: Resolve host-level firewall variables from fleet config
+      ansible.builtin.set_fact:
+        firewall_manage_redis_rules: "{{ fleet_host_cfg.get('firewall', {}).get('manage_redis_rules', firewall_manage_redis_rules | default(false)) | bool }}"
+        firewall_allow_tailnet_redis_only: "{{ fleet_host_cfg.get('firewall', {}).get('allow_tailnet_redis_only', firewall_allow_tailnet_redis_only | default(true)) | bool }}"
+        firewall_tailnet_cidr: "{{ fleet_host_cfg.get('firewall', {}).get('tailnet_cidr', firewall_tailnet_cidr | default('100.64.0.0/10')) }}"
+        firewall_allowlist_redis_sources: "{{ fleet_host_cfg.get('firewall', {}).get('allowlist_redis_sources', firewall_allowlist_redis_sources | default([])) }}"
+        firewall_source_tcp_rules: "{{ fleet_host_cfg.get('firewall', {}).get('source_tcp_rules', firewall_source_tcp_rules | default([])) }}"
+      changed_when: false
+      tags: [always]
+
     - name: Ensure CI public key is available in bootstrap mode
       ansible.builtin.assert:
         that:

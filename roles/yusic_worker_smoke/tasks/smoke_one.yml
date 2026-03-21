@@ -53,3 +53,83 @@
     executable: /bin/bash
   changed_when: false
   no_log: true
+
+- name: Preflight tailscale connectivity on non-RU workers
+  ansible.builtin.shell: |
+    set -euo pipefail
+    known_hosts_file="{{ yusic_worker_known_hosts_path | default((yusic_worker_relay_stage_dir | default('/opt/yusic-worker-relay/stage')) ~ '/known_hosts') }}"
+    ssh_args=(
+      -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking | default('yes') }}
+      -o UserKnownHostsFile="${known_hosts_file}"
+      -o BatchMode={{ (yusic_worker.ssh.password | default('') | length > 0) | ternary('no', 'yes') }}
+      -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds | default(15) }}
+      -p {{ yusic_worker.ssh.port }}
+    )
+    if [ -f "{{ yusic_worker_relay_stage_dir | default('/opt/yusic-worker-relay/stage') }}/{{ yusic_worker.alias }}/id_worker" ]; then
+      ssh_args+=(-i "{{ yusic_worker_relay_stage_dir | default('/opt/yusic-worker-relay/stage') }}/{{ yusic_worker.alias }}/id_worker")
+    fi
+    target="{{ yusic_worker.ssh.user }}@{{ yusic_worker.ssh.host }}"
+    tailscale_cmd={{ yusic_worker_tailscale_status_command | quote }}
+    if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
+      SSHPASS="{{ yusic_worker.ssh.password }}" sshpass -e ssh "${ssh_args[@]}" "${target}" "sh -lc \"$tailscale_cmd\" >/dev/null"
+    else
+      ssh "${ssh_args[@]}" "${target}" "sh -lc \"$tailscale_cmd\" >/dev/null"
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+  no_log: true
+  when:
+    - yusic_worker_tailnet_required_for_non_ru | bool
+    - "'region:ru' not in (yusic_worker.tags | default([]))"
+
+- name: Verify worker can reach Redis endpoint
+  ansible.builtin.shell: |
+    set -euo pipefail
+    known_hosts_file="{{ yusic_worker_known_hosts_path | default((yusic_worker_relay_stage_dir | default('/opt/yusic-worker-relay/stage')) ~ '/known_hosts') }}"
+    ssh_args=(
+      -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking | default('yes') }}
+      -o UserKnownHostsFile="${known_hosts_file}"
+      -o BatchMode={{ (yusic_worker.ssh.password | default('') | length > 0) | ternary('no', 'yes') }}
+      -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds | default(15) }}
+      -p {{ yusic_worker.ssh.port }}
+    )
+    if [ -f "{{ yusic_worker_relay_stage_dir | default('/opt/yusic-worker-relay/stage') }}/{{ yusic_worker.alias }}/id_worker" ]; then
+      ssh_args+=(-i "{{ yusic_worker_relay_stage_dir | default('/opt/yusic-worker-relay/stage') }}/{{ yusic_worker.alias }}/id_worker")
+    fi
+    target="{{ yusic_worker.ssh.user }}@{{ yusic_worker.ssh.host }}"
+    redis_url={{ yusic_worker.redis_url | quote }}
+    probe='python3 -c "import socket,sys;from urllib.parse import urlparse;u=urlparse(sys.argv[1]);h=u.hostname;p=u.port or 6379;s=socket.create_connection((h,p),timeout=5);s.close()" '"$redis_url"
+    if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
+      SSHPASS="{{ yusic_worker.ssh.password }}" sshpass -e ssh "${ssh_args[@]}" "${target}" "sh -lc \"$probe\""
+    else
+      ssh "${ssh_args[@]}" "${target}" "sh -lc \"$probe\""
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+  no_log: true
+  when: yusic_worker_verify_redis_reachability | bool
+
+- name: Verify worker heartbeat is visible in coordinator
+  ansible.builtin.shell: |
+    set -euo pipefail
+    coordinator_url="{{ (yusic_worker.coordinator_url | default(yusic_worker_coordinator_url) | default('')) | trim }}"
+    if [ -z "$coordinator_url" ]; then
+      exit 0
+    fi
+    deadline=$(( $(date +%s) + {{ yusic_worker_smoke_heartbeat_timeout_seconds | int }} ))
+    while true; do
+      if curl -fsS "$coordinator_url/v1/workers" | grep -q "\"worker_id\"[[:space:]]*:[[:space:]]*\"{{ yusic_worker.alias }}\""; then
+        exit 0
+      fi
+      if [ "$(date +%s)" -ge "$deadline" ]; then
+        echo "worker heartbeat not found in coordinator: {{ yusic_worker.alias }}" >&2
+        exit 1
+      fi
+      sleep 1
+    done
+  args:
+    executable: /bin/bash
+  changed_when: false
+  when: yusic_worker_verify_worker_heartbeat | bool

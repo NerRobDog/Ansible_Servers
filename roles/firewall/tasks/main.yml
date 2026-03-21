@@ -69,6 +69,51 @@
     proto: udp
   loop: "{{ firewall_allowed_udp_ports }}"
 
+- name: Build effective source-scoped TCP rules
+  ansible.builtin.set_fact:
+    firewall_source_tcp_rules_effective: >-
+      {{
+        (
+          firewall_source_tcp_rules | default([], true)
+          + (
+            (firewall_manage_redis_rules | bool and firewall_allow_tailnet_redis_only | bool)
+            | ternary([{"port": firewall_redis_port | int, "proto": "tcp", "from_ip": firewall_tailnet_cidr}], [])
+          )
+          + (
+            (
+              firewall_manage_redis_rules | bool
+              | ternary(firewall_allowlist_redis_sources, [])
+            )
+            | default([], true)
+            | map('regex_replace', '^(.*)$', '{"port": ' ~ (firewall_redis_port | int | string) ~ ', "proto": "tcp", "from_ip": "\\1"}')
+            | map('from_yaml')
+            | list
+          )
+        )
+      }}
+  changed_when: false
+
+- name: Remove public allow rule for Redis when source-scoped mode is enabled
+  community.general.ufw:
+    rule: allow
+    port: "{{ firewall_redis_port | string }}"
+    proto: tcp
+    delete: true
+  when:
+    - firewall_manage_redis_rules | bool
+    - firewall_allow_tailnet_redis_only | bool or (firewall_allowlist_redis_sources | default([], true) | length > 0)
+
+- name: Allow source-scoped TCP rules through UFW
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.proto | default('tcp') }}"
+    src: "{{ item.from_ip }}"
+  loop: "{{ firewall_source_tcp_rules_effective | default([], true) }}"
+  when:
+    - item.from_ip is defined
+    - (item.from_ip | string | length) > 0
+
 - name: Remove public allow rule for Caddy monitor port when disabled
   community.general.ufw:
     rule: allow

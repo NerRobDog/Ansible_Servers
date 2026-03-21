@@ -89,6 +89,8 @@ workers:
 
 - container `yusic_download_worker` запущен;
 - внутри контейнера проходит `python services/download-worker/selfcheck.py`;
+- для non-RU worker дополнительно проходит preflight `tailscale status --json`;
+- worker проходит TCP preflight до Redis из `redis_url`;
 - worker публикует heartbeat в Redis;
 - coordinator видит worker в пуле.
 

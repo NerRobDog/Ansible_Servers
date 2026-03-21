@@ -98,6 +98,7 @@ def test_valid_yaml_modes() -> None:
         runtime_vars = json.loads(vars_path.read_text(encoding="utf-8"))
         assert_true(runtime_vars["fleet_mode"] == mode, f"fleet_mode mismatch for {mode}")
         assert_true("de_node" in runtime_vars["fleet_hosts"], "de_node missing in fleet_hosts")
+        assert_true("firewall" in runtime_vars["fleet_hosts"]["de_node"], "firewall config missing in fleet host payload")
         assert_true("de_node" in runtime_vars["remnawave_runtime_host_vars"], "de_node missing in remnawave_runtime_host_vars")
 
         bootstrap_map = json.loads(boot_path.read_text(encoding="utf-8"))
