@@ -159,14 +159,14 @@
         - name: Write temporary private key for selected worker SSH (optional)
           ansible.builtin.copy:
             dest: "{{ yusic_worker_relay_stage_dir_effective }}/{{ item.alias }}/id_worker"
-            content: "{{ item.ssh.private_key }}"
+            content: "{{ item.ssh.private_key | default(yusic_worker_default_private_key | default('')) }}"
             owner: root
             group: root
             mode: "0600"
           loop: "{{ yusic_selected_workers }}"
           loop_control:
             label: "{{ item.alias }}"
-          when: item.ssh.private_key | default('') | length > 0
+          when: (item.ssh.private_key | default('') | length > 0) or (yusic_worker_default_private_key | default('') | length > 0)
           no_log: true
 
         - name: Deploy/update workers and smoke with rollback on failure

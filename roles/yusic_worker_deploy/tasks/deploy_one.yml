@@ -88,7 +88,7 @@
     docker://{{ yusic_worker_image_ref }}
     docker-archive:{{ yusic_worker_archive_path }}:{{ yusic_worker_image_ref }}
   changed_when: true
-  no_log: false
+  no_log: "{{ (yusic_worker_skopeo_authfile | default('') | length > 0) or (yusic_worker_skopeo_src_creds | default('') | length > 0) }}"
 
 - name: Ensure remote worker workdir exists
   ansible.builtin.shell: |
@@ -111,7 +111,7 @@
   args:
     executable: /bin/bash
   changed_when: false
-  no_log: false
+  no_log: true
 
 - name: Upload image archive and compose assets to worker
   ansible.builtin.shell: |

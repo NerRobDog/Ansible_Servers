@@ -341,6 +341,7 @@ jobs:
           REMNAWAVE_API_ENDPOINT_TEMPLATE: ${{ vars.REMNAWAVE_API_ENDPOINT_TEMPLATE }}
           GHCR_USERNAME_INPUT: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN_INPUT: ${{ secrets.GHCR_TOKEN }}
+          ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -380,6 +381,12 @@ jobs:
             cmd+=(--extra-vars "worker_mode=${WORKER_MODE}")
             cmd+=(--extra-vars "worker_limit=${LIMIT}")
             cmd+=(--extra-vars "worker_run_smoke=${RUN_SMOKE}")
+            if [[ -n "${ANSIBLE_SSH_PRIVATE_KEY}" ]]; then
+              worker_ssh_vars_file=".ansible/runtime/yusic_worker_ssh_auth.json"
+              jq -cn --arg key "${ANSIBLE_SSH_PRIVATE_KEY}" '{yusic_worker_default_private_key:$key}' > "${worker_ssh_vars_file}"
+              chmod 600 "${worker_ssh_vars_file}"
+              cmd+=(--extra-vars "@${worker_ssh_vars_file}")
+            fi
             if [[ "${WORKER_MODE}" == "deploy" || "${WORKER_MODE}" == "update" ]]; then
               GHCR_USER="${GHCR_USERNAME_INPUT:-$GITHUB_ACTOR}"
               GHCR_PASS="${GHCR_TOKEN_INPUT:-$GITHUB_TOKEN}"
