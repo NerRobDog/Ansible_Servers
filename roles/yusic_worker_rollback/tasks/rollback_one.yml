@@ -2,8 +2,11 @@
 - name: Restore previous image for worker
   ansible.builtin.shell: |
     set -euo pipefail
+    known_hosts_file="{{ yusic_worker_known_hosts_path | default((yusic_worker_relay_stage_dir | default('/opt/yusic-worker-relay/stage')) ~ '/known_hosts') }}"
     ssh_args=(
       -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking | default('yes') }}
+      -o UserKnownHostsFile="${known_hosts_file}"
+      -o BatchMode={{ (yusic_worker.ssh.password | default('') | length > 0) | ternary('no', 'yes') }}
       -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds | default(15) }}
       -p {{ yusic_worker.ssh.port }}
     )

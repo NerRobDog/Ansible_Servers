@@ -86,6 +86,7 @@
     - name: Resolve relay staging directory path
       ansible.builtin.set_fact:
         yusic_worker_relay_stage_dir_effective: "{{ yusic_worker_relay_stage_dir | default('/opt/yusic-worker-relay/stage') }}"
+        yusic_worker_known_hosts_path: "{{ (yusic_worker_relay_stage_dir | default('/opt/yusic-worker-relay/stage')) ~ '/known_hosts' }}"
       changed_when: false
       tags: [always]
 
@@ -99,6 +100,32 @@
       loop: "{{ yusic_selected_workers }}"
       loop_control:
         label: "{{ item.alias }}"
+      tags: [always]
+
+    - name: Ensure relay known_hosts file exists
+      ansible.builtin.file:
+        path: "{{ yusic_worker_known_hosts_path }}"
+        state: touch
+        owner: root
+        group: root
+        mode: "0644"
+      changed_when: false
+      tags: [always]
+
+    - name: Refresh worker host keys in relay known_hosts
+      ansible.builtin.shell: |
+        set -euo pipefail
+        host="{{ yusic_worker.ssh.host }}"
+        port="{{ yusic_worker.ssh.port }}"
+        ssh-keygen -R "[${host}]:${port}" -f "{{ yusic_worker_known_hosts_path }}" >/dev/null 2>&1 || true
+        ssh-keyscan -p "${port}" -H "${host}" >> "{{ yusic_worker_known_hosts_path }}"
+      args:
+        executable: /bin/bash
+      loop: "{{ yusic_selected_workers }}"
+      loop_control:
+        loop_var: yusic_worker
+        label: "{{ yusic_worker.alias }}"
+      changed_when: false
       tags: [always]
 
     - name: Write temporary private key for selected worker SSH (optional)
@@ -173,6 +200,8 @@
             set -euo pipefail
             ssh_args=(
               -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking | default('yes') }}
+              -o UserKnownHostsFile={{ yusic_worker_known_hosts_path }}
+              -o BatchMode={{ (yusic_worker.ssh.password | default('') | length > 0) | ternary('no', 'yes') }}
               -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds | default(15) }}
               -p {{ yusic_worker.ssh.port }}
             )
@@ -208,6 +237,5 @@
           loop_control:
             loop_var: yusic_worker
             label: "{{ yusic_worker.alias }}"
-          when: yusic_worker.ssh.private_key | default('') | length > 0
           no_log: true
           failed_when: false

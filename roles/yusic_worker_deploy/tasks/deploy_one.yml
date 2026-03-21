@@ -41,6 +41,8 @@
     set -euo pipefail
     ssh_args=(
       -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking }}
+      -o UserKnownHostsFile={{ yusic_worker_known_hosts_path | default(yusic_worker_relay_stage_dir ~ '/known_hosts') }}
+      -o BatchMode={{ (yusic_worker.ssh.password | default('') | length > 0) | ternary('no', 'yes') }}
       -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds }}
       -p {{ yusic_worker.ssh.port }}
     )
@@ -93,6 +95,8 @@
     set -euo pipefail
     ssh_args=(
       -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking }}
+      -o UserKnownHostsFile={{ yusic_worker_known_hosts_path | default(yusic_worker_relay_stage_dir ~ '/known_hosts') }}
+      -o BatchMode={{ (yusic_worker.ssh.password | default('') | length > 0) | ternary('no', 'yes') }}
       -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds }}
       -p {{ yusic_worker.ssh.port }}
     )
@@ -115,6 +119,8 @@
     scp_args=(
       -p
       -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking }}
+      -o UserKnownHostsFile={{ yusic_worker_known_hosts_path | default(yusic_worker_relay_stage_dir ~ '/known_hosts') }}
+      -o BatchMode={{ (yusic_worker.ssh.password | default('') | length > 0) | ternary('no', 'yes') }}
       -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds }}
       -P {{ yusic_worker.ssh.port }}
     )
@@ -144,6 +150,8 @@
     set -euo pipefail
     ssh_args=(
       -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking }}
+      -o UserKnownHostsFile={{ yusic_worker_known_hosts_path | default(yusic_worker_relay_stage_dir ~ '/known_hosts') }}
+      -o BatchMode={{ (yusic_worker.ssh.password | default('') | length > 0) | ternary('no', 'yes') }}
       -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds }}
       -p {{ yusic_worker.ssh.port }}
     )
@@ -168,6 +176,8 @@
     archive_basename="$(basename "{{ yusic_worker_archive_path }}")"
     ssh_args=(
       -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking }}
+      -o UserKnownHostsFile={{ yusic_worker_known_hosts_path | default(yusic_worker_relay_stage_dir ~ '/known_hosts') }}
+      -o BatchMode={{ (yusic_worker.ssh.password | default('') | length > 0) | ternary('no', 'yes') }}
       -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds }}
       -p {{ yusic_worker.ssh.port }}
     )

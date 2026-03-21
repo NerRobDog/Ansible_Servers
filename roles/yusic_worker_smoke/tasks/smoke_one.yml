@@ -2,8 +2,11 @@
 - name: Validate worker container state on target host
   ansible.builtin.shell: |
     set -euo pipefail
+    known_hosts_file="{{ yusic_worker_known_hosts_path | default((yusic_worker_relay_stage_dir | default('/opt/yusic-worker-relay/stage')) ~ '/known_hosts') }}"
     ssh_args=(
       -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking | default('yes') }}
+      -o UserKnownHostsFile="${known_hosts_file}"
+      -o BatchMode={{ (yusic_worker.ssh.password | default('') | length > 0) | ternary('no', 'yes') }}
       -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds | default(15) }}
       -p {{ yusic_worker.ssh.port }}
     )
@@ -13,10 +16,10 @@
     target="{{ yusic_worker.ssh.user }}@{{ yusic_worker.ssh.host }}"
     if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
       SSHPASS="{{ yusic_worker.ssh.password }}" sshpass -e ssh "${ssh_args[@]}" "${target}" \
-        "docker inspect '{{ yusic_worker.container_name }}' | grep -q '\"Status\": \"running\"'"
+        "docker inspect -f '{% raw %}{{.State.Status}}{% endraw %}' '{{ yusic_worker.container_name }}' | grep -qx 'running'"
     else
       ssh "${ssh_args[@]}" "${target}" \
-        "docker inspect '{{ yusic_worker.container_name }}' | grep -q '\"Status\": \"running\"'"
+        "docker inspect -f '{% raw %}{{.State.Status}}{% endraw %}' '{{ yusic_worker.container_name }}' | grep -qx 'running'"
     fi
   args:
     executable: /bin/bash
@@ -26,8 +29,11 @@
 - name: Run worker selfcheck inside container
   ansible.builtin.shell: |
     set -euo pipefail
+    known_hosts_file="{{ yusic_worker_known_hosts_path | default((yusic_worker_relay_stage_dir | default('/opt/yusic-worker-relay/stage')) ~ '/known_hosts') }}"
     ssh_args=(
       -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking | default('yes') }}
+      -o UserKnownHostsFile="${known_hosts_file}"
+      -o BatchMode={{ (yusic_worker.ssh.password | default('') | length > 0) | ternary('no', 'yes') }}
       -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds | default(15) }}
       -p {{ yusic_worker.ssh.port }}
     )
