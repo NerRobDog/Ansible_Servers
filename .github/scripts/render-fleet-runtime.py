@@ -93,9 +93,9 @@ MONITORING_DEFAULTS = {
     "stack_grafana_admin_password": "change_me",
 }
 
-WORKER_ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63} )
-WORKER_CONTAINER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127} )
-WORKER_WORKDIR_RE = re.compile(r"^/[A-Za-z0-9._/\-]+ )
+WORKER_ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+WORKER_CONTAINER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+WORKER_WORKDIR_RE = re.compile(r"^/[A-Za-z0-9._/\-]+$")
 
 
 def fail(message: str) -> None:

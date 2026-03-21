@@ -357,8 +357,6 @@ def test_invalid_monitoring_port() -> None:
     assert_true(proc.returncode != 0, "Renderer should fail for invalid monitoring port")
     assert_true("monitoring" in (proc.stderr + proc.stdout), "Error should mention monitoring")
 
-<<<<<<< HEAD
-=======
 
 def test_invalid_monitoring_acl_sources_type() -> None:
     config = {
@@ -461,7 +459,6 @@ def test_monitoring_resolves_loki_push_url_and_labels() -> None:
     assert_true(nl_cfg["labels"]["role"] == "node", "Host labels role mismatch")
 
 
->>>>>>> 5b414c9 (Standardize monitoring v1 with Alertmanager Telegram, Loki logs, Grafana provisioning)
 def main() -> int:
     tests = [
         test_valid_yaml_modes,
