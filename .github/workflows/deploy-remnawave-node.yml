@@ -390,17 +390,7 @@ jobs:
               auth_vars_file=".ansible/runtime/yusic_worker_registry_auth.json"
               export GHCR_USER GHCR_PASS
               export AUTH_VARS_FILE="${auth_vars_file}"
-              python - <<'PY'
-import json
-import os
-from pathlib import Path
-
-payload = {
-    "yusic_worker_skopeo_src_creds": f"{os.environ['GHCR_USER']}:{os.environ['GHCR_PASS']}",
-}
-path = Path(os.environ["AUTH_VARS_FILE"])
-path.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
-PY
+              jq -cn --arg creds "${GHCR_USER}:${GHCR_PASS}" '{yusic_worker_skopeo_src_creds:$creds}' > "${auth_vars_file}"
               chmod 600 "${auth_vars_file}"
               cmd+=(--extra-vars "worker_image_tag=${WORKER_IMAGE_TAG}")
               cmd+=(--extra-vars "@${auth_vars_file}")
