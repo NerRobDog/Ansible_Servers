@@ -341,7 +341,6 @@ jobs:
           REMNAWAVE_API_ENDPOINT_TEMPLATE: ${{ vars.REMNAWAVE_API_ENDPOINT_TEMPLATE }}
           GHCR_USERNAME_INPUT: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN_INPUT: ${{ secrets.GHCR_TOKEN }}
-          ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -381,9 +380,16 @@ jobs:
             cmd+=(--extra-vars "worker_mode=${WORKER_MODE}")
             cmd+=(--extra-vars "worker_limit=${LIMIT}")
             cmd+=(--extra-vars "worker_run_smoke=${RUN_SMOKE}")
-            if [[ -n "${ANSIBLE_SSH_PRIVATE_KEY}" ]]; then
+            if [[ -f "${HOME}/.ssh/id_ed25519" ]]; then
               worker_ssh_vars_file=".ansible/runtime/yusic_worker_ssh_auth.json"
-              jq -cn --arg key "${ANSIBLE_SSH_PRIVATE_KEY}" '{yusic_worker_default_private_key:$key}' > "${worker_ssh_vars_file}"
+              python3 - <<'PY'
+import json
+from pathlib import Path
+key = Path.home().joinpath(".ssh", "id_ed25519").read_text()
+Path(".ansible/runtime/yusic_worker_ssh_auth.json").write_text(
+    json.dumps({"yusic_worker_default_private_key": key})
+)
+PY
               chmod 600 "${worker_ssh_vars_file}"
               cmd+=(--extra-vars "@${worker_ssh_vars_file}")
             fi
