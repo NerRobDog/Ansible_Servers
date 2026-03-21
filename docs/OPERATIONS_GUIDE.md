@@ -20,6 +20,10 @@ Workflow: `.github/workflows/deploy-remnawave-node.yml`
 - `deploy`: обычный деплой только по SSH-ключу.
 - `lockdown`: отключение SSH входа по паролю и root login.
 
+Target:
+- `target=remnawave` — текущий flow панели + Ansible playbook `playbook.yml`.
+- `target=yusic_worker` — lifecycle внешних воркеров через relay (`playbook-yusic-worker.yml`), без panel sync.
+
 Перед `ansible-playbook` workflow выполняет panel pre-step:
 - upsert Config Profiles из `remnawave/profiles/*.json`;
 - назначение profile/inbounds существующим нодам в панели.
@@ -42,6 +46,8 @@ Workflow: `.github/workflows/deploy-remnawave-node.yml`
 ### Обязательная Environment Variable
 
 - `RW_PANEL_API_BASE_URL` — базовый URL панели, например `https://panel.example.com`.
+
+Для `target=yusic_worker` `RW_PANEL_API_TOKEN`/`RW_PANEL_API_BASE_URL` не используются в runtime path, но могут оставаться в Environment для совместимости.
 
 ## 4) Формат fleet-конфига (до base64)
 
@@ -110,6 +116,32 @@ hosts:
       - test_stack
 ```
 
+Дополнительно для внешних yusic-воркеров:
+
+```yaml
+defaults:
+  yusic_worker:
+    relay_host_alias: tw-germ-1
+    image_repo: ghcr.io/OWNER/Yusic_bot/download-worker
+    enabled: true
+    arch: arm64
+    tags: ["provider:soundcloud", "region:nl", "cpu:low"]
+    max_concurrent_jobs: 1
+    network_mode: host
+    dns: ["1.1.1.1", "8.8.8.8"]
+    redis_url: redis://100.64.0.10:6379/0
+    cache_bot_token: "<CACHE_BOT_TOKEN>"
+    inline_cache_chat_id: "-1001234567890"
+
+workers:
+  wrt_me:
+    ssh:
+      host: 100.112.10.20
+      port: 22
+      user: root
+    tags: ["provider:soundcloud", "region:nl", "cpu:low"]
+```
+
 ### Важно для Reality self-steal
 
 Для рабочего трафика:
@@ -147,7 +179,10 @@ base64 -i fleet.yaml | tr -d '\n' | gh secret set RW_FLEET_CONFIG_B64 --env prod
 1. Actions -> `deploy-remnawave-node` -> Run workflow.
 2. Выберите:
    - `environment` (например `production`);
-   - `mode`: `bootstrap`, `deploy` или `lockdown`;
+   - `target`: `remnawave` или `yusic_worker`;
+   - `mode`: `bootstrap`, `deploy` или `lockdown` (для `target=remnawave`);
+   - `worker_mode`: `bootstrap|deploy|update|smoke` (для `target=yusic_worker`);
+   - `worker_image_tag`: обязательный `sha-*` для `worker_mode=deploy|update`;
    - `limit`: `all` или `host1,host2`;
    - `check_mode`: сначала `true`, потом `false`;
    - `panel_sync_write`: `false` для read-only отчёта, `true` для применения изменений в панели.

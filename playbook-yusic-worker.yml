@@ -1,0 +1,246 @@
+---
+- name: Manage Yusic external workers via relay host
+  hosts: all
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Resolve yusic worker runtime map
+      ansible.builtin.set_fact:
+        yusic_runtime: "{{ yusic_worker_runtime | default({}) }}"
+        worker_mode_effective: "{{ worker_mode | default('deploy') | string }}"
+        worker_limit_effective: "{{ worker_limit | default('all') | string }}"
+        worker_run_smoke_effective: "{{ worker_run_smoke | default(true) | bool }}"
+      changed_when: false
+      tags: [always]
+
+    - name: Validate worker mode
+      ansible.builtin.assert:
+        that:
+          - worker_mode_effective in ['bootstrap', 'deploy', 'update', 'smoke']
+        fail_msg: "worker_mode must be one of: bootstrap, deploy, update, smoke."
+      tags: [always]
+
+    - name: Validate yusic worker runtime structure
+      ansible.builtin.assert:
+        that:
+          - yusic_runtime is mapping
+          - yusic_runtime.get('workers', {}) is mapping
+          - yusic_runtime.get('enabled_workers', []) is iterable
+          - yusic_runtime.get('relay_host_alias', '') | string | length > 0
+        fail_msg: "yusic_worker_runtime is missing required fields (workers/enabled_workers/relay_host_alias)."
+      tags: [always]
+
+    - name: Ensure play runs on configured relay host alias
+      ansible.builtin.assert:
+        that:
+          - inventory_hostname == (yusic_runtime.get('relay_host_alias') | string)
+        fail_msg: >-
+          playbook-yusic-worker must run on relay host '{{ yusic_runtime.get("relay_host_alias") }}'
+          but current host is '{{ inventory_hostname }}'.
+      tags: [always]
+
+    - name: Resolve selected worker aliases
+      ansible.builtin.set_fact:
+        selected_worker_aliases: >-
+          {{
+            (
+              worker_limit_effective | lower == 'all'
+            )
+            | ternary(
+              yusic_runtime.get('enabled_workers', []),
+              worker_limit_effective.split(',') | map('trim') | reject('equalto', '') | list
+            )
+          }}
+      changed_when: false
+      tags: [always]
+
+    - name: Validate selected aliases exist in runtime map
+      ansible.builtin.assert:
+        that:
+          - item in yusic_runtime.get('workers', {})
+        fail_msg: "Worker alias '{{ item }}' is not defined in workers map."
+      loop: "{{ selected_worker_aliases }}"
+      tags: [always]
+
+    - name: Build selected worker list
+      ansible.builtin.set_fact:
+        yusic_selected_workers: >-
+          {{
+            yusic_runtime.get('workers', {})
+            | dict2items
+            | selectattr('key', 'in', selected_worker_aliases)
+            | selectattr('value.enabled', 'equalto', true)
+            | map(attribute='value')
+            | list
+          }}
+      changed_when: false
+      tags: [always]
+
+    - name: Ensure selected workers are enabled
+      ansible.builtin.assert:
+        that:
+          - yusic_selected_workers | length > 0
+        fail_msg: "No enabled workers selected by worker_limit={{ worker_limit_effective }}."
+      tags: [always]
+
+    - name: Resolve relay staging directory path
+      ansible.builtin.set_fact:
+        yusic_worker_relay_stage_dir_effective: >-
+          {{
+            yusic_worker_relay_stage_dir
+            | default(
+                (yusic_worker_relay_root_dir | default('/opt/yusic-worker-relay')) ~ '/stage'
+              )
+          }}
+        yusic_worker_known_hosts_path: "{{ yusic_worker_relay_stage_dir_effective ~ '/known_hosts' }}"
+      changed_when: false
+      tags: [always]
+
+    - name: Ensure relay staging directory exists for selected workers
+      ansible.builtin.file:
+        path: "{{ yusic_worker_relay_stage_dir_effective }}/{{ item.alias }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+      loop: "{{ yusic_selected_workers }}"
+      loop_control:
+        label: "{{ item.alias }}"
+      tags: [always]
+
+    - name: Ensure relay known_hosts file exists
+      ansible.builtin.file:
+        path: "{{ yusic_worker_known_hosts_path }}"
+        state: touch
+        owner: root
+        group: root
+        mode: "0644"
+      changed_when: false
+      tags: [always]
+
+    - name: Refresh worker host keys in relay known_hosts
+      ansible.builtin.shell: |
+        set -euo pipefail
+        host="{{ yusic_worker.ssh.host }}"
+        port="{{ yusic_worker.ssh.port }}"
+        ssh-keygen -R "[${host}]:${port}" -f "{{ yusic_worker_known_hosts_path }}" >/dev/null 2>&1 || true
+        ssh-keyscan -p "${port}" -H "${host}" >> "{{ yusic_worker_known_hosts_path }}"
+      args:
+        executable: /bin/bash
+      loop: "{{ yusic_selected_workers }}"
+      loop_control:
+        loop_var: yusic_worker
+        label: "{{ yusic_worker.alias }}"
+      changed_when: false
+      tags: [always]
+
+    - name: Validate immutable image tag for deploy/update
+      ansible.builtin.assert:
+        that:
+          - worker_image_tag is defined
+          - worker_image_tag | string | length > 0
+          - worker_image_tag | regex_search('^sha-[0-9a-f]{7,64}$')
+        fail_msg: "worker_image_tag is required for deploy/update and must match sha-<hex>."
+      when: worker_mode_effective in ['deploy', 'update']
+      tags: [always]
+
+  tasks:
+    - name: Execute selected worker lifecycle mode
+      block:
+        - name: Ensure relay prerequisites for yusic worker lifecycle
+          ansible.builtin.include_role:
+            name: yusic_worker_relay
+
+        - name: Write temporary private key for selected worker SSH (optional)
+          ansible.builtin.copy:
+            dest: "{{ yusic_worker_relay_stage_dir_effective }}/{{ item.alias }}/id_worker"
+            content: "{{ item.ssh.private_key }}"
+            owner: root
+            group: root
+            mode: "0600"
+          loop: "{{ yusic_selected_workers }}"
+          loop_control:
+            label: "{{ item.alias }}"
+          when: item.ssh.private_key | default('') | length > 0
+          no_log: true
+
+        - name: Deploy/update workers and smoke with rollback on failure
+          when: worker_mode_effective in ['deploy', 'update']
+          block:
+            - name: Deploy worker payload
+              ansible.builtin.include_role:
+                name: yusic_worker_deploy
+              vars:
+                yusic_selected_workers: "{{ yusic_selected_workers }}"
+                worker_image_tag: "{{ worker_image_tag }}"
+
+            - name: Run smoke checks after deploy/update
+              ansible.builtin.include_role:
+                name: yusic_worker_smoke
+              vars:
+                yusic_selected_workers: "{{ yusic_selected_workers }}"
+              when: worker_run_smoke_effective
+          rescue:
+            - name: Rollback workers to previous image on failed deploy/update
+              ansible.builtin.include_role:
+                name: yusic_worker_rollback
+              vars:
+                yusic_selected_workers: "{{ yusic_selected_workers }}"
+                yusic_worker_backup_images: "{{ yusic_worker_backup_images | default({}) }}"
+
+            - name: Fail deploy after rollback
+              ansible.builtin.fail:
+                msg: "yusic worker deploy/update failed; rollback was attempted for workers with backup images (if any)."
+
+        - name: Run smoke-only mode
+          ansible.builtin.include_role:
+            name: yusic_worker_smoke
+          vars:
+            yusic_selected_workers: "{{ yusic_selected_workers }}"
+          when: worker_mode_effective == 'smoke'
+
+        - name: Run bootstrap connectivity checks for selected workers
+          when: worker_mode_effective == 'bootstrap'
+          ansible.builtin.shell: |
+            set -euo pipefail
+            ssh_args=(
+              -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking | default('yes') }}
+              -o UserKnownHostsFile={{ yusic_worker_known_hosts_path }}
+              -o BatchMode={{ (yusic_worker.ssh.password | default('') | length > 0) | ternary('no', 'yes') }}
+              -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds | default(15) }}
+              -p {{ yusic_worker.ssh.port }}
+            )
+            if [ -f "{{ yusic_worker_relay_stage_dir_effective }}/{{ yusic_worker.alias }}/id_worker" ]; then
+              ssh_args+=(-i "{{ yusic_worker_relay_stage_dir_effective }}/{{ yusic_worker.alias }}/id_worker")
+            fi
+            target="{{ yusic_worker.ssh.user }}@{{ yusic_worker.ssh.host }}"
+            remote_cmd="set -eu; docker --version >/dev/null; docker compose version >/dev/null;"
+            remote_cmd="${remote_cmd} if [ ! -d '{{ yusic_worker.workdir }}' ]; then"
+            remote_cmd="${remote_cmd} mkdir -p '{{ yusic_worker.workdir }}';"
+            remote_cmd="${remote_cmd} echo __WORKDIR_CREATED__;"
+            remote_cmd="${remote_cmd} fi"
+            if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
+              SSHPASS="{{ yusic_worker.ssh.password }}" sshpass -e ssh "${ssh_args[@]}" "${target}" "${remote_cmd}"
+            else
+              ssh "${ssh_args[@]}" "${target}" "${remote_cmd}"
+            fi
+          args:
+            executable: /bin/bash
+          register: yusic_worker_bootstrap_cmd
+          changed_when: "'__WORKDIR_CREATED__' in (yusic_worker_bootstrap_cmd.stdout | default(''))"
+          no_log: true
+          loop: "{{ yusic_selected_workers }}"
+          loop_control:
+            loop_var: yusic_worker
+            label: "{{ yusic_worker.alias }}"
+      always:
+        - name: Remove temporary worker SSH keys from relay staging
+          ansible.builtin.file:
+            path: "{{ yusic_worker_relay_stage_dir_effective }}/{{ yusic_worker.alias }}/id_worker"
+            state: absent
+          loop: "{{ yusic_selected_workers | default([]) }}"
+          loop_control:
+            loop_var: yusic_worker
+            label: "{{ yusic_worker.alias }}"
+          no_log: true
+          failed_when: false

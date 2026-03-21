@@ -1,0 +1,28 @@
+---
+- name: Validate supported OS for yusic relay role
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+    fail_msg: "Role yusic_worker_relay currently supports Debian-family relay hosts only."
+
+- name: Ensure relay prerequisites are installed
+  ansible.builtin.apt:
+    name: "{{ yusic_worker_relay_packages }}"
+    state: present
+    update_cache: true
+
+- name: Ensure skopeo command is available on relay
+  ansible.builtin.command: skopeo --version
+  changed_when: false
+
+- name: Ensure relay workspace directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - "{{ yusic_worker_relay_root_dir }}"
+    - "{{ yusic_worker_relay_archive_dir }}"
+    - "{{ yusic_worker_relay_stage_dir }}"

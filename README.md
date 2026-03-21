@@ -11,6 +11,7 @@
 ## Основные документы
 
 - Подробная инструкция для операторов: [`docs/OPERATIONS_GUIDE.md`](docs/OPERATIONS_GUIDE.md)
+- Runbook по lifecycle yusic worker-нод: [`docs/YUSIC_WORKERS_RUNBOOK.md`](docs/YUSIC_WORKERS_RUNBOOK.md)
 - Настройка секретов (RU, пошагово): [`docs/SECRETS_SETUP_RU.md`](docs/SECRETS_SETUP_RU.md)
 - Описание ролей и feature flags: [`docs/ROLE_CATALOG.md`](docs/ROLE_CATALOG.md)
 - Правила документирования для помощников: [`docs/DOCUMENTATION_RULES.md`](docs/DOCUMENTATION_RULES.md)
@@ -26,6 +27,10 @@
 - `node_tuning` — BBR + IPv6.
 - `user_shell` — пользователь/sudo/SSH shell.
 - `ssh_lockdown` — отключение password auth и root SSH login.
+- `yusic_worker_relay` — подготовка relay-ноды для внешних yusic worker.
+- `yusic_worker_deploy` — deploy/update воркеров через relay (`skopeo` + transfer + compose up).
+- `yusic_worker_smoke` — проверка контейнера и `download-worker` selfcheck.
+- `yusic_worker_rollback` — rollback воркера на backup image при failed smoke.
 - `custom_roles` — дополнительные локальные роли из `roles/`, задаются по хостам.
 
 ## Workflow
@@ -34,7 +39,10 @@
 
 Inputs:
 - `environment` — GitHub Environment c секретами флота.
+- `target` — `remnawave | yusic_worker`.
 - `mode` — `bootstrap | deploy | lockdown`.
+- `worker_mode` — `bootstrap | deploy | update | smoke` (используется только для `target=yusic_worker`).
+- `worker_image_tag` — immutable tag `sha-*` (обязателен для `worker_mode=deploy|update`).
 - `limit` — `all` или alias-хостов через запятую.
 - `check_mode` — dry-run.
 - `run_smoke` — post-deploy smoke-проверки (`true|false`).
@@ -72,6 +80,10 @@ Pre-step перед Ansible:
 Environment Variables:
 - `RW_PANEL_API_BASE_URL` — базовый URL панели (например, `https://panel.example.com`).
 - `REMNAWAVE_API_ENDPOINT_TEMPLATE` — старый optional source для host runtime vars (можно оставить пустым).
+
+Для `target=yusic_worker` panel sync не запускается, но `RW_FLEET_CONFIG_B64` должен содержать секции:
+- `defaults.yusic_worker`
+- `workers.<alias>`
 
 ## Локальные проверки
 

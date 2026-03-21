@@ -14,7 +14,12 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 RENDERER = SCRIPT_DIR / "render-fleet-runtime.py"
 
 
-def run_renderer(config_text: str, mode: str, suffix: str = ".yaml") -> tuple[subprocess.CompletedProcess[str], Path, Path, Path]:
+def run_renderer(
+    config_text: str,
+    mode: str,
+    suffix: str = ".yaml",
+    target: str = "remnawave",
+) -> tuple[subprocess.CompletedProcess[str], Path, Path, Path]:
     temp_dir = tempfile.TemporaryDirectory()
     root = Path(temp_dir.name)
     config_path = root / f"fleet{suffix}"
@@ -30,6 +35,8 @@ def run_renderer(config_text: str, mode: str, suffix: str = ".yaml") -> tuple[su
         str(config_path),
         "--mode",
         mode,
+        "--target",
+        target,
         "--inventory-out",
         str(inventory_out),
         "--vars-out",
@@ -161,6 +168,164 @@ def test_invalid_ipv6_state() -> None:
     assert_true("ipv6_state" in (proc.stderr + proc.stdout), "Error should mention ipv6_state")
 
 
+def test_yusic_worker_runtime_success() -> None:
+    yaml_text = (
+        "---\n"
+        "defaults:\n"
+        "  deploy_user: deploy\n"
+        "  yusic_worker:\n"
+        "    relay_host_alias: relay_ru\n"
+        "    image_repo: ghcr.io/example/download-worker\n"
+        "    redis_url: redis://127.0.0.1:6379/0\n"
+        "    cache_bot_token: token\n"
+        "    inline_cache_chat_id: -1001\n"
+        "hosts:\n"
+        "  relay_ru:\n"
+        "    ansible_host: 203.0.113.10\n"
+        "workers:\n"
+        "  wrt_me:\n"
+        "    arch: arm64\n"
+        "    ssh:\n"
+        "      host: 100.64.0.10\n"
+        "      port: 22\n"
+        "      user: root\n"
+        "    tags:\n"
+        "      - provider:soundcloud\n"
+        "      - region:nl\n"
+    )
+
+    proc, inv_path, vars_path, _ = run_renderer(yaml_text, "deploy", target="yusic_worker")
+    assert_true(proc.returncode == 0, f"yusic_worker render failed: {proc.stderr or proc.stdout}")
+
+    inv_text = inv_path.read_text(encoding="utf-8")
+    parse_inventory_line(inv_text, "relay_ru")
+
+    runtime_vars = json.loads(vars_path.read_text(encoding="utf-8"))
+    assert_true(runtime_vars["fleet_target"] == "yusic_worker", "fleet_target mismatch for yusic_worker")
+    yusic_runtime = runtime_vars["yusic_worker_runtime"]
+    assert_true(yusic_runtime["relay_host_alias"] == "relay_ru", "relay_host_alias mismatch")
+    assert_true(yusic_runtime["enabled_workers"] == ["wrt_me"], "enabled workers mismatch")
+    worker = yusic_runtime["workers"]["wrt_me"]
+    assert_true(worker["arch"] == "arm64", "worker arch mismatch")
+    assert_true(worker["image_repo"] == "ghcr.io/example/download-worker", "worker image repo mismatch")
+    assert_true(worker["ssh"]["host"] == "100.64.0.10", "worker ssh host mismatch")
+
+
+def test_yusic_worker_invalid_relay_alias() -> None:
+    config = {
+        "defaults": {
+            "yusic_worker": {
+                "relay_host_alias": "missing_relay",
+                "image_repo": "ghcr.io/example/download-worker",
+                "redis_url": "redis://127.0.0.1:6379/0",
+                "cache_bot_token": "token",
+                "inline_cache_chat_id": "-1001",
+            }
+        },
+        "hosts": {
+            "relay_ru": {
+                "ansible_host": "203.0.113.10",
+            }
+        },
+        "workers": {
+            "wrt_me": {
+                "ssh": {
+                    "host": "100.64.0.10",
+                    "user": "root",
+                }
+            }
+        },
+    }
+
+    proc, _, _, _ = run_renderer(json.dumps(config), "deploy", suffix=".json", target="yusic_worker")
+    assert_true(proc.returncode != 0, "Renderer should fail for unknown relay_host_alias")
+    assert_true("relay_host_alias" in (proc.stderr + proc.stdout), "Error should mention relay_host_alias")
+
+
+def test_yusic_worker_requires_enabled_workers_for_target() -> None:
+    config = {
+        "hosts": {
+            "relay_ru": {
+                "ansible_host": "203.0.113.10",
+            }
+        },
+        "workers": {
+            "wrt_me": {
+                "enabled": False,
+                "relay_host_alias": "relay_ru",
+                "image_repo": "ghcr.io/example/download-worker",
+                "ssh": {
+                    "host": "100.64.0.10",
+                    "user": "root",
+                },
+                "redis_url": "redis://127.0.0.1:6379/0",
+                "cache_bot_token": "token",
+                "inline_cache_chat_id": "-1001",
+            }
+        },
+    }
+    proc, _, _, _ = run_renderer(json.dumps(config), "deploy", suffix=".json", target="yusic_worker")
+    assert_true(proc.returncode != 0, "Renderer should fail when target=yusic_worker has no enabled workers")
+    assert_true("enabled worker" in (proc.stderr + proc.stdout), "Error should mention enabled worker")
+
+
+def test_remnawave_target_ignores_invalid_yusic_contract() -> None:
+    yaml_text = (
+        "---\n"
+        "defaults:\n"
+        "  yusic_worker:\n"
+        "    arch: x86_64\n"
+        "hosts:\n"
+        "  de_node:\n"
+        "    ansible_host: 203.0.113.10\n"
+        "workers:\n"
+        "  - unexpected-list-item\n"
+    )
+    proc, _, vars_path, _ = run_renderer(yaml_text, "deploy", target="remnawave")
+    assert_true(proc.returncode == 0, f"remnawave target should ignore invalid yusic contract: {proc.stderr or proc.stdout}")
+    runtime_vars = json.loads(vars_path.read_text(encoding="utf-8"))
+    assert_true(runtime_vars["fleet_target"] == "remnawave", "fleet_target mismatch for remnawave")
+    assert_true("yusic_worker_runtime" in runtime_vars, "yusic_worker_runtime should stay present in runtime vars")
+
+
+def test_yusic_worker_invalid_alias_rejected() -> None:
+    config = {
+        "defaults": {
+            "yusic_worker": {
+                "relay_host_alias": "relay_ru",
+                "image_repo": "ghcr.io/example/download-worker",
+                "redis_url": "redis://127.0.0.1:6379/0",
+                "cache_bot_token": "token",
+                "inline_cache_chat_id": "-1001",
+            }
+        },
+        "hosts": {"relay_ru": {"ansible_host": "203.0.113.10"}},
+        "workers": {"../bad": {"ssh": {"host": "100.64.0.10", "user": "root"}}},
+    }
+    proc, _, _, _ = run_renderer(json.dumps(config), "deploy", suffix=".json", target="yusic_worker")
+    assert_true(proc.returncode != 0, "Renderer should fail for invalid worker alias")
+    assert_true("alias" in (proc.stderr + proc.stdout), "Error should mention alias")
+
+
+def test_yusic_worker_invalid_workdir_rejected() -> None:
+    config = {
+        "defaults": {
+            "yusic_worker": {
+                "relay_host_alias": "relay_ru",
+                "image_repo": "ghcr.io/example/download-worker",
+                "redis_url": "redis://127.0.0.1:6379/0",
+                "cache_bot_token": "token",
+                "inline_cache_chat_id": "-1001",
+            }
+        },
+        "hosts": {"relay_ru": {"ansible_host": "203.0.113.10"}},
+        "workers": {"wrt_me": {"workdir": "/opt/yusic'worker", "ssh": {"host": "100.64.0.10", "user": "root"}}},
+    }
+    proc, _, _, _ = run_renderer(json.dumps(config), "deploy", suffix=".json", target="yusic_worker")
+    assert_true(proc.returncode != 0, "Renderer should fail for unsafe workdir")
+    assert_true("workdir" in (proc.stderr + proc.stdout), "Error should mention workdir")
+
+
 def main() -> int:
     tests = [
         test_valid_yaml_modes,
@@ -168,6 +333,12 @@ def main() -> int:
         test_invalid_missing_ansible_host,
         test_invalid_custom_roles_item,
         test_invalid_ipv6_state,
+        test_yusic_worker_runtime_success,
+        test_yusic_worker_invalid_relay_alias,
+        test_yusic_worker_requires_enabled_workers_for_target,
+        test_remnawave_target_ignores_invalid_yusic_contract,
+        test_yusic_worker_invalid_alias_rejected,
+        test_yusic_worker_invalid_workdir_rejected,
     ]
 
     for test in tests:

@@ -8,6 +8,7 @@ on:
 env:
   ANSIBLE_LOCAL_TEMP: .ansible/tmp
   ANSIBLE_REMOTE_TEMP: .ansible/tmp
+  ANSIBLE_COLLECTIONS_PATH: .ansible/collections:/usr/share/ansible/collections
   PY_COLORS: "1"
 
 jobs:
@@ -28,7 +29,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Install Ansible collections
-        run: ansible-galaxy collection install -r requirements.yml
+        run: ansible-galaxy collection install -p .ansible/collections -r requirements.yml
 
       - name: Prepare Ansible local temp
         run: mkdir -p .ansible/tmp
@@ -37,10 +38,12 @@ jobs:
         run: python .github/scripts/test-render-fleet-runtime.py
 
       - name: Syntax check
-        run: ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
+        run: |
+          ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
+          ansible-playbook -i hosts.example.ini playbook-yusic-worker.yml --syntax-check
 
       - name: ansible-lint
-        run: ansible-lint playbook.yml roles
+        run: ansible-lint playbook.yml playbook-yusic-worker.yml roles
 
       - name: yamllint
         run: yamllint .
@@ -62,7 +65,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Install Ansible collections
-        run: ansible-galaxy collection install -r requirements.yml
+        run: ansible-galaxy collection install -p .ansible/collections -r requirements.yml
 
       - name: Prepare Ansible local temp
         run: mkdir -p .ansible/tmp
