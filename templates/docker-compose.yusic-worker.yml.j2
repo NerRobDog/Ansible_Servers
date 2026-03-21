@@ -1,7 +1,7 @@
 ---
 services:
   download-worker:
-    image: "{{ yusic_worker_image_ref }}"
+    image: "${WORKER_IMAGE:-{{ yusic_worker_image_ref }}}"
     container_name: "{{ yusic_worker.container_name }}"
     restart: unless-stopped
     env_file:
@@ -13,4 +13,3 @@ services:
       - "{{ dns_server }}"
 {% endfor %}
 {% endif %}
-

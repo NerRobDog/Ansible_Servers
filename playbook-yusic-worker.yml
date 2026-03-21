@@ -83,6 +83,38 @@
         fail_msg: "No enabled workers selected by worker_limit={{ worker_limit_effective }}."
       tags: [always]
 
+    - name: Resolve relay staging directory path
+      ansible.builtin.set_fact:
+        yusic_worker_relay_stage_dir_effective: "{{ yusic_worker_relay_stage_dir | default('/opt/yusic-worker-relay/stage') }}"
+      changed_when: false
+      tags: [always]
+
+    - name: Ensure relay staging directory exists for selected workers
+      ansible.builtin.file:
+        path: "{{ yusic_worker_relay_stage_dir_effective }}/{{ item.alias }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+      loop: "{{ yusic_selected_workers }}"
+      loop_control:
+        label: "{{ item.alias }}"
+      tags: [always]
+
+    - name: Write temporary private key for selected worker SSH (optional)
+      ansible.builtin.copy:
+        dest: "{{ yusic_worker_relay_stage_dir_effective }}/{{ item.alias }}/id_worker"
+        content: "{{ item.ssh.private_key }}"
+        owner: root
+        group: root
+        mode: "0600"
+      loop: "{{ yusic_selected_workers }}"
+      loop_control:
+        label: "{{ item.alias }}"
+      when: item.ssh.private_key | default('') | length > 0
+      no_log: true
+      tags: [always]
+
     - name: Validate immutable image tag for deploy/update
       ansible.builtin.assert:
         that:
@@ -98,37 +130,84 @@
       tags: [yusic_worker, relay]
 
   tasks:
-    - name: Deploy/update workers and smoke with rollback on failure
-      when: worker_mode_effective in ['deploy', 'update']
+    - name: Execute selected worker lifecycle mode
       block:
-        - name: Deploy worker payload
-          ansible.builtin.include_role:
-            name: yusic_worker_deploy
-          vars:
-            yusic_selected_workers: "{{ yusic_selected_workers }}"
-            worker_image_tag: "{{ worker_image_tag }}"
+        - name: Deploy/update workers and smoke with rollback on failure
+          when: worker_mode_effective in ['deploy', 'update']
+          block:
+            - name: Deploy worker payload
+              ansible.builtin.include_role:
+                name: yusic_worker_deploy
+              vars:
+                yusic_selected_workers: "{{ yusic_selected_workers }}"
+                worker_image_tag: "{{ worker_image_tag }}"
 
-        - name: Run smoke checks after deploy/update
+            - name: Run smoke checks after deploy/update
+              ansible.builtin.include_role:
+                name: yusic_worker_smoke
+              vars:
+                yusic_selected_workers: "{{ yusic_selected_workers }}"
+              when: worker_run_smoke_effective
+          rescue:
+            - name: Rollback workers to previous image on failed deploy/update
+              ansible.builtin.include_role:
+                name: yusic_worker_rollback
+              vars:
+                yusic_selected_workers: "{{ yusic_selected_workers }}"
+                yusic_worker_backup_images: "{{ yusic_worker_backup_images | default({}) }}"
+
+            - name: Fail deploy after rollback
+              ansible.builtin.fail:
+                msg: "yusic worker deploy/update failed and rollback was applied."
+
+        - name: Run smoke-only mode
           ansible.builtin.include_role:
             name: yusic_worker_smoke
           vars:
             yusic_selected_workers: "{{ yusic_selected_workers }}"
-          when: worker_run_smoke_effective
-      rescue:
-        - name: Rollback workers to previous image on failed deploy/update
-          ansible.builtin.include_role:
-            name: yusic_worker_rollback
-          vars:
-            yusic_selected_workers: "{{ yusic_selected_workers }}"
-            yusic_worker_backup_images: "{{ yusic_worker_backup_images | default({}) }}"
+          when: worker_mode_effective == 'smoke'
 
-        - name: Fail deploy after rollback
-          ansible.builtin.fail:
-            msg: "yusic worker deploy/update failed and rollback was applied."
-
-    - name: Run smoke-only mode
-      ansible.builtin.include_role:
-        name: yusic_worker_smoke
-      vars:
-        yusic_selected_workers: "{{ yusic_selected_workers }}"
-      when: worker_mode_effective == 'smoke'
+        - name: Run bootstrap connectivity checks for selected workers
+          when: worker_mode_effective == 'bootstrap'
+          ansible.builtin.shell: |
+            set -euo pipefail
+            ssh_args=(
+              -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking | default('accept-new') }}
+              -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds | default(15) }}
+              -p {{ yusic_worker.ssh.port }}
+            )
+            if [ -f "{{ yusic_worker_relay_stage_dir_effective }}/{{ yusic_worker.alias }}/id_worker" ]; then
+              ssh_args+=(-i "{{ yusic_worker_relay_stage_dir_effective }}/{{ yusic_worker.alias }}/id_worker")
+            fi
+            target="{{ yusic_worker.ssh.user }}@{{ yusic_worker.ssh.host }}"
+            remote_cmd="set -euo pipefail; docker --version >/dev/null;"
+            remote_cmd="${remote_cmd} if [ ! -d '{{ yusic_worker.workdir }}' ]; then"
+            remote_cmd="${remote_cmd} mkdir -p '{{ yusic_worker.workdir }}';"
+            remote_cmd="${remote_cmd} echo __WORKDIR_CREATED__;"
+            remote_cmd="${remote_cmd} fi"
+            if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
+              SSHPASS="{{ yusic_worker.ssh.password }}" sshpass -e ssh "${ssh_args[@]}" "${target}" "${remote_cmd}"
+            else
+              ssh "${ssh_args[@]}" "${target}" "${remote_cmd}"
+            fi
+          args:
+            executable: /bin/bash
+          register: yusic_worker_bootstrap_cmd
+          changed_when: "'__WORKDIR_CREATED__' in (yusic_worker_bootstrap_cmd.stdout | default(''))"
+          no_log: true
+          loop: "{{ yusic_selected_workers }}"
+          loop_control:
+            loop_var: yusic_worker
+            label: "{{ yusic_worker.alias }}"
+      always:
+        - name: Remove temporary worker SSH keys from relay staging
+          ansible.builtin.file:
+            path: "{{ yusic_worker_relay_stage_dir_effective }}/{{ yusic_worker.alias }}/id_worker"
+            state: absent
+          loop: "{{ yusic_selected_workers | default([]) }}"
+          loop_control:
+            loop_var: yusic_worker
+            label: "{{ yusic_worker.alias }}"
+          when: yusic_worker.ssh.private_key | default('') | length > 0
+          no_log: true
+          failed_when: false

@@ -15,16 +15,6 @@
     group: root
     mode: "0750"
 
-- name: Write temporary private key for worker SSH (optional)
-  ansible.builtin.copy:
-    dest: "{{ yusic_worker_stage_path }}/id_worker"
-    content: "{{ yusic_worker.ssh.private_key }}"
-    owner: root
-    group: root
-    mode: "0600"
-  when: yusic_worker.ssh.private_key | default('') | length > 0
-  no_log: true
-
 - name: Render yusic worker compose file on relay
   ansible.builtin.template:
     src: "{{ playbook_dir }}/templates/docker-compose.yusic-worker.yml.j2"
@@ -58,7 +48,7 @@
       ssh_args+=(-i "{{ yusic_worker_stage_path }}/id_worker")
     fi
     if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
-      sshpass -p "{{ yusic_worker.ssh.password }}" ssh "${ssh_args[@]}" "{{ yusic_worker_target }}" \
+      SSHPASS="{{ yusic_worker.ssh.password }}" sshpass -e ssh "${ssh_args[@]}" "{{ yusic_worker_target }}" \
         "if [ -f '{{ yusic_worker.workdir }}/yusic-worker.env' ]; then \
         grep '^WORKER_IMAGE=' '{{ yusic_worker.workdir }}/yusic-worker.env' | head -n1 | cut -d= -f2-; \
         fi"
@@ -104,7 +94,7 @@
       ssh_args+=(-i "{{ yusic_worker_stage_path }}/id_worker")
     fi
     if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
-      sshpass -p "{{ yusic_worker.ssh.password }}" ssh "${ssh_args[@]}" "{{ yusic_worker_target }}" "mkdir -p '{{ yusic_worker.workdir }}'"
+      SSHPASS="{{ yusic_worker.ssh.password }}" sshpass -e ssh "${ssh_args[@]}" "{{ yusic_worker_target }}" "mkdir -p '{{ yusic_worker.workdir }}'"
     else
       ssh "${ssh_args[@]}" "{{ yusic_worker_target }}" "mkdir -p '{{ yusic_worker.workdir }}'"
     fi
@@ -125,7 +115,7 @@
       scp_args+=(-i "{{ yusic_worker_stage_path }}/id_worker")
     fi
     if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
-      sshpass -p "{{ yusic_worker.ssh.password }}" scp "${scp_args[@]}" \
+      SSHPASS="{{ yusic_worker.ssh.password }}" sshpass -e scp "${scp_args[@]}" \
         "{{ yusic_worker_archive_path }}" \
         "{{ yusic_worker_stage_path }}/docker-compose.yml" \
         "{{ yusic_worker_stage_path }}/yusic-worker.env" \
@@ -155,7 +145,7 @@
       ssh_args+=(-i "{{ yusic_worker_stage_path }}/id_worker")
     fi
     if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
-      sshpass -p "{{ yusic_worker.ssh.password }}" ssh "${ssh_args[@]}" "{{ yusic_worker_target }}" \
+      SSHPASS="{{ yusic_worker.ssh.password }}" sshpass -e ssh "${ssh_args[@]}" "{{ yusic_worker_target }}" \
         "cd '{{ yusic_worker.workdir }}' && \
         docker load -i \"${archive_basename}\" && \
         docker compose --env-file yusic-worker.env -f docker-compose.yml up -d && \

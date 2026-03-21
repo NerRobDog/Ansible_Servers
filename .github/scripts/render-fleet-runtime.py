@@ -89,6 +89,20 @@ def parse_bool(value) -> bool:
     fail(f"Cannot parse boolean value: {value!r}")
 
 
+def parse_bool_soft(value, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
 def ensure_mapping(value, context: str):
     if value is None:
         return {}
@@ -132,7 +146,7 @@ def deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def load_fleet_config(path: Path):
+def load_fleet_config(path: Path, target: str):
     raw = path.read_text(encoding="utf-8").strip()
     if not raw:
         fail("Fleet config file is empty.")
@@ -153,7 +167,15 @@ def load_fleet_config(path: Path):
         fail("Fleet config must contain non-empty object field 'hosts'.")
 
     defaults = ensure_mapping(data.get("defaults", {}), "Field 'defaults'")
-    workers = ensure_mapping(data.get("workers", {}), "Field 'workers'")
+    workers_raw = data.get("workers", {})
+    if workers_raw is None:
+        workers_raw = {}
+    if not isinstance(workers_raw, dict):
+        if target == "yusic_worker":
+            fail("Field 'workers' must be an object.")
+        workers_raw = {}
+
+    workers = workers_raw
     return data["hosts"], defaults, workers
 
 
@@ -331,6 +353,30 @@ def normalize_worker(alias: str, worker_cfg: dict, worker_defaults: dict, host_a
 
 
 def normalize_workers(workers_raw: dict, defaults: dict, host_aliases: set[str], target: str):
+    if target != "yusic_worker":
+        defaults_raw = defaults.get("yusic_worker", {})
+        worker_defaults = deep_merge(YUSIC_WORKER_DEFAULTS, defaults_raw if isinstance(defaults_raw, dict) else {})
+        relay_host_alias = str(worker_defaults.get("relay_host_alias", "") or "").strip()
+        normalized = {}
+        for alias, cfg in workers_raw.items():
+            if not isinstance(cfg, dict):
+                continue
+            merged = deep_merge(worker_defaults, cfg)
+            merged["alias"] = alias
+            merged["enabled"] = parse_bool_soft(merged.get("enabled", True), True)
+            normalized[alias] = merged
+
+        enabled_aliases = sorted(alias for alias, cfg in normalized.items() if cfg.get("enabled", False))
+        if not relay_host_alias and enabled_aliases:
+            relay_host_alias = str(normalized[enabled_aliases[0]].get("relay_host_alias", "") or "").strip()
+
+        return {
+            "defaults": worker_defaults,
+            "workers": normalized,
+            "enabled_workers": enabled_aliases,
+            "relay_host_alias": relay_host_alias,
+        }
+
     strict_required = target == "yusic_worker"
     worker_defaults = normalize_yusic_defaults(defaults)
     normalized = {
@@ -387,7 +433,7 @@ def main() -> None:
     parser.add_argument("--bootstrap-out", required=True)
     args = parser.parse_args()
 
-    hosts_raw, defaults, workers_raw = load_fleet_config(Path(args.fleet_config))
+    hosts_raw, defaults, workers_raw = load_fleet_config(Path(args.fleet_config), args.target)
     normalized_hosts = {alias: normalize_host(alias, cfg, defaults) for alias, cfg in hosts_raw.items()}
     yusic_runtime = normalize_workers(workers_raw, defaults, set(normalized_hosts.keys()), args.target)
 

@@ -269,6 +269,25 @@ def test_yusic_worker_requires_enabled_workers_for_target() -> None:
     assert_true("enabled worker" in (proc.stderr + proc.stdout), "Error should mention enabled worker")
 
 
+def test_remnawave_target_ignores_invalid_yusic_contract() -> None:
+    yaml_text = (
+        "---\n"
+        "defaults:\n"
+        "  yusic_worker:\n"
+        "    arch: x86_64\n"
+        "hosts:\n"
+        "  de_node:\n"
+        "    ansible_host: 203.0.113.10\n"
+        "workers:\n"
+        "  - unexpected-list-item\n"
+    )
+    proc, _, vars_path, _ = run_renderer(yaml_text, "deploy", target="remnawave")
+    assert_true(proc.returncode == 0, f"remnawave target should ignore invalid yusic contract: {proc.stderr or proc.stdout}")
+    runtime_vars = json.loads(vars_path.read_text(encoding="utf-8"))
+    assert_true(runtime_vars["fleet_target"] == "remnawave", "fleet_target mismatch for remnawave")
+    assert_true("yusic_worker_runtime" in runtime_vars, "yusic_worker_runtime should stay present in runtime vars")
+
+
 def main() -> int:
     tests = [
         test_valid_yaml_modes,
@@ -279,6 +298,7 @@ def main() -> int:
         test_yusic_worker_runtime_success,
         test_yusic_worker_invalid_relay_alias,
         test_yusic_worker_requires_enabled_workers_for_target,
+        test_remnawave_target_ignores_invalid_yusic_contract,
     ]
 
     for test in tests:

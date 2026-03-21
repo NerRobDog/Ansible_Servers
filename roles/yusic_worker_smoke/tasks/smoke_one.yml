@@ -12,7 +12,7 @@
     fi
     target="{{ yusic_worker.ssh.user }}@{{ yusic_worker.ssh.host }}"
     if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
-      sshpass -p "{{ yusic_worker.ssh.password }}" ssh "${ssh_args[@]}" "${target}" \
+      SSHPASS="{{ yusic_worker.ssh.password }}" sshpass -e ssh "${ssh_args[@]}" "${target}" \
         "docker inspect '{{ yusic_worker.container_name }}' | grep -q '\"Status\": \"running\"'"
     else
       ssh "${ssh_args[@]}" "${target}" \
@@ -37,11 +37,11 @@
     target="{{ yusic_worker.ssh.user }}@{{ yusic_worker.ssh.host }}"
     selfcheck_cmd={{ yusic_worker.selfcheck_command | quote }}
     if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
-      sshpass -p "{{ yusic_worker.ssh.password }}" ssh "${ssh_args[@]}" "${target}" \
-        "docker exec '{{ yusic_worker.container_name }}' sh -lc ${selfcheck_cmd}"
+      SSHPASS="{{ yusic_worker.ssh.password }}" sshpass -e ssh "${ssh_args[@]}" "${target}" \
+        "docker exec '{{ yusic_worker.container_name }}' sh -lc \"$selfcheck_cmd\""
     else
       ssh "${ssh_args[@]}" "${target}" \
-        "docker exec '{{ yusic_worker.container_name }}' sh -lc ${selfcheck_cmd}"
+        "docker exec '{{ yusic_worker.container_name }}' sh -lc \"$selfcheck_cmd\""
     fi
   args:
     executable: /bin/bash
