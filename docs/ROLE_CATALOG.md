@@ -15,6 +15,7 @@
 - Базовые allow-правила:
   - SSH (`firewall_ssh_port`, обычно 22/tcp)
   - 443/tcp (Reality/public endpoint)
+- При `feature_remnawave_node=true` автоматически открывает `remnawave.node_port`.
 - По умолчанию не открывает наружу порт Caddy monitor (`8443`).
 
 ### `docker`
