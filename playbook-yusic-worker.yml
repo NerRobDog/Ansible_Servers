@@ -176,22 +176,16 @@
               ansible.builtin.include_role:
                 name: yusic_worker_deploy
               vars:
-                yusic_selected_workers: "{{ yusic_selected_workers }}"
                 worker_image_tag: "{{ worker_image_tag }}"
 
             - name: Run smoke checks after deploy/update
               ansible.builtin.include_role:
                 name: yusic_worker_smoke
-              vars:
-                yusic_selected_workers: "{{ yusic_selected_workers }}"
               when: worker_run_smoke_effective
           rescue:
             - name: Rollback workers to previous image on failed deploy/update
               ansible.builtin.include_role:
                 name: yusic_worker_rollback
-              vars:
-                yusic_selected_workers: "{{ yusic_selected_workers }}"
-                yusic_worker_backup_images: "{{ yusic_worker_backup_images | default({}) }}"
 
             - name: Fail deploy after rollback
               ansible.builtin.fail:
@@ -200,8 +194,6 @@
         - name: Run smoke-only mode
           ansible.builtin.include_role:
             name: yusic_worker_smoke
-          vars:
-            yusic_selected_workers: "{{ yusic_selected_workers }}"
           when: worker_mode_effective == 'smoke'
 
         - name: Run bootstrap connectivity checks for selected workers
