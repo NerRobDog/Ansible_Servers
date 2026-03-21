@@ -15,11 +15,15 @@ except Exception:  # pragma: no cover
 
 FEATURE_DEFAULTS = {
     "feature_openwrt_base": True,
+    "feature_openwrt_network_core": False,
+    "feature_openwrt_firewall_core": False,
     "feature_openwrt_wan": False,
+    "feature_openwrt_wan_apply_in_prod": False,
     "feature_openwrt_zerotier": True,
     "feature_tailscale": False,
     "feature_openwrt_passwall2": True,
     "feature_openwrt_homeproxy_cleanup": True,
+    "feature_openwrt_docker_runtime": True,
     "feature_openwrt_docker_stacks": True,
     "feature_openwrt_monitoring_agent": True,
     "feature_openwrt_ssh_lockdown": False,
@@ -31,6 +35,7 @@ PASSWALL2_DEFAULTS = {
     "probe_url": "https://www.gstatic.com/generate_204",
     "socks_port": 1070,
     "profile_overrides": {},
+    "acl_bypass_macs": [],
 }
 
 ZEROTIER_DEFAULTS = {
@@ -49,6 +54,9 @@ MONITORING_DEFAULTS = {
 DOCKER_DEFAULTS = {
     "manage_runtime": True,
     "compose_command": "docker-compose",
+    "runtime_packages": ["dockerd", "docker", "docker-compose"],
+    "manage_daemon_config": False,
+    "daemon_config": {},
     "stacks": [],
 }
 
@@ -64,6 +72,15 @@ WAN_DEFAULTS = {
     "pppoe_password": "",
     "pppoe_ipv6": "auto",
 }
+
+NETWORK_DEFAULTS = {
+    "lan_device": "br-lan",
+    "lan_ipaddr": "192.168.1.1",
+    "lan_netmask": "255.255.255.0",
+    "lan_ip6assign": "60",
+    "ula_prefix": "",
+}
+
 DEFAULT_SSH_KEY_FILE = "~/.ssh/id_ed25519"
 
 
@@ -159,7 +176,6 @@ def choose_endpoint(alias: str, access: dict, mode: str, check_connectivity: boo
         if endpoint_reachable(host, port, timeout_sec):
             return kind, host, port
 
-    # Fallback to preferred candidate if checks failed (can still work with proxy/jump timing)
     return candidates[0]
 
 
@@ -216,6 +232,10 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict, mode: str, check_
     if not isinstance(host_cfg, dict):
         fail(f"Host '{alias}' config must be an object.")
 
+    profile = str(host_cfg.get("profile", defaults.get("profile", "prod_update")) or "").strip()
+    if profile not in {"fresh", "prod_update"}:
+        fail(f"Host '{alias}' profile must be fresh|prod_update.")
+
     ansible_port_default = parse_int(
         host_cfg.get("ansible_port", defaults.get("ansible_port", 22)),
         f"hosts.{alias}.ansible_port",
@@ -260,7 +280,6 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict, mode: str, check_
     if not ssh_private_key_file:
         fail(f"Host '{alias}' requires non-empty SSH private key path.")
 
-    # Backward-compatible fallback if ansible_host is provided directly.
     direct_ansible_host = str(host_cfg.get("ansible_host", defaults.get("ansible_host", "")) or "").strip()
     if direct_ansible_host:
         access_cfg.setdefault("lan_host", direct_ansible_host)
@@ -314,6 +333,13 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict, mode: str, check_
         fail(f"Host '{alias}' passwall2.profile_overrides must be an object.")
     passwall2["profile_overrides"] = profile_overrides
 
+    acl_bypass_macs = passwall2.get("acl_bypass_macs", [])
+    if acl_bypass_macs is None:
+        acl_bypass_macs = []
+    if not isinstance(acl_bypass_macs, list):
+        fail(f"Host '{alias}' passwall2.acl_bypass_macs must be a list.")
+    passwall2["acl_bypass_macs"] = [str(item or "").strip() for item in acl_bypass_macs if str(item or "").strip()]
+
     if normalized_features["feature_openwrt_passwall2"] and passwall2["enabled"] and not passwall2["subscribe_url"]:
         fail(f"Host '{alias}' requires passwall2.subscribe_url when feature_openwrt_passwall2 is enabled.")
 
@@ -328,6 +354,7 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict, mode: str, check_
     zerotier["manage_secret"] = parse_bool(zerotier.get("manage_secret", False))
     zerotier["network_id"] = str(zerotier.get("network_id", "") or "").strip()
     zerotier["secret"] = str(zerotier.get("secret", "") or "").strip()
+    zerotier["src_cidr"] = str(zerotier.get("src_cidr", "172.16.0.0/12") or "").strip()
 
     if normalized_features["feature_openwrt_zerotier"] and zerotier["enabled"] and not zerotier["network_id"]:
         fail(f"Host '{alias}' requires zerotier.network_id when zerotier role is enabled.")
@@ -387,6 +414,25 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict, mode: str, check_
         if wan["pppoe_ipv6"] not in {"auto", "0", "1"}:
             fail(f"Host '{alias}' wan.pppoe_ipv6 must be one of: auto, 0, 1.")
 
+    default_network = defaults.get("network", {}) or {}
+    if not isinstance(default_network, dict):
+        fail("defaults.network must be an object when provided.")
+    host_network = host_cfg.get("network", {}) or {}
+    if not isinstance(host_network, dict):
+        fail(f"Host '{alias}' network must be an object.")
+
+    network = NETWORK_DEFAULTS.copy()
+    network.update(default_network)
+    network.update(host_network)
+    network["lan_device"] = str(network.get("lan_device", NETWORK_DEFAULTS["lan_device"]) or "").strip()
+    network["lan_ipaddr"] = str(network.get("lan_ipaddr", NETWORK_DEFAULTS["lan_ipaddr"]) or "").strip()
+    network["lan_netmask"] = str(network.get("lan_netmask", NETWORK_DEFAULTS["lan_netmask"]) or "").strip()
+    network["lan_ip6assign"] = str(network.get("lan_ip6assign", NETWORK_DEFAULTS["lan_ip6assign"]) or "").strip()
+    network["ula_prefix"] = str(network.get("ula_prefix", "") or "").strip()
+
+    if not network["lan_device"] or not network["lan_ipaddr"] or not network["lan_netmask"] or not network["lan_ip6assign"]:
+        fail(f"Host '{alias}' network.lan_* fields must be non-empty.")
+
     default_monitoring = defaults.get("monitoring", {}) or {}
     if not isinstance(default_monitoring, dict):
         fail("defaults.monitoring must be an object when provided.")
@@ -423,6 +469,21 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict, mode: str, check_
     if not docker["compose_command"]:
         fail(f"Host '{alias}' docker.compose_command must be non-empty string.")
 
+    runtime_packages = docker.get("runtime_packages", DOCKER_DEFAULTS["runtime_packages"])
+    if not isinstance(runtime_packages, list):
+        fail(f"Host '{alias}' docker.runtime_packages must be a list.")
+    docker["runtime_packages"] = [str(item or "").strip() for item in runtime_packages if str(item or "").strip()]
+    if not docker["runtime_packages"]:
+        fail(f"Host '{alias}' docker.runtime_packages must not be empty.")
+
+    docker["manage_daemon_config"] = parse_bool(docker.get("manage_daemon_config", False))
+    daemon_config = docker.get("daemon_config", {})
+    if daemon_config is None:
+        daemon_config = {}
+    if not isinstance(daemon_config, dict):
+        fail(f"Host '{alias}' docker.daemon_config must be an object.")
+    docker["daemon_config"] = daemon_config
+
     stacks = docker.get("stacks", [])
     if stacks is None:
         stacks = []
@@ -449,6 +510,7 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict, mode: str, check_
             fail(f"Host '{alias}' custom_roles contains invalid item: {role_name!r}")
 
     return {
+        "profile": profile,
         "ansible_host": selected_host,
         "ansible_port": selected_port,
         "ansible_ssh_private_key_file": ssh_private_key_file,
@@ -467,6 +529,7 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict, mode: str, check_
         },
         "features": normalized_features,
         "wan": wan,
+        "network": network,
         "zerotier": zerotier,
         "passwall2": passwall2,
         "monitoring": monitoring,
@@ -530,11 +593,19 @@ def main() -> None:
         "openwrt_fleet_hosts": normalized_hosts,
         "openwrt_runtime_host_vars": {
             alias: {
+                "openwrt_profile": cfg["profile"],
                 "passwall2_subscribe_url": cfg["passwall2"]["subscribe_url"],
                 "passwall2_probe_url": cfg["passwall2"]["probe_url"],
                 "passwall2_socks_port": cfg["passwall2"]["socks_port"],
+                "passwall2_profile_overrides": cfg["passwall2"]["profile_overrides"],
+                "passwall2_acl_bypass_macs": cfg["passwall2"]["acl_bypass_macs"],
                 "openwrt_node_exporter_port": cfg["monitoring"]["openwrt_node_exporter_port"],
                 "openwrt_probe_interval_minutes": cfg["monitoring"]["openwrt_probe_interval_minutes"],
+                "openwrt_network_lan_device": cfg["network"]["lan_device"],
+                "openwrt_network_lan_ipaddr": cfg["network"]["lan_ipaddr"],
+                "openwrt_network_lan_netmask": cfg["network"]["lan_netmask"],
+                "openwrt_network_lan_ip6assign": cfg["network"]["lan_ip6assign"],
+                "openwrt_network_ula_prefix": cfg["network"]["ula_prefix"],
                 "openwrt_wan_enabled": cfg["wan"]["enabled"],
                 "openwrt_wan_proto": cfg["wan"]["proto"],
                 "openwrt_wan_device": cfg["wan"]["device"],
@@ -545,7 +616,11 @@ def main() -> None:
                 "openwrt_wan_pppoe_username": cfg["wan"]["pppoe_username"],
                 "openwrt_wan_pppoe_password": cfg["wan"]["pppoe_password"],
                 "openwrt_wan_pppoe_ipv6": cfg["wan"]["pppoe_ipv6"],
+                "openwrt_docker_runtime_packages": cfg["docker"]["runtime_packages"],
+                "openwrt_docker_runtime_manage_daemon_config": cfg["docker"]["manage_daemon_config"],
+                "openwrt_docker_runtime_daemon_config": cfg["docker"]["daemon_config"],
                 "zerotier_network_id": cfg["zerotier"]["network_id"],
+                "openwrt_firewall_zerotier_src_cidr": cfg["zerotier"]["src_cidr"],
             }
             for alias, cfg in normalized_hosts.items()
         },

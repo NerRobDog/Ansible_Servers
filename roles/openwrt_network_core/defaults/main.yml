@@ -1,0 +1,7 @@
+---
+openwrt_network_lan_device: br-lan
+openwrt_network_lan_ipaddr: 192.168.1.1
+openwrt_network_lan_netmask: 255.255.255.0
+openwrt_network_lan_ip6assign: "60"
+openwrt_network_ula_prefix: ""
+openwrt_network_manage_wan_baseline: true

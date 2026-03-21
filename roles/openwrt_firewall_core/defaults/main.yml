@@ -1,0 +1,3 @@
+---
+openwrt_firewall_allow_zerotier_ssh: true
+openwrt_firewall_zerotier_src_cidr: 172.16.0.0/12

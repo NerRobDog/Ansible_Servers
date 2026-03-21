@@ -175,9 +175,30 @@ features:
   - `openwrt_base_packages`
   - `openwrt_bootstrap_public_key`
 
+### `openwrt_network_core`
+- Назначение: managed baseline для `network` (loopback/LAN/WAN skeleton).
+- Дефолт: выключена (`feature_openwrt_network_core=false`).
+- Ключевые параметры:
+  - `openwrt_network_lan_device`
+  - `openwrt_network_lan_ipaddr`
+  - `openwrt_network_lan_netmask`
+  - `openwrt_network_lan_ip6assign`
+  - `openwrt_network_ula_prefix`
+
+### `openwrt_firewall_core`
+- Назначение: managed baseline для `firewall` + fail-safe SSH.
+- Дефолт: выключена (`feature_openwrt_firewall_core=false`).
+- Поведение:
+  - всегда держит allow SSH из LAN;
+  - при включённом ZeroTier добавляет allow SSH из `openwrt_firewall_zerotier_src_cidr`.
+- Ключевые параметры:
+  - `openwrt_firewall_allow_zerotier_ssh`
+  - `openwrt_firewall_zerotier_src_cidr`
+
 ### `openwrt_wan`
 - Назначение: managed конфиг `network.wan` для разных провайдеров.
 - Дефолт: выключена (`feature_openwrt_wan=false`), включайте осознанно во fleet.
+- В `openwrt_profile=prod_update` требует явный opt-in: `feature_openwrt_wan_apply_in_prod=true`.
 - Поддерживаемые режимы:
   - `openwrt_wan_proto=dhcp`
   - `openwrt_wan_proto=static` (нужны `openwrt_wan_ipaddr` + `openwrt_wan_netmask`)
@@ -208,18 +229,28 @@ features:
   - `passwall2_probe_url`
   - `passwall2_socks_port`
   - `passwall2_profile_overrides`
+  - `passwall2_acl_bypass_macs`
   - `passwall2_auto_enable_when_nodes`
   - `passwall2_require_nodes_for_enable`
+- Шаблон разделён на логические блоки (rules/nodes/global/acl/runtime/subscribe) и собирается в единый managed конфиг.
 
 ### `openwrt_homeproxy_cleanup`
 - Назначение: stop/disable/remove HomeProxy и его конфиг, чтобы не держать mixed-mode.
 - Дефолт: включена (`feature_openwrt_homeproxy_cleanup=true`).
 
+### `openwrt_docker_runtime`
+- Назначение: managed Docker runtime на OpenWrt (пакеты/daemon/service) без destructive reset.
+- Дефолт: включена (`feature_openwrt_docker_runtime=true`).
+- Ключевые параметры:
+  - `openwrt_docker_manage_runtime`
+  - `openwrt_docker_runtime_packages`
+  - `openwrt_docker_runtime_manage_daemon_config`
+  - `openwrt_docker_runtime_daemon_config`
+
 ### `openwrt_docker_stacks`
 - Назначение: управляемые docker-compose стеки на OpenWrt.
 - Дефолт: включена (`feature_openwrt_docker_stacks=true`).
 - Ключевые параметры:
-  - `openwrt_docker_manage_runtime`
   - `openwrt_docker_compose_command`
   - `openwrt_docker_stacks`
 
@@ -242,11 +273,15 @@ features:
 ```yaml
 features:
   feature_openwrt_base: true
+  feature_openwrt_network_core: false
+  feature_openwrt_firewall_core: false
   feature_openwrt_wan: false
+  feature_openwrt_wan_apply_in_prod: false
   feature_openwrt_zerotier: true
   feature_tailscale: false
   feature_openwrt_passwall2: true
   feature_openwrt_homeproxy_cleanup: true
+  feature_openwrt_docker_runtime: true
   feature_openwrt_docker_stacks: true
   feature_openwrt_monitoring_agent: true
   feature_openwrt_ssh_lockdown: false

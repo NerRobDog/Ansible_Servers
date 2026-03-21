@@ -5,7 +5,9 @@ openwrt_wan_device: eth0
 openwrt_wan_ipaddr: ""
 openwrt_wan_netmask: ""
 openwrt_wan_gateway: ""
-openwrt_wan_dns: []
+openwrt_wan_dns:
+  - 9.9.9.9
+  - 149.112.112.112
 openwrt_wan_pppoe_username: ""
 openwrt_wan_pppoe_password: ""
 openwrt_wan_pppoe_ipv6: auto

@@ -1,0 +1,9 @@
+---
+openwrt_docker_manage_runtime: true
+openwrt_docker_runtime_packages:
+  - dockerd
+  - docker
+  - docker-compose
+openwrt_docker_runtime_manage_daemon_config: false
+openwrt_docker_runtime_daemon_config: {}
+openwrt_docker_runtime_daemon_config_path: /etc/docker/daemon.json

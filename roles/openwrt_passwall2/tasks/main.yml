@@ -58,98 +58,184 @@
   failed_when: openwrt_passwall2_feed.rc != 0
   tags: [openwrt, passwall2]
 
-- name: Install passwall2 packages
+- name: Detect passwall2 runtime processes before package sync
   ansible.builtin.raw: |
-    set -eu
-    missing=""
-    for pkg in {{ passwall2_packages | join(' ') }}; do
-      opkg list-installed | grep -q "^${pkg} " || missing="${missing} ${pkg}"
-    done
-
-    if [ -z "${missing}" ]; then
-      echo "NOCHANGE"
-      exit 0
-    fi
-
-    workdir="$(mktemp -d)"
-    trap 'rm -rf "${workdir}"' EXIT INT TERM
-
-    fetch_feed_index() {
-      feed_name="$1"
-      feed_url="$2"
-      feed_gz="${workdir}/${feed_name}.Packages.gz"
-      feed_txt="${workdir}/${feed_name}.Packages"
-
-      wget -q -T {{ passwall2_download_timeout | int }} -t {{ passwall2_download_retries | int }} -O "${feed_gz}" "${feed_url}/Packages.gz"
-      gzip -dc "${feed_gz}" > "${feed_txt}"
-    }
-
-    find_pkg_url() {
-      pkg="$1"
-      feed_name="$2"
-      feed_url="$3"
-      feed_txt="${workdir}/${feed_name}.Packages"
-
-      rel="$(awk -v pkg="${pkg}" '
-        BEGIN { in_pkg=0; filename="" }
-        /^Package:[[:space:]]*/ {
-          split($0, a, ":")
-          name=substr($0, index($0, ":")+1)
-          gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
-          in_pkg=(name==pkg)
-          filename=""
-          next
-        }
-        in_pkg && /^Filename:[[:space:]]*/ {
-          filename=substr($0, index($0, ":")+1)
-          gsub(/^[[:space:]]+|[[:space:]]+$/, "", filename)
-          print filename
-          exit
-        }
-      ' "${feed_txt}")"
-
-      if [ -n "${rel}" ]; then
-        echo "${feed_url}/${rel}"
-        return 0
-      fi
-      return 1
-    }
-
-    fetch_feed_index "{{ passwall2_feed_name }}" "{{ passwall2_feed_url }}"
-    fetch_feed_index "{{ passwall2_dep_feed_name }}" "{{ passwall2_dep_feed_url }}"
-
-    changed=0
-    for pkg in ${missing}; do
-      pkg_url=""
-      if pkg_url="$(find_pkg_url "${pkg}" "{{ passwall2_feed_name }}" "{{ passwall2_feed_url }}")"; then
-        :
-      elif pkg_url="$(find_pkg_url "${pkg}" "{{ passwall2_dep_feed_name }}" "{{ passwall2_dep_feed_url }}")"; then
-        :
-      else
-        echo "Package '${pkg}' not found in configured passwall feeds." >&2
-        exit 1
-      fi
-
-      pkg_file="${workdir}/${pkg}.ipk"
-      wget -q -T {{ passwall2_download_timeout | int }} -t {{ passwall2_download_retries | int }} -O "${pkg_file}" "${pkg_url}"
-      opkg install "${pkg_file}"
-      changed=1
-    done
-
-    if [ "${changed}" -eq 1 ]; then
-      echo "CHANGED"
+    if pgrep -f '/tmp/etc/passwall2/bin/xray' >/dev/null 2>&1 || pgrep -f '/tmp/etc/passwall2/bin/sing-box' >/dev/null 2>&1; then
+      echo RUNNING
     else
-      echo "NOCHANGE"
+      echo STOPPED
     fi
   when: passwall2_enabled | bool
-  register: openwrt_passwall2_install
-  changed_when: "'CHANGED' in openwrt_passwall2_install.stdout"
-  failed_when: openwrt_passwall2_install.rc != 0
+  register: openwrt_passwall2_runtime_state
+  changed_when: false
+  failed_when: openwrt_passwall2_runtime_state.rc != 0
   tags: [openwrt, passwall2]
+
+- name: Sync passwall2 packages from active opkg feeds
+  when: passwall2_enabled | bool
+  tags: [openwrt, passwall2]
+  block:
+    - name: Stop passwall2 temporarily for reliable package downloads
+      ansible.builtin.raw: |
+        if [ -x /etc/init.d/passwall2 ]; then
+          /etc/init.d/passwall2 stop >/dev/null 2>&1 || true
+          sleep 1
+        fi
+      changed_when: false
+
+    - name: Refresh opkg indexes before passwall2 package sync
+      ansible.builtin.raw: |
+        rm -f /usr/local/opkg-lists/immortalwrt_* \
+              /usr/local/opkg-lists/fw876* \
+              /usr/local/opkg-lists/passwall2 || true
+        opkg update >/dev/null 2>&1 || opkg update
+      register: openwrt_passwall2_update
+      changed_when: false
+      failed_when: openwrt_passwall2_update.rc != 0
+
+    - name: Install and normalize passwall2 package versions
+      ansible.builtin.raw: |
+        set -eu
+        pkg="{{ item }}"
+
+        installed_version="$(opkg list-installed | awk -v pkg="${pkg}" '$1==pkg {print $3; exit}')"
+        best=""
+        for version in $(opkg list "${pkg}" 2>/dev/null | awk -v pkg="${pkg}" '$1 == pkg { print $3 }'); do
+          if [ -z "${best}" ] || opkg compare-versions "${version}" ">" "${best}"; then
+            best="${version}"
+          fi
+        done
+        target_version="${best}"
+
+        if [ -z "${target_version}" ]; then
+          echo "Package '${pkg}' not found in opkg indexes after update." >&2
+          exit 1
+        fi
+
+        if [ -n "${installed_version}" ] && [ "{{ passwall2_enforce_package_versions | bool }}" != "True" ]; then
+          echo "NOCHANGE"
+          exit 0
+        fi
+
+        if [ -n "${installed_version}" ] && [ "${installed_version}" = "${target_version}" ]; then
+          echo "NOCHANGE"
+          exit 0
+        fi
+
+        if [ -n "${installed_version}" ]; then
+          if ! opkg install --force-reinstall --force-downgrade "${pkg}"; then
+            opkg install --force-reinstall "${pkg}"
+          fi
+        else
+          opkg install "${pkg}"
+        fi
+        echo "CHANGED"
+      loop: "{{ passwall2_packages }}"
+      register: openwrt_passwall2_install_results
+      changed_when: "'CHANGED' in openwrt_passwall2_install_results.stdout"
+      failed_when: openwrt_passwall2_install_results.rc != 0
+
+  always:
+    - name: Restore passwall2 runtime after package sync
+      ansible.builtin.raw: "/etc/init.d/passwall2 start >/dev/null 2>&1 || true"
+      when:
+        - "'RUNNING' in (openwrt_passwall2_runtime_state.stdout | default(''))"
+      changed_when: false
 
 - name: Build effective passwall2 profile options
   ansible.builtin.set_fact:
-    passwall2_profile_effective: "{{ passwall2_profile_defaults | combine(passwall2_profile_overrides | default({}), recursive=True) }}"
+    passwall2_profile_effective: >-
+      {{
+        passwall2_profile_defaults
+        | combine(passwall2_dns_profiles.get(passwall2_dns_provider, {}), recursive=True)
+        | combine(passwall2_profile_overrides | default({}), recursive=True)
+      }}
+  when: passwall2_enabled | bool
+  changed_when: false
+  tags: [openwrt, passwall2]
+
+- name: Resolve managed Passwall2 ACL bypass MAC list
+  ansible.builtin.set_fact:
+    passwall2_acl_bypass_macs_effective: >-
+      {{
+        (
+          passwall2_profile_effective.acl_bypass_macs
+          | default(passwall2_acl_bypass_macs, true)
+          | default([], true)
+        )
+      }}
+  when: passwall2_enabled | bool
+  changed_when: false
+  tags: [openwrt, passwall2]
+
+- name: Validate Passwall2 ACL bypass MAC list type
+  ansible.builtin.assert:
+    that:
+      - passwall2_acl_bypass_macs_effective is iterable
+      - passwall2_acl_bypass_macs_effective is not string
+    fail_msg: "passwall2_acl_bypass_macs must be a list of MAC addresses."
+  when: passwall2_enabled | bool
+  tags: [openwrt, passwall2]
+
+- name: Read current passwall2 global enabled state
+  ansible.builtin.raw: "uci -q get 'passwall2.@global[0].enabled' || echo 0"
+  when: passwall2_enabled | bool
+  register: openwrt_passwall2_current_enabled
+  changed_when: false
+  failed_when: openwrt_passwall2_current_enabled.rc != 0
+  tags: [openwrt, passwall2]
+
+- name: Resolve template global enabled state
+  ansible.builtin.set_fact:
+    passwall2_template_enabled: >-
+      {{
+        (
+          (openwrt_passwall2_current_enabled | default({})).get('stdout', '')
+          | regex_findall('[01]')
+          | first
+          | default(passwall2_profile_effective.enabled)
+        )
+      }}
+  when: passwall2_enabled | bool
+  changed_when: false
+  tags: [openwrt, passwall2]
+
+- name: Snapshot existing passwall2 config before managed rewrite
+  ansible.builtin.raw: |
+    set -eu
+    backup_file="/tmp/passwall2.pre-ansible.conf"
+    backup_nodes=0
+    if [ -f /etc/config/passwall2 ]; then
+      cp /etc/config/passwall2 "${backup_file}"
+      backup_nodes="$(uci -q show passwall2 | sed -n 's/^passwall2\.\([^.]*\)=nodes$/\1/p' | while read node_id; do
+        proto="$(uci -q get passwall2.${node_id}.protocol || true)"
+        case "${proto}" in
+          ""|_*)
+            ;;
+          *)
+            echo "${node_id}"
+            ;;
+        esac
+      done | wc -l | tr -d ' ')"
+    fi
+    echo "BACKUP_NODE_COUNT=${backup_nodes}"
+  when: passwall2_enabled | bool
+  register: openwrt_passwall2_backup_probe
+  changed_when: false
+  failed_when: openwrt_passwall2_backup_probe.rc != 0
+  tags: [openwrt, passwall2]
+
+- name: Parse passwall2 backup runtime nodes count
+  ansible.builtin.set_fact:
+    openwrt_passwall2_backup_nodes_count: >-
+      {{
+        (
+          (openwrt_passwall2_backup_probe | default({})).get('stdout', '')
+          | regex_findall('BACKUP_NODE_COUNT=([0-9]+)')
+          | first
+          | default('0')
+        ) | int
+      }}
   when: passwall2_enabled | bool
   changed_when: false
   tags: [openwrt, passwall2]
@@ -175,30 +261,245 @@
   notify: Restart passwall2
   tags: [openwrt, passwall2]
 
-- name: Detect available Passwall2 runtime nodes
+- name: Sync Passwall2 subscription list
   ansible.builtin.raw: |
-    sh -c "uci show passwall2 | grep '=nodes' | grep -v \"protocol='_'\" | wc -l"
+    set -eu
+    attempts=0
+    synced_count=0
+    while [ "${attempts}" -lt 3 ]; do
+      attempts=$((attempts + 1))
+      lua /usr/share/passwall2/subscribe.lua start all manual >/dev/null 2>&1 || true
+      synced_count="$(
+        uci -q show passwall2 |
+          sed -n 's/^passwall2\.\([^.]*\)=nodes$/\1/p' |
+          while read node_id; do
+            proto="$(uci -q get passwall2.${node_id}.protocol || true)"
+            case "${proto}" in
+              ""|_*)
+                ;;
+              *)
+                echo "${node_id}"
+                ;;
+            esac
+          done |
+          wc -l |
+          tr -d ' '
+      )"
+      if [ "${synced_count}" -gt 0 ]; then
+        break
+      fi
+      sleep 2
+    done
+    echo "DONE"
+    echo "SYNCED_COUNT=${synced_count}"
+  when: passwall2_enabled | bool
+  register: openwrt_passwall2_subscribe_sync
+  changed_when: false
+  failed_when: openwrt_passwall2_subscribe_sync.rc != 0
+  tags: [openwrt, passwall2]
+
+- name: Rebuild Passwall2 balancing and shunt targets from runtime nodes
+  ansible.builtin.raw: |
+    set -eu
+
+    valid_nodes=""
+    non_ru_nodes=""
+    ru_node=""
+    need_update=0
+
+    for node_id in $(uci -q show passwall2 | sed -n 's/^passwall2\.\([^.]*\)=nodes$/\1/p'); do
+      proto="$(uci -q get passwall2.${node_id}.protocol || true)"
+      remarks="$(uci -q get passwall2.${node_id}.remarks || true)"
+      case "${proto}" in
+        ""|_*)
+          ;;
+        *)
+          valid_nodes="${valid_nodes} ${node_id}"
+          if printf '%s' "${remarks}" | grep -Eq '🇷🇺|(^|[^A-Za-z])(RU|RUS|RUSSIA|РОССИЯ|РФ|MSK)([^A-Za-z]|$)'; then
+            if [ -z "${ru_node}" ]; then
+              ru_node="${node_id}"
+            fi
+          else
+            non_ru_nodes="${non_ru_nodes} ${node_id}"
+          fi
+          ;;
+      esac
+    done
+
+    valid_nodes="$(echo "${valid_nodes}" | xargs || true)"
+    non_ru_nodes="$(echo "${non_ru_nodes}" | xargs || true)"
+    current_nodes="$(uci -q get passwall2.{{ passwall2_balance_node_id }}.balancing_node || true)"
+    current_nodes="$(echo "${current_nodes}" | xargs || true)"
+
+    if [ "${current_nodes}" != "${non_ru_nodes}" ]; then
+      need_update=1
+      uci -q delete passwall2.{{ passwall2_balance_node_id }}.balancing_node || true
+      for node_id in ${non_ru_nodes}; do
+        uci add_list passwall2.{{ passwall2_balance_node_id }}.balancing_node="${node_id}"
+      done
+    fi
+
+    if [ -n "${valid_nodes}" ]; then
+      proxy_node="$(uci -q get passwall2.{{ passwall2_shunt_node_id }}.Proxy || true)"
+      default_node="$(uci -q get passwall2.{{ passwall2_shunt_node_id }}.default_node || true)"
+      ban_ru_node="$(uci -q get passwall2.{{ passwall2_shunt_node_id }}.Ban_RU || true)"
+      desired_proxy='{{ passwall2_balance_node_id }}'
+      desired_default='{{ passwall2_balance_node_id }}'
+      desired_ban_ru='{{ passwall2_balance_node_id }}'
+
+      if [ -n "${ru_node}" ]; then
+        desired_ban_ru="${ru_node}"
+      fi
+
+      if [ -z "${non_ru_nodes}" ]; then
+        desired_proxy='_direct'
+        desired_default='_direct'
+      fi
+
+      if [ "${proxy_node}" != "${desired_proxy}" ] || [ "${default_node}" != "${desired_default}" ] || [ "${ban_ru_node}" != "${desired_ban_ru}" ]; then
+        need_update=1
+        uci set passwall2.{{ passwall2_shunt_node_id }}.Proxy="${desired_proxy}"
+        uci set passwall2.{{ passwall2_shunt_node_id }}.default_node="${desired_default}"
+        uci set passwall2.{{ passwall2_shunt_node_id }}.Ban_RU="${desired_ban_ru}"
+      fi
+    fi
+
+    if [ "${need_update}" -eq 1 ]; then
+      uci commit passwall2
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+
+    count="$(echo "${valid_nodes}" | wc -w | tr -d ' ')"
+    echo "VALID_COUNT=${count}"
+    echo "VALID_NODES=${valid_nodes}"
+    echo "NON_RU_NODES=${non_ru_nodes}"
+    echo "RU_NODE=${ru_node}"
   when: passwall2_enabled | bool
   register: openwrt_passwall2_nodes_count_raw
-  changed_when: false
+  changed_when: "'CHANGED' in openwrt_passwall2_nodes_count_raw.stdout"
   failed_when: openwrt_passwall2_nodes_count_raw.rc != 0
+  notify: Restart passwall2
+  tags: [openwrt, passwall2]
+
+- name: Count Passwall2 runtime nodes after sync
+  ansible.builtin.raw: |
+    count="$(uci -q show passwall2 | sed -n 's/^passwall2\.\([^.]*\)=nodes$/\1/p' | while read node_id; do
+      proto="$(uci -q get passwall2.${node_id}.protocol || true)"
+      case "${proto}" in
+        ""|_*)
+          ;;
+        *)
+          echo "${node_id}"
+          ;;
+      esac
+    done | wc -l | tr -d ' ')"
+    echo "NODE_COUNT=${count}"
+  register: openwrt_passwall2_nodes_count_check
+  changed_when: false
+  failed_when: openwrt_passwall2_nodes_count_check.rc != 0
+  when: passwall2_enabled | bool
   tags: [openwrt, passwall2]
 
 - name: Parse Passwall2 runtime nodes count
   ansible.builtin.set_fact:
-    openwrt_passwall2_nodes_count: "{{ (openwrt_passwall2_nodes_count_raw.stdout | regex_search('([0-9]+)', '\\1') | first | default('0')) | int }}"
+    openwrt_passwall2_nodes_count: >-
+      {{
+        (
+          (openwrt_passwall2_nodes_count_check | default({})).get('stdout', '')
+          | regex_findall('NODE_COUNT=([0-9]+)')
+          | first
+          | default('0')
+        ) | int
+      }}
   when: passwall2_enabled | bool
   changed_when: false
+  tags: [openwrt, passwall2]
+
+- name: Restore previous passwall2 config when subscription yielded no runtime nodes
+  ansible.builtin.raw: |
+    set -eu
+    backup_file="/tmp/passwall2.pre-ansible.conf"
+    if [ -f "${backup_file}" ]; then
+      cp "${backup_file}" /etc/config/passwall2
+      echo "RESTORED"
+    else
+      echo "NOCHANGE"
+    fi
+  when:
+    - passwall2_enabled | bool
+    - passwall2_require_nodes_for_enable | bool
+    - openwrt_passwall2_nodes_count | int == 0
+    - openwrt_passwall2_backup_nodes_count | int > 0
+  register: openwrt_passwall2_restore_from_backup
+  changed_when: "'RESTORED' in openwrt_passwall2_restore_from_backup.stdout"
+  failed_when: openwrt_passwall2_restore_from_backup.rc != 0
+  notify: Restart passwall2
+  tags: [openwrt, passwall2]
+
+- name: Recount Passwall2 runtime nodes after backup restore
+  ansible.builtin.raw: |
+    count="$(uci -q show passwall2 | sed -n 's/^passwall2\.\([^.]*\)=nodes$/\1/p' | while read node_id; do
+      proto="$(uci -q get passwall2.${node_id}.protocol || true)"
+      case "${proto}" in
+        ""|_*)
+          ;;
+        *)
+          echo "${node_id}"
+          ;;
+      esac
+    done | wc -l | tr -d ' ')"
+    echo "NODE_COUNT=${count}"
+  when:
+    - passwall2_enabled | bool
+    - openwrt_passwall2_restore_from_backup is defined
+    - openwrt_passwall2_restore_from_backup.changed | bool
+  register: openwrt_passwall2_nodes_count_after_restore
+  changed_when: false
+  failed_when: openwrt_passwall2_nodes_count_after_restore.rc != 0
+  tags: [openwrt, passwall2]
+
+- name: Update Passwall2 runtime nodes count after backup restore
+  ansible.builtin.set_fact:
+    openwrt_passwall2_nodes_count: >-
+      {{
+        (
+          openwrt_passwall2_nodes_count_after_restore.stdout
+          | default('', true)
+          | regex_findall('NODE_COUNT=([0-9]+)')
+          | first
+          | default(openwrt_passwall2_nodes_count | string)
+        ) | int
+      }}
+  when:
+    - passwall2_enabled | bool
+    - openwrt_passwall2_nodes_count_after_restore is defined
+    - openwrt_passwall2_nodes_count_after_restore.stdout is defined
+  changed_when: false
+  tags: [openwrt, passwall2]
+
+- name: Assert Passwall2 runtime nodes are present after sync/fallback
+  ansible.builtin.assert:
+    that:
+      - openwrt_passwall2_nodes_count | int > 0
+    fail_msg: >-
+      Passwall2 has no runtime nodes after subscription sync and fallback restore.
+      Check passwall2_subscribe_url reachability and subscription content.
+  when:
+    - passwall2_enabled | bool
+    - passwall2_require_nodes_for_enable | bool
+    - not ansible_check_mode
   tags: [openwrt, passwall2]
 
 - name: Disable Passwall2 global switch by default (safe mode)
   ansible.builtin.raw: |
     set -eu
-    current="$(uci -q get passwall2.global.enabled || echo 0)"
+    current="$(uci -q get passwall2.@global[0].enabled || echo 0)"
     if [ "${current}" = "0" ]; then
       echo "NOCHANGE"
     else
-      uci set passwall2.global.enabled='0'
+      uci set passwall2.@global[0].enabled='0'
       uci commit passwall2
       echo "CHANGED"
     fi
@@ -214,11 +515,11 @@
 - name: Enable Passwall2 global switch when nodes are present and auto-enable is on
   ansible.builtin.raw: |
     set -eu
-    current="$(uci -q get passwall2.global.enabled || echo 0)"
+    current="$(uci -q get passwall2.@global[0].enabled || echo 0)"
     if [ "${current}" = "1" ]; then
       echo "NOCHANGE"
     else
-      uci set passwall2.global.enabled='1'
+      uci set passwall2.@global[0].enabled='1'
       uci commit passwall2
       echo "CHANGED"
     fi

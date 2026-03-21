@@ -317,20 +317,29 @@ Workflow для мониторинговых smoke-проверок роутер
 
 Рекомендуемая последовательность:
 1. Обновите secret `OPENWRT_FLEET_CONFIG_B64`.
-2. Запустите `deploy-openwrt` с `mode=bootstrap` и `limit` на новые роутеры.
-3. Запустите `deploy-openwrt` с `mode=deploy` (сначала `check_mode=true`, затем `false`).
+2. Запустите `deploy-openwrt` с `mode=bootstrap`, `openwrt_profile=fresh` и `limit` на новые роутеры.
+3. Запустите `deploy-openwrt` с `mode=deploy`, `openwrt_profile=prod_update` (сначала `check_mode=true`, затем `false`).
 4. После проверки key-based доступа запустите `mode=lockdown`.
 5. Включите расписание/ручные запуски `monitor-openwrt-fleet`.
 
 WAN-профили во fleet (DHCP/static/PPPoE):
 - включите `features.feature_openwrt_wan=true` (global или per-host);
+- для `openwrt_profile=prod_update` обязательно включите `features.feature_openwrt_wan_apply_in_prod=true`;
 - задайте `wan.proto` и параметры провайдера per-host.
+
+Базовые managed network/firewall роли:
+- `features.feature_openwrt_network_core` — baseline `network` (LAN/loopback/WAN skeleton);
+- `features.feature_openwrt_firewall_core` — baseline `firewall` + fail-safe SSH (LAN + ZeroTier CIDR).
 
 Минимальные примеры:
 ```yaml
 defaults:
+  profile: prod_update
   features:
+    feature_openwrt_network_core: true
+    feature_openwrt_firewall_core: true
     feature_openwrt_wan: true
+    feature_openwrt_wan_apply_in_prod: true
   wan:
     proto: dhcp
     device: eth0

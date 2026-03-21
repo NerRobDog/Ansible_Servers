@@ -10,8 +10,13 @@ passwall2_subscribe_url: ""
 passwall2_probe_url: https://www.gstatic.com/generate_204
 passwall2_socks_port: 1070
 passwall2_profile_overrides: {}
-passwall2_auto_enable_when_nodes: false
+passwall2_acl_bypass_macs: []
+passwall2_dns_provider: quad9
+passwall2_auto_enable_when_nodes: true
 passwall2_require_nodes_for_enable: true
+passwall2_shunt_node_id: uOEn2cRl
+passwall2_balance_node_id: QA84CBXY
+passwall2_enforce_package_versions: true
 
 passwall2_geoip_url_v2ray: https://github.com/hydraponique/roscomvpn-geoip/releases/download/202510180601/geoip.dat
 passwall2_geosite_url_v2ray: https://github.com/hydraponique/roscomvpn-geosite/releases/download/202510180849/geosite.dat
@@ -28,16 +33,31 @@ passwall2_packages:
   - microsocks
   - naiveproxy
 
+passwall2_dns_profiles:
+  quad9:
+    remote_dns_protocol: doh
+    remote_dns: 9.9.9.9
+    remote_dns_detour: direct
+    remote_dns_doh: https://dns.quad9.net/dns-query
+    dns_hosts:
+      - dns.quad9.net 9.9.9.9
+      - dns11.quad9.net 149.112.112.112
+
 passwall2_profile_defaults:
   enabled: "0"
+  localhost_proxy: "0"
   acl_enable: "1"
   loglevel: error
   tcp_redir_ports: 22,25,53,143,465,587,853,993,995,80,443
   udp_redir_ports: 1:65535
-  remote_dns_doh: https://1.1.1.1/dns-query
+  remote_dns_protocol: doh
+  remote_dns: 9.9.9.9
+  remote_dns_detour: direct
+  remote_dns_doh: https://dns.quad9.net/dns-query
   dns_hosts:
-    - cloudflare-dns.com 1.1.1.1
-    - dns.google.com 8.8.8.8
+    - dns.quad9.net 9.9.9.9
+    - dns11.quad9.net 149.112.112.112
+  block_domains: []
   direct_domains:
     - geosite:private
     - geosite:category-ru
@@ -45,15 +65,25 @@ passwall2_profile_defaults:
     - geosite:apple
     - geosite:twitch
     - geosite:steam
-    - geosite:sony
-    - geosite:playstation
-    - geosite:category-games
+    - playstation.com
+    - store.playstation.com
+    - sony.com
   proxy_domains:
-    - geosite:tiktok
-    - geosite:signal
+    - soundcloud.com
+    - chat.openai.com
+    - openai.com
+    - x.ai
+    - netflix.com
+    - copilot.microsoft.com
+    - tiktok.com
+    - web.telegram.org
+    - telegram.org
+    - t.me
   ban_ru_domains:
-    - "#geosite:category-ban-ru"
-    - geosite:discord
-    - geosite:youtube
-  direct_ip_list: geoip:private
-  proxy_ip_list: "#geoip:proxy"
+    - youtube.com
+    - discord.com
+    - instagram.com
+    - rutracker.org
+  direct_ip_list: ""
+  proxy_ip_list: ""
+  acl_bypass_macs: []

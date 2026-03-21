@@ -39,11 +39,14 @@
 - `yusic_worker_rollback` — rollback воркера на backup image при failed smoke.
 - `custom_roles` — дополнительные локальные роли из `roles/`, задаются по хостам.
 - `openwrt_base` — базовая подготовка OpenWrt и bootstrap key.
+- `openwrt_network_core` — managed baseline секций `network` (LAN/loopback/WAN skeleton).
+- `openwrt_firewall_core` — managed baseline секций `firewall` + fail-safe SSH (LAN + ZeroTier CIDR).
 - `openwrt_wan` — managed настройка `network.wan` (DHCP/static/PPPoE).
 - `openwrt_rollback_guard` — авто-rollback guard с snapshot/watchdog/confirm.
 - `openwrt_zerotier` — join/config ZeroTier.
 - `openwrt_passwall2` — полностью managed `/etc/config/passwall2`.
 - `openwrt_homeproxy_cleanup` — удаление HomeProxy (миграция к Passwall2).
+- `openwrt_docker_runtime` — managed Docker runtime (пакеты/daemon/service, без destructive reset).
 - `openwrt_docker_stacks` — управляемые docker-compose стеки на OpenWrt.
 - `openwrt_monitoring_agent` — OpenWrt exporter + textfile probes.
 - `openwrt_ssh_lockdown` — отключение SSH password auth на OpenWrt.
@@ -91,6 +94,7 @@ Inputs (manual run):
 Inputs:
 - `environment` — GitHub Environment c OpenWrt fleet secrets.
 - `mode` — `bootstrap | deploy | lockdown`.
+- `openwrt_profile` — `prod_update | fresh` (default: `prod_update`).
 - `limit` — `all` или alias-хостов через запятую.
 - `check_mode` — dry-run.
 - `run_smoke` — post-deploy smoke-проверки.
@@ -100,6 +104,11 @@ Rollback-контракт OpenWrt:
 - в `deploy/lockdown` (без `check_mode`) guard автоматически вооружается;
 - после успешного smoke workflow подтверждает guard;
 - если job падает до confirm, watchdog выполняет rollback и reboot роутера.
+
+OpenWrt profile-контракт:
+- `fresh` — первичная раскатка после чистой установки;
+- `prod_update` — безопасный режим обновлений;
+- WAN изменения в `prod_update` блокируются, если не включен host feature `feature_openwrt_wan_apply_in_prod=true`.
 
 ### OpenWrt monitoring workflow
 
@@ -143,6 +152,8 @@ Rollback-контракт OpenWrt:
 Feature flags:
 - `feature_tailscale`: общий флаг для server и OpenWrt контуров (по умолчанию `false`).
 - `feature_openwrt_zerotier` и `feature_tailscale` могут быть включены одновременно.
+- `feature_openwrt_network_core`, `feature_openwrt_firewall_core`: базовые managed network/firewall роли.
+- `feature_openwrt_docker_runtime`, `feature_openwrt_docker_stacks`: runtime/stacks управление Docker на OpenWrt.
 
 Environment Variables:
 - `RW_PANEL_API_BASE_URL` — базовый URL панели (например, `https://panel.example.com`).
@@ -190,6 +201,7 @@ scripts/deploy-openwrt-local.sh \
   --runtime-vars .ansible/runtime/openwrt_runtime_vars.json \
   --bootstrap-map .ansible/runtime/openwrt_bootstrap_map.json \
   --mode deploy \
+  --profile prod_update \
   --limit wrt_de,wrt_nl
 ```
 

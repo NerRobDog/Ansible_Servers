@@ -1,0 +1,54 @@
+config global_haproxy
+	option balancing_enable '0'
+
+config global_delay
+	option start_daemon '1'
+	option start_delay '60'
+
+config global_forwarding
+	option tcp_no_redir_ports 'disable'
+	option udp_no_redir_ports 'disable'
+	option tcp_redir_ports '{{ passwall2_profile_effective.tcp_redir_ports }}'
+	option udp_redir_ports '{{ passwall2_profile_effective.udp_redir_ports }}'
+	option accept_icmp '0'
+	option use_nft '1'
+	option tcp_proxy_way 'redirect'
+	option ipv6_tproxy '0'
+
+config global_xray
+	option sniffing_override_dest '0'
+
+config global_other
+	option auto_detection_time '0'
+
+config global_rules
+	option geosite_update '1'
+	option geoip_update '1'
+	option v2ray_location_asset '/usr/share/v2ray/'
+	option geoip_url '{{ passwall2_geoip_url_v2ray }}'
+	option geosite_url '{{ passwall2_geosite_url_v2ray }}'
+	option enable_geoview '0'
+	option auto_update '1'
+	option week_update '7'
+	option time_update '2'
+
+config global_app
+	option xray_file '/usr/bin/xray'
+	option hysteria_file '/usr/bin/hysteria'
+	option sing_box_file '/usr/bin/sing-box'
+
+config global_subscribe
+	option filter_keyword_mode '1'
+	option ss_type 'shadowsocks-rust'
+	option trojan_type 'sing-box'
+	option vmess_type 'xray'
+	option vless_type 'xray'
+	option hysteria2_type 'sing-box'
+
+config global_singbox
+	option sniff_override_destination '0'
+	option geoip_path '/usr/share/singbox/geoip.db'
+	option geoip_url '{{ passwall2_geoip_url_singbox }}'
+	option geosite_path '/usr/share/singbox/geosite.db'
+	option geosite_url '{{ passwall2_geosite_url_singbox }}'
+

@@ -1,0 +1,69 @@
+---
+- name: Validate docker runtime inputs
+  ansible.builtin.assert:
+    that:
+      - openwrt_docker_runtime_packages is iterable
+      - openwrt_docker_runtime_packages is not string
+      - openwrt_docker_runtime_daemon_config is mapping
+    fail_msg: "Invalid docker runtime settings."
+  tags: [openwrt, docker]
+
+- name: Install docker runtime packages
+  ansible.builtin.raw: |
+    set -eu
+    missing=""
+    for pkg in {{ openwrt_docker_runtime_packages | join(' ') }}; do
+      opkg list-installed | grep -q "^${pkg} " || missing="${missing} ${pkg}"
+    done
+
+    if [ -n "${missing}" ]; then
+      opkg update >/dev/null 2>&1 || opkg update
+      opkg install ${missing}
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  when: openwrt_docker_manage_runtime | bool
+  register: openwrt_docker_runtime_install
+  changed_when: "'CHANGED' in openwrt_docker_runtime_install.stdout"
+  failed_when: openwrt_docker_runtime_install.rc != 0
+  tags: [openwrt, docker]
+
+- name: Ensure docker daemon config parent directory exists
+  ansible.builtin.raw: "mkdir -p $(dirname {{ openwrt_docker_runtime_daemon_config_path }})"
+  when:
+    - openwrt_docker_manage_runtime | bool
+    - openwrt_docker_runtime_manage_daemon_config | bool
+  changed_when: false
+  tags: [openwrt, docker]
+
+- name: Write docker daemon config
+  ansible.builtin.raw: |
+    set -eu
+    cfg='{{ openwrt_docker_runtime_daemon_config_path }}'
+    old_sum="$(md5sum "${cfg}" 2>/dev/null | awk '{print $1}')"
+    cat <<'EOF_DAEMON' > "${cfg}"
+    {{ openwrt_docker_runtime_daemon_config | to_nice_json }}
+    EOF_DAEMON
+    new_sum="$(md5sum "${cfg}" | awk '{print $1}')"
+    if [ "${old_sum}" != "${new_sum}" ]; then
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  when:
+    - openwrt_docker_manage_runtime | bool
+    - openwrt_docker_runtime_manage_daemon_config | bool
+  register: openwrt_docker_runtime_daemon
+  changed_when: "'CHANGED' in openwrt_docker_runtime_daemon.stdout"
+  failed_when: openwrt_docker_runtime_daemon.rc != 0
+  tags: [openwrt, docker]
+
+- name: Enable and start dockerd
+  ansible.builtin.raw: |
+    /etc/init.d/dockerd enable >/dev/null 2>&1 || true
+    /etc/init.d/dockerd start >/dev/null 2>&1 || true
+    echo "OK"
+  when: openwrt_docker_manage_runtime | bool
+  changed_when: false
+  tags: [openwrt, docker]

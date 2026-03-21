@@ -17,6 +17,14 @@ on:
           - bootstrap
           - deploy
           - lockdown
+      openwrt_profile:
+        description: OpenWrt configuration profile
+        required: true
+        type: choice
+        default: prod_update
+        options:
+          - prod_update
+          - fresh
       limit:
         description: Host aliases list (comma-separated) or all
         required: false
@@ -248,6 +256,8 @@ jobs:
           done
 
       - name: Syntax check
+        env:
+          OPENWRT_PROFILE: ${{ inputs.openwrt_profile }}
         run: |
           cmd=(
             ansible-playbook
@@ -255,6 +265,7 @@ jobs:
             playbook.openwrt.yml
             --syntax-check
             --extra-vars @.ansible/runtime/openwrt_runtime_vars.json
+            --extra-vars "openwrt_profile=${OPENWRT_PROFILE}"
           )
           if [[ -f .ansible/runtime/vault_pass.txt ]]; then
             cmd+=(--vault-id "secrets@.ansible/runtime/vault_pass.txt")
@@ -266,6 +277,7 @@ jobs:
           LIMIT: ${{ inputs.limit }}
           CHECK_MODE: ${{ inputs.check_mode }}
           TAGS: ${{ inputs.tags }}
+          OPENWRT_PROFILE: ${{ inputs.openwrt_profile }}
           CI_DEPLOY_PUBLIC_KEY: ${{ steps.ssh_key.outputs.public_key }}
           TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
@@ -275,6 +287,7 @@ jobs:
             playbook.openwrt.yml
             --limit "${LIMIT}"
             --extra-vars @.ansible/runtime/openwrt_runtime_vars.json
+            --extra-vars "openwrt_profile=${OPENWRT_PROFILE}"
           )
           if [[ -n "${TAGS}" ]]; then
             cmd+=(--tags "${TAGS}")

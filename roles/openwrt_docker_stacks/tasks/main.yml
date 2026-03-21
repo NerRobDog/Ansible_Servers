@@ -7,15 +7,6 @@
     fail_msg: "openwrt_docker_stacks must be a list"
   tags: [openwrt, docker]
 
-- name: Enable and start dockerd
-  ansible.builtin.raw: |
-    /etc/init.d/dockerd enable >/dev/null 2>&1 || true
-    /etc/init.d/dockerd start >/dev/null 2>&1 || true
-    echo "OK"
-  when: openwrt_docker_manage_runtime | bool
-  changed_when: false
-  tags: [openwrt, docker]
-
 - name: Ensure docker stacks root directory exists
   ansible.builtin.raw: "mkdir -p {{ openwrt_docker_stacks_root }}"
   changed_when: false

@@ -55,7 +55,6 @@
       ensure_delete network.wan.username
       ensure_delete network.wan.password
       ensure_delete network.wan.ipv6
-      ensure_delete network.wan.dns
     fi
 
     if [ "$proto" = "static" ]; then
@@ -69,17 +68,6 @@
       ensure_delete network.wan.username
       ensure_delete network.wan.password
       ensure_delete network.wan.ipv6
-      current_dns="$(uci -q get network.wan.dns 2>/dev/null | sed 's/[[:space:]]*$//')"
-      desired_dns='{{ openwrt_wan_dns | map("trim") | reject("equalto", "") | join(" ") }}'
-      if [ "$current_dns" != "$desired_dns" ]; then
-        ensure_delete network.wan.dns
-        {% for dns in openwrt_wan_dns %}
-        {% if dns | trim | length > 0 %}
-        uci add_list network.wan.dns='{{ dns }}'
-        {% endif %}
-        {% endfor %}
-        changed='1'
-      fi
     fi
 
     if [ "$proto" = "pppoe" ]; then
@@ -89,6 +77,23 @@
       ensure_delete network.wan.ipaddr
       ensure_delete network.wan.netmask
       ensure_delete network.wan.gateway
+    fi
+
+    desired_dns='{{ openwrt_wan_dns | map("trim") | reject("equalto", "") | join(" ") }}'
+    current_dns="$(uci -q get network.wan.dns 2>/dev/null | sed 's/[[:space:]]*$//')"
+    if [ -n "$desired_dns" ]; then
+      ensure_set network.wan.peerdns '0'
+      if [ "$current_dns" != "$desired_dns" ]; then
+        ensure_delete network.wan.dns
+        {% for dns in openwrt_wan_dns %}
+        {% if dns | trim | length > 0 %}
+        uci add_list network.wan.dns='{{ dns }}'
+        {% endif %}
+        {% endfor %}
+        changed='1'
+      fi
+    else
+      ensure_set network.wan.peerdns '1'
       ensure_delete network.wan.dns
     fi
 

@@ -1,0 +1,16 @@
+config subscribe_list
+	option remark 'Watchdog'
+	option url '{{ passwall2_subscribe_url }}'
+	option allowInsecure '0'
+	option filter_keyword_mode '5'
+	option ss_type 'global'
+	option trojan_type 'global'
+	option vmess_type 'global'
+	option vless_type 'global'
+	option hysteria2_type 'global'
+	option domain_strategy 'global'
+	option auto_update '1'
+	option week_update '8'
+	option interval_update '1'
+	option user_agent 'Passwall2/OpenWrt'
+

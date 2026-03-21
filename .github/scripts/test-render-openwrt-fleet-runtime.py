@@ -124,12 +124,21 @@ def test_valid_json_input() -> None:
                 "deploy_user": "root",
                 "bootstrap": {"username": "root", "password": "pw"},
                 "features": {"feature_tailscale": True},
-                "passwall2": {"subscribe_url": "https://example.invalid/2"},
+                "passwall2": {
+                    "subscribe_url": "https://example.invalid/2",
+                    "acl_bypass_macs": ["AA:BB:CC:DD:EE:FF"],
+                },
+                "profile": "fresh",
                 "wan": {
                     "proto": "pppoe",
                     "device": "eth1",
                     "pppoe_username": "user",
                     "pppoe_password": "pass",
+                },
+                "docker": {
+                    "runtime_packages": ["dockerd", "docker"],
+                    "manage_daemon_config": True,
+                    "daemon_config": {"live-restore": True},
                 },
             }
         }
@@ -152,6 +161,18 @@ def test_valid_json_input() -> None:
     assert_true(
         runtime_vars["openwrt_runtime_host_vars"]["wrt_2"]["openwrt_wan_device"] == "eth1",
         "openwrt_wan_device not exported to runtime host vars",
+    )
+    assert_true(
+        runtime_vars["openwrt_fleet_hosts"]["wrt_2"]["profile"] == "fresh",
+        "profile from JSON not applied",
+    )
+    assert_true(
+        runtime_vars["openwrt_runtime_host_vars"]["wrt_2"]["passwall2_acl_bypass_macs"] == ["AA:BB:CC:DD:EE:FF"],
+        "passwall2_acl_bypass_macs not exported to runtime host vars",
+    )
+    assert_true(
+        runtime_vars["openwrt_runtime_host_vars"]["wrt_2"]["openwrt_docker_runtime_manage_daemon_config"] is True,
+        "openwrt_docker_runtime_manage_daemon_config not exported",
     )
 
 

@@ -6,6 +6,7 @@
 # - passwall2 is fully managed; usually only subscribe_url differs per host
 
 defaults:
+  profile: prod_update
   deploy_user: root
   ansible_port: 22
   bootstrap:
@@ -18,11 +19,15 @@ defaults:
     ssh_private_key_file: "~/.ssh/id_ed25519"
   features:
     feature_openwrt_base: true
+    feature_openwrt_network_core: false
+    feature_openwrt_firewall_core: false
     feature_openwrt_wan: true
+    feature_openwrt_wan_apply_in_prod: false
     feature_openwrt_zerotier: true
     feature_tailscale: false
     feature_openwrt_passwall2: true
     feature_openwrt_homeproxy_cleanup: true
+    feature_openwrt_docker_runtime: true
     feature_openwrt_docker_stacks: true
     feature_openwrt_monitoring_agent: true
     feature_openwrt_ssh_lockdown: false
@@ -31,18 +36,32 @@ defaults:
     network_id: "a84ac5c10a8906ee"
     manage_secret: false
     secret: ""
+    src_cidr: 172.16.0.0/12
+  network:
+    lan_device: br-lan
+    lan_ipaddr: 192.168.1.1
+    lan_netmask: 255.255.255.0
+    lan_ip6assign: "60"
+    ula_prefix: ""
   passwall2:
     enabled: true
     subscribe_url: ""
     probe_url: "https://www.gstatic.com/generate_204"
     socks_port: 1070
     profile_overrides: {}
+    acl_bypass_macs: []
   monitoring:
     openwrt_monitoring_enabled: true
     openwrt_node_exporter_port: 9100
     openwrt_probe_interval_minutes: 1
   docker:
     manage_runtime: true
+    runtime_packages:
+      - dockerd
+      - docker
+      - docker-compose
+    manage_daemon_config: false
+    daemon_config: {}
     compose_command: docker-compose
     stacks: []
   custom_roles: []
@@ -60,6 +79,7 @@ defaults:
 
 hosts:
   wrt_de:
+    profile: fresh
     access:
       lan_host: 192.168.88.1
       zt_host: 172.23.11.10
@@ -76,6 +96,8 @@ hosts:
       pppoe_ipv6: auto
     passwall2:
       subscribe_url: "https://provider.example/sub/de"
+      acl_bypass_macs:
+        - "AA:BB:CC:DD:EE:FF"
     docker:
       stacks:
         - name: dns-stack
@@ -88,6 +110,7 @@ hosts:
     custom_roles: []
 
   wrt_nl:
+    profile: prod_update
     access:
       lan_host: 192.168.89.1
       zt_host: 172.23.11.11
@@ -109,5 +132,8 @@ hosts:
       subscribe_url: "https://provider.example/sub/nl"
     features:
       # Example: this host runs base/zerotier/passwall2/monitoring only.
+      feature_openwrt_network_core: true
+      feature_openwrt_firewall_core: true
+      feature_openwrt_wan_apply_in_prod: true
       feature_openwrt_docker_stacks: false
     custom_roles: []

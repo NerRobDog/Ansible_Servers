@@ -113,13 +113,18 @@ ssh_lockdown_enabled: false
 fleet_mode: deploy
 fleet_hosts: {}
 openwrt_fleet_hosts: {}
+openwrt_profile: prod_update
 
 # OpenWrt fleet defaults
 feature_openwrt_base: true
+feature_openwrt_network_core: false
+feature_openwrt_firewall_core: false
 feature_openwrt_wan: false
+feature_openwrt_wan_apply_in_prod: false
 feature_openwrt_zerotier: true
 feature_openwrt_passwall2: true
 feature_openwrt_homeproxy_cleanup: true
+feature_openwrt_docker_runtime: true
 feature_openwrt_docker_stacks: true
 feature_openwrt_monitoring_agent: true
 feature_openwrt_ssh_lockdown: false
@@ -139,10 +144,19 @@ openwrt_wan_device: eth0
 openwrt_wan_ipaddr: ""
 openwrt_wan_netmask: ""
 openwrt_wan_gateway: ""
-openwrt_wan_dns: []
+openwrt_wan_dns:
+  - 9.9.9.9
+  - 149.112.112.112
 openwrt_wan_pppoe_username: ""
 openwrt_wan_pppoe_password: ""
 openwrt_wan_pppoe_ipv6: auto
+
+openwrt_network_lan_device: br-lan
+openwrt_network_lan_ipaddr: 192.168.1.1
+openwrt_network_lan_netmask: 255.255.255.0
+openwrt_network_lan_ip6assign: "60"
+openwrt_network_ula_prefix: ""
+openwrt_network_manage_wan_baseline: true
 
 zerotier_enabled: true
 zerotier_package: zerotier
@@ -162,6 +176,8 @@ passwall2_subscribe_url: ""
 passwall2_probe_url: https://www.gstatic.com/generate_204
 passwall2_socks_port: 1070
 passwall2_profile_overrides: {}
+passwall2_acl_bypass_macs: []
+passwall2_dns_provider: quad9
 passwall2_geoip_url_v2ray: https://github.com/hydraponique/roscomvpn-geoip/releases/download/202510180601/geoip.dat
 passwall2_geosite_url_v2ray: https://github.com/hydraponique/roscomvpn-geosite/releases/download/202510180849/geosite.dat
 passwall2_geoip_url_singbox: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.db
@@ -176,13 +192,33 @@ passwall2_packages:
   - microsocks
   - naiveproxy
 
+passwall2_dns_profiles:
+  quad9:
+    remote_dns_protocol: doh
+    remote_dns: 9.9.9.9
+    remote_dns_detour: direct
+    remote_dns_doh: https://dns.quad9.net/dns-query
+    dns_hosts:
+      - dns.quad9.net 9.9.9.9
+      - dns11.quad9.net 149.112.112.112
+
 openwrt_homeproxy_cleanup_packages:
   - luci-app-homeproxy
   - homeproxy
 
 openwrt_docker_manage_runtime: true
+openwrt_docker_runtime_packages:
+  - dockerd
+  - docker
+  - docker-compose
+openwrt_docker_runtime_manage_daemon_config: false
+openwrt_docker_runtime_daemon_config: {}
+openwrt_docker_runtime_daemon_config_path: /etc/docker/daemon.json
 openwrt_docker_compose_command: docker-compose
 openwrt_docker_stacks: []
+
+openwrt_firewall_allow_zerotier_ssh: true
+openwrt_firewall_zerotier_src_cidr: 172.16.0.0/12
 
 openwrt_monitoring_enabled: true
 openwrt_node_exporter_port: 9100

@@ -1,0 +1,24 @@
+{% if passwall2_profile_effective.block_domains | default([]) | length > 0 %}
+config shunt_rules 'Block'
+	option remarks 'Block'
+	option network 'tcp,udp'
+	option domain_list '{{ passwall2_profile_effective.block_domains | join("\n") }}'
+{% endif %}
+
+config shunt_rules 'Direct'
+	option remarks 'Direct'
+	option network 'tcp,udp'
+	option domain_list '{{ passwall2_profile_effective.direct_domains | join("\n") }}'
+	option ip_list '{{ passwall2_profile_effective.direct_ip_list }}'
+
+config shunt_rules 'Ban_RU'
+	option remarks 'Ban_RU'
+	option network 'tcp,udp'
+	option domain_list '{{ passwall2_profile_effective.ban_ru_domains | join("\n") }}'
+
+config shunt_rules 'Proxy'
+	option remarks 'Proxy'
+	option network 'tcp,udp'
+	option domain_list '{{ passwall2_profile_effective.proxy_domains | join("\n") }}'
+	option ip_list '{{ passwall2_profile_effective.proxy_ip_list }}'
+

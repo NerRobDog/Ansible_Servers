@@ -9,6 +9,7 @@ runtime_vars=""
 bootstrap_map=""
 limit="all"
 mode="deploy"
+profile="prod_update"
 check_mode="false"
 tags=""
 vault_id=""
@@ -22,6 +23,8 @@ Options:
   --bootstrap-map <path>      Runtime bootstrap map from renderer
   --mode <bootstrap|deploy|lockdown>
                               Fleet mode (default: deploy)
+  --profile <fresh|prod_update>
+                              OpenWrt profile (default: prod_update)
   --check-mode <true|false>   Run ansible in check mode (default: false)
   --tags <tag1,tag2>          Optional ansible tags
   --vault-id <value>          Optional --vault-id argument for ansible-playbook
@@ -55,6 +58,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --mode)
       mode="${2:-}"
+      shift 2
+      ;;
+    --profile)
+      profile="${2:-}"
       shift 2
       ;;
     --check-mode)
@@ -104,6 +111,11 @@ fi
 
 if [[ "${mode}" != "bootstrap" && "${mode}" != "deploy" && "${mode}" != "lockdown" ]]; then
   echo "--mode must be bootstrap|deploy|lockdown" >&2
+  exit 1
+fi
+
+if [[ "${profile}" != "fresh" && "${profile}" != "prod_update" ]]; then
+  echo "--profile must be fresh|prod_update" >&2
   exit 1
 fi
 
@@ -230,6 +242,7 @@ cmd=(
   --limit "${limit}"
   --extra-vars "@${runtime_vars}"
   --extra-vars "fleet_mode=${mode}"
+  --extra-vars "openwrt_profile=${profile}"
 )
 
 if [[ -n "${tags}" ]]; then
