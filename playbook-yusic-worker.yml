@@ -169,6 +169,15 @@
           when: (item.ssh.private_key | default('') | length > 0) or (yusic_worker_default_private_key | default('') | length > 0)
           no_log: true
 
+        - name: Validate temporary worker SSH key format
+          ansible.builtin.command:
+            cmd: "ssh-keygen -l -f {{ yusic_worker_relay_stage_dir_effective }}/{{ item.alias }}/id_worker"
+          loop: "{{ yusic_selected_workers }}"
+          loop_control:
+            label: "{{ item.alias }}"
+          when: (item.ssh.private_key | default('') | length > 0) or (yusic_worker_default_private_key | default('') | length > 0)
+          changed_when: false
+
         - name: Deploy/update workers and smoke with rollback on failure
           when: worker_mode_effective in ['deploy', 'update']
           block:
