@@ -3,12 +3,12 @@
   ansible.builtin.shell: |
     set -euo pipefail
     ssh_args=(
-      -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking }}
-      -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds }}
+      -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking | default('yes') }}
+      -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds | default(15) }}
       -p {{ yusic_worker.ssh.port }}
     )
-    if [ -f "{{ yusic_worker_relay_stage_dir }}/{{ yusic_worker.alias }}/id_worker" ]; then
-      ssh_args+=(-i "{{ yusic_worker_relay_stage_dir }}/{{ yusic_worker.alias }}/id_worker")
+    if [ -f "{{ yusic_worker_relay_stage_dir | default('/opt/yusic-worker-relay/stage') }}/{{ yusic_worker.alias }}/id_worker" ]; then
+      ssh_args+=(-i "{{ yusic_worker_relay_stage_dir | default('/opt/yusic-worker-relay/stage') }}/{{ yusic_worker.alias }}/id_worker")
     fi
     target="{{ yusic_worker.ssh.user }}@{{ yusic_worker.ssh.host }}"
     if [ -n "{{ yusic_worker.ssh.password | default('') }}" ]; then
@@ -27,12 +27,12 @@
   ansible.builtin.shell: |
     set -euo pipefail
     ssh_args=(
-      -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking }}
-      -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds }}
+      -o StrictHostKeyChecking={{ yusic_worker_ssh_strict_host_key_checking | default('yes') }}
+      -o ConnectTimeout={{ yusic_worker_ssh_connect_timeout_seconds | default(15) }}
       -p {{ yusic_worker.ssh.port }}
     )
-    if [ -f "{{ yusic_worker_relay_stage_dir }}/{{ yusic_worker.alias }}/id_worker" ]; then
-      ssh_args+=(-i "{{ yusic_worker_relay_stage_dir }}/{{ yusic_worker.alias }}/id_worker")
+    if [ -f "{{ yusic_worker_relay_stage_dir | default('/opt/yusic-worker-relay/stage') }}/{{ yusic_worker.alias }}/id_worker" ]; then
+      ssh_args+=(-i "{{ yusic_worker_relay_stage_dir | default('/opt/yusic-worker-relay/stage') }}/{{ yusic_worker.alias }}/id_worker")
     fi
     target="{{ yusic_worker.ssh.user }}@{{ yusic_worker.ssh.host }}"
     selfcheck_cmd={{ yusic_worker.selfcheck_command | quote }}

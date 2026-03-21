@@ -1,4 +1,1 @@
 ---
-yusic_worker_ssh_connect_timeout_seconds: 15
-yusic_worker_ssh_strict_host_key_checking: "yes"
-yusic_worker_relay_stage_dir: /opt/yusic-worker-relay/stage

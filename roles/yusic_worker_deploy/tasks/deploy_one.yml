@@ -78,9 +78,15 @@
   ansible.builtin.command: >-
     skopeo copy
     --override-arch {{ yusic_worker.arch }}
+    {% if yusic_worker_skopeo_authfile | default('') | length > 0 -%}
+    --src-authfile {{ yusic_worker_skopeo_authfile }}
+    {%- elif yusic_worker_skopeo_src_creds | default('') | length > 0 -%}
+    --src-creds {{ yusic_worker_skopeo_src_creds }}
+    {%- endif %}
     docker://{{ yusic_worker_image_ref }}
     docker-archive:{{ yusic_worker_archive_path }}:{{ yusic_worker_image_ref }}
   changed_when: true
+  no_log: "{{ (yusic_worker_skopeo_authfile | default('') | length > 0) or (yusic_worker_skopeo_src_creds | default('') | length > 0) }}"
 
 - name: Ensure remote worker workdir exists
   ansible.builtin.shell: |
@@ -185,3 +191,30 @@
     executable: /bin/bash
   changed_when: true
   no_log: true
+
+- name: Validate archive retention value
+  ansible.builtin.assert:
+    that:
+      - (yusic_worker_archive_retain | string) is regex('^[0-9]+$')
+    fail_msg: "yusic_worker_archive_retain must be a non-negative integer."
+
+- name: Find worker image archives on relay
+  ansible.builtin.find:
+    paths: "{{ yusic_worker_relay_archive_dir }}"
+    patterns: "{{ yusic_worker.alias }}-*.tar"
+    file_type: file
+  register: yusic_worker_archive_files
+  changed_when: false
+
+- name: Prune old worker image archives on relay
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: >-
+    {{
+      (
+        yusic_worker_archive_files.files
+        | sort(attribute='mtime', reverse=True)
+      )[yusic_worker_archive_retain | int:]
+    }}
+  when: yusic_worker_archive_files.matched | int > (yusic_worker_archive_retain | int)

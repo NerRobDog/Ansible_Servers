@@ -180,7 +180,7 @@
               ssh_args+=(-i "{{ yusic_worker_relay_stage_dir_effective }}/{{ yusic_worker.alias }}/id_worker")
             fi
             target="{{ yusic_worker.ssh.user }}@{{ yusic_worker.ssh.host }}"
-            remote_cmd="set -euo pipefail; docker --version >/dev/null;"
+            remote_cmd="set -euo pipefail; docker --version >/dev/null; docker compose version >/dev/null;"
             remote_cmd="${remote_cmd} if [ ! -d '{{ yusic_worker.workdir }}' ]; then"
             remote_cmd="${remote_cmd} mkdir -p '{{ yusic_worker.workdir }}';"
             remote_cmd="${remote_cmd} echo __WORKDIR_CREATED__;"
