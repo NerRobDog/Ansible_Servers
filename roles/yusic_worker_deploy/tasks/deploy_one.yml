@@ -117,7 +117,7 @@
   args:
     executable: /bin/bash
   changed_when: false
-  no_log: true
+  no_log: false
 
 - name: Upload image archive and compose assets to worker
   ansible.builtin.shell: |
