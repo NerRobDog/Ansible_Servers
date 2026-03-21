@@ -92,6 +92,11 @@
                 (yusic_worker_relay_root_dir | default('/opt/yusic-worker-relay')) ~ '/stage'
               )
           }}
+      changed_when: false
+      tags: [always]
+
+    - name: Resolve relay known_hosts file path
+      ansible.builtin.set_fact:
         yusic_worker_known_hosts_path: "{{ yusic_worker_relay_stage_dir_effective ~ '/known_hosts' }}"
       changed_when: false
       tags: [always]
