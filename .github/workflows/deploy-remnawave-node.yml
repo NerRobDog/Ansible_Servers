@@ -382,14 +382,7 @@ jobs:
             cmd+=(--extra-vars "worker_run_smoke=${RUN_SMOKE}")
             if [[ -f "${HOME}/.ssh/id_ed25519" ]]; then
               worker_ssh_vars_file=".ansible/runtime/yusic_worker_ssh_auth.json"
-              python3 - <<'PY'
-import json
-from pathlib import Path
-key = Path.home().joinpath(".ssh", "id_ed25519").read_text()
-Path(".ansible/runtime/yusic_worker_ssh_auth.json").write_text(
-    json.dumps({"yusic_worker_default_private_key": key})
-)
-PY
+              python3 -c 'import json, pathlib; key = pathlib.Path.home().joinpath(".ssh", "id_ed25519").read_text(); pathlib.Path(".ansible/runtime/yusic_worker_ssh_auth.json").write_text(json.dumps({"yusic_worker_default_private_key": key}))'
               chmod 600 "${worker_ssh_vars_file}"
               cmd+=(--extra-vars "@${worker_ssh_vars_file}")
             fi
