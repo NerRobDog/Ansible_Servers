@@ -37,6 +37,9 @@ jobs:
       - name: Fleet renderer contract tests
         run: python .github/scripts/test-render-fleet-runtime.py
 
+      - name: OpenWrt collector contract tests
+        run: python .github/scripts/test-collect-openwrt-host-config.py
+
       - name: OpenWrt fleet renderer contract tests
         run: python .github/scripts/test-render-openwrt-fleet-runtime.py
 

@@ -171,6 +171,7 @@ python3 -m pip install -r requirements.txt
 mkdir -p .ansible/tmp
 python .github/scripts/test-render-fleet-runtime.py
 python .github/scripts/test-render-openwrt-fleet-runtime.py
+python .github/scripts/test-collect-openwrt-host-config.py
 ANSIBLE_LOCAL_TEMP=.ansible/tmp ANSIBLE_REMOTE_TEMP=.ansible/tmp ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
 ANSIBLE_LOCAL_TEMP=.ansible/tmp ANSIBLE_REMOTE_TEMP=.ansible/tmp ansible-playbook -i hosts.example.ini playbook.openwrt.yml --syntax-check
 ansible-lint playbook.yml playbook.openwrt.yml roles
@@ -207,6 +208,26 @@ scripts/deploy-openwrt-local.sh \
 
 Скрипт выполняет `deploy -> smoke -> confirm rollback guard`.
 Прямой `ansible-playbook playbook.openwrt.yml` допустим для диагностики, но не даёт полного rollback-контракта.
+
+## Onboard unmanaged OpenWrt (collector)
+
+Если роутер ещё не описан во fleet, снимите его текущий managed-срез через SSH:
+
+```bash
+.github/scripts/collect-openwrt-host-config.py \
+  --alias wrt_new \
+  --host 172.23.10.50 \
+  --user root \
+  --key-file ~/.ssh/ansible_actions \
+  --proxy-jump aluva-zt \
+  --yaml-out .ansible/runtime/wrt_new.host.yml \
+  --json-out .ansible/runtime/wrt_new.report.json
+```
+
+Что дальше:
+- вставьте block из `.ansible/runtime/wrt_new.host.yml` в `hosts:` вашего `fleet.openwrt.yml`;
+- проверьте/при необходимости поправьте secrets (PPPoE, subscribe_url и т.д.);
+- обновите `OPENWRT_FLEET_CONFIG_B64` и сделайте dry-run (`check_mode=true`) перед apply.
 
 ## Быстрый operational flow
 

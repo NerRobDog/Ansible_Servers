@@ -322,6 +322,22 @@ Workflow для мониторинговых smoke-проверок роутер
 4. После проверки key-based доступа запустите `mode=lockdown`.
 5. Включите расписание/ручные запуски `monitor-openwrt-fleet`.
 
+Onboarding unmanaged OpenWrt (через collector):
+1. Снимите текущий managed-срез роутера:
+   ```bash
+   .github/scripts/collect-openwrt-host-config.py \
+     --alias wrt_new \
+     --host 172.23.10.50 \
+     --user root \
+     --key-file ~/.ssh/ansible_actions \
+     --host-key-check accept-new \
+     --yaml-out .ansible/runtime/wrt_new.host.yml \
+     --json-out .ansible/runtime/wrt_new.report.json
+   ```
+2. Вставьте block из `.ansible/runtime/wrt_new.host.yml` под `hosts:` в вашем `fleet.openwrt.yml`.
+3. Проверьте секреты в host block (PPPoE/passwall2 subscribe) перед загрузкой в `OPENWRT_FLEET_CONFIG_B64`.
+4. Запустите `deploy-openwrt` сначала с `check_mode=true`, затем `check_mode=false`.
+
 WAN-профили во fleet (DHCP/static/PPPoE):
 - включите `features.feature_openwrt_wan=true` (global или per-host);
 - для `openwrt_profile=prod_update` обязательно включите `features.feature_openwrt_wan_apply_in_prod=true`;
