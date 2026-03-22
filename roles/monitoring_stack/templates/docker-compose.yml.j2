@@ -1,0 +1,78 @@
+services:
+  prometheus:
+    image: {{ monitoring_stack_prometheus_image }}
+    container_name: monitoring-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time={{ monitoring_stack_retention_days }}d
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_prometheus_port }}:9090"
+    restart: unless-stopped
+
+  alertmanager:
+    image: {{ monitoring_stack_alertmanager_image }}
+    container_name: monitoring-alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager/templates:/etc/alertmanager/templates:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_alertmanager_port }}:9093"
+    restart: unless-stopped
+
+  grafana:
+    image: {{ monitoring_stack_grafana_image }}
+    container_name: monitoring-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER={{ monitoring_stack_grafana_admin_user }}
+      - GF_SECURITY_ADMIN_PASSWORD={{ monitoring_stack_grafana_admin_password }}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_grafana_port }}:3000"
+    restart: unless-stopped
+
+  loki:
+    image: {{ monitoring_stack_loki_image }}
+    container_name: monitoring-loki
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - ./loki/config.yml:/etc/loki/config.yml:ro
+      - loki_data:/loki
+    ports:
+      - "{{ monitoring_stack_loki_ingest_bind_address }}:{{ monitoring_stack_loki_port }}:3100"
+    restart: unless-stopped
+
+  promtail:
+    image: {{ monitoring_stack_promtail_image }}
+    container_name: monitoring-promtail
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./promtail/config.yml:/etc/promtail/config.yml:ro
+      - /var/log:/var/log:ro
+      - /var/log/journal:/var/log/journal:ro
+      - /run/log/journal:/run/log/journal:ro
+      - /etc/machine-id:/etc/machine-id:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:
+  loki_data:

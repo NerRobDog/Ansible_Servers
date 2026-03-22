@@ -1,0 +1,348 @@
+---
+- name: Validate monitoring agent config
+  ansible.builtin.assert:
+    that:
+      - monitoring_agent_bind_address | trim | length > 0
+      - (monitoring_agent_node_exporter_port | int) > 0
+      - (monitoring_agent_node_exporter_port | int) < 65536
+      - (monitoring_agent_cadvisor_port | int) > 0
+      - (monitoring_agent_cadvisor_port | int) < 65536
+      - monitoring_agent_enable_node_exporter | bool or monitoring_agent_enable_cadvisor | bool
+      - monitoring_labels_role | trim | length > 0
+      - not monitoring_agent_promtail_enabled | bool or monitoring_loki_push_url | trim | length > 0
+      - not monitoring_agent_promtail_enabled | bool or (monitoring_loki_push_url is match('^https?://.+'))
+    fail_msg: >-
+      Invalid monitoring_agent settings. Check bind_address, ports, labels and Loki URL for promtail.
+  tags: [monitoring, metrics, agent]
+
+- name: Ensure monitoring agent install directory exists
+  ansible.builtin.file:
+    path: "{{ monitoring_agent_install_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags: [monitoring, metrics, agent]
+
+- name: Render monitoring agent docker-compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ monitoring_agent_install_path }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart monitoring agent stack
+  tags: [monitoring, metrics, agent]
+
+- name: Render monitoring agent promtail config
+  ansible.builtin.template:
+    src: promtail.yml.j2
+    dest: "{{ monitoring_agent_install_path }}/promtail.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  when: monitoring_agent_promtail_enabled | bool
+  notify: Restart monitoring agent stack
+  tags: [monitoring, logs, agent]
+
+- name: Ensure monitoring agent stack is running
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_agent_install_path }}"
+    state: present
+    pull: missing
+    remove_orphans: true
+  when: monitoring_agent_manage_runtime | bool
+  tags: [monitoring, metrics, agent]
+
+- name: Ensure iptables userspace tools are present for monitoring ACL
+  ansible.builtin.package:
+    name: iptables
+    state: present
+  when: monitoring_agent_acl_enabled | bool or monitoring_agent_acl_cleanup_when_disabled | bool
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Initialize normalized monitoring ACL source list
+  ansible.builtin.set_fact:
+    monitoring_agent_acl_allowed_sources_effective: []
+  when: monitoring_agent_acl_enabled | bool
+  changed_when: false
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Build normalized monitoring ACL source list
+  ansible.builtin.set_fact:
+    monitoring_agent_acl_allowed_sources_effective: >-
+      {{
+        monitoring_agent_acl_allowed_sources_effective
+        + [
+          (
+            source if "/" in source
+            else source ~ ("/128" if ":" in source else "/32")
+          )
+        ]
+      }}
+  vars:
+    source: "{{ item | string | trim }}"
+  loop: "{{ monitoring_agent_acl_allowed_sources | default([]) }}"
+  when:
+    - monitoring_agent_acl_enabled | bool
+    - source | length > 0
+  changed_when: false
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Validate monitoring ACL config
+  ansible.builtin.assert:
+    that:
+      - monitoring_agent_acl_chain | trim | length > 0
+      - monitoring_agent_acl_allowed_sources_effective | length > 0
+    fail_msg: >-
+      monitoring_agent_acl_enabled=true requires non-empty monitoring_agent_acl_chain
+      and monitoring_agent_acl_allowed_sources.
+  when: monitoring_agent_acl_enabled | bool
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Build monitoring ACL protected ports list
+  ansible.builtin.set_fact:
+    monitoring_agent_acl_ports: >-
+      {{
+        (
+          ([monitoring_agent_node_exporter_port | int] if monitoring_agent_enable_node_exporter | bool else [])
+          +
+          ([monitoring_agent_cadvisor_port | int] if monitoring_agent_enable_cadvisor | bool else [])
+        )
+        | unique
+        | map("string")
+        | list
+      }}
+  when: monitoring_agent_acl_enabled | bool
+  changed_when: false
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Capture current iptables filter table
+  ansible.builtin.command: iptables-save -t filter
+  register: monitoring_agent_filter_table
+  check_mode: false
+  changed_when: false
+  when: monitoring_agent_acl_enabled | bool or monitoring_agent_acl_cleanup_when_disabled | bool
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Detect existing monitoring ACL chain and jump state
+  ansible.builtin.set_fact:
+    monitoring_agent_acl_chain_exists: >-
+      {{
+        (
+          monitoring_agent_filter_table.stdout
+          | regex_search("(?m)^:" ~ (monitoring_agent_acl_chain | regex_escape) ~ " ")
+        ) is not none
+      }}
+    monitoring_agent_acl_jump_exists: >-
+      {{
+        (
+          monitoring_agent_filter_table.stdout
+          | regex_search("(?m)^-A DOCKER-USER -j " ~ (monitoring_agent_acl_chain | regex_escape) ~ "$")
+        ) is not none
+      }}
+    monitoring_agent_acl_current_rules: >-
+      {{
+        monitoring_agent_filter_table.stdout_lines
+        | select("match", "^-A " ~ (monitoring_agent_acl_chain | regex_escape) ~ " ")
+        | list
+      }}
+  when: monitoring_agent_acl_enabled | bool or monitoring_agent_acl_cleanup_when_disabled | bool
+  changed_when: false
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Initialize desired monitoring ACL rules
+  ansible.builtin.set_fact:
+    monitoring_agent_acl_desired_rules:
+      - "-A {{ monitoring_agent_acl_chain }} -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN"
+  when: monitoring_agent_acl_enabled | bool
+  changed_when: false
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Add source allow rules to desired monitoring ACL
+  ansible.builtin.set_fact:
+    monitoring_agent_acl_desired_rules: >-
+      {{
+        monitoring_agent_acl_desired_rules
+        + [
+          "-A " ~ monitoring_agent_acl_chain
+          ~ " -s " ~ item
+          ~ " -p tcp -m multiport --dports " ~ (monitoring_agent_acl_ports | join(","))
+          ~ " -j RETURN"
+        ]
+      }}
+  loop: "{{ monitoring_agent_acl_allowed_sources_effective }}"
+  when: monitoring_agent_acl_enabled | bool
+  changed_when: false
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Add terminal rules to desired monitoring ACL
+  ansible.builtin.set_fact:
+    monitoring_agent_acl_desired_rules: >-
+      {{
+        monitoring_agent_acl_desired_rules
+        + [
+          "-A " ~ monitoring_agent_acl_chain
+          ~ " -p tcp -m multiport --dports " ~ (monitoring_agent_acl_ports | join(","))
+          ~ " -j DROP",
+          "-A " ~ monitoring_agent_acl_chain ~ " -j RETURN"
+        ]
+      }}
+  when: monitoring_agent_acl_enabled | bool
+  changed_when: false
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Detect monitoring ACL drift
+  ansible.builtin.set_fact:
+    monitoring_agent_acl_needs_apply: >-
+      {{
+        (not monitoring_agent_acl_chain_exists)
+        or (not monitoring_agent_acl_jump_exists)
+        or (monitoring_agent_acl_current_rules != monitoring_agent_acl_desired_rules)
+      }}
+  when: monitoring_agent_acl_enabled | bool
+  changed_when: false
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Detect monitoring ACL cleanup requirement
+  ansible.builtin.set_fact:
+    monitoring_agent_acl_cleanup_needed: >-
+      {{
+        (not (monitoring_agent_acl_enabled | bool))
+        and (monitoring_agent_acl_cleanup_when_disabled | bool)
+        and ((monitoring_agent_acl_chain_exists | default(false)) or (monitoring_agent_acl_jump_exists | default(false)))
+      }}
+  changed_when: false
+  when: monitoring_agent_acl_cleanup_when_disabled | bool
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Report monitoring ACL drift in check mode
+  ansible.builtin.debug:
+    msg: "Monitoring ACL rules would be updated."
+  when:
+    - monitoring_agent_acl_enabled | bool
+    - ansible_check_mode | bool
+    - monitoring_agent_acl_needs_apply | bool
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Report monitoring ACL cleanup in check mode
+  ansible.builtin.debug:
+    msg: "Monitoring ACL rules would be removed."
+  when:
+    - monitoring_agent_acl_cleanup_when_disabled | bool
+    - ansible_check_mode | bool
+    - monitoring_agent_acl_cleanup_needed | default(false) | bool
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Create monitoring ACL chain when missing
+  ansible.builtin.command: "iptables -w -N {{ monitoring_agent_acl_chain }}"
+  when:
+    - monitoring_agent_acl_enabled | bool
+    - monitoring_agent_acl_needs_apply | bool
+    - not monitoring_agent_acl_chain_exists | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Flush monitoring ACL chain before applying desired rules
+  ansible.builtin.command: "iptables -w -F {{ monitoring_agent_acl_chain }}"
+  when:
+    - monitoring_agent_acl_enabled | bool
+    - monitoring_agent_acl_needs_apply | bool
+    - monitoring_agent_acl_chain_exists | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Remove previous DOCKER-USER jump to monitoring ACL chain
+  ansible.builtin.shell: |
+    while iptables -w -C DOCKER-USER -j {{ monitoring_agent_acl_chain }} 2>/dev/null; do
+      iptables -w -D DOCKER-USER -j {{ monitoring_agent_acl_chain }}
+    done
+  when:
+    - monitoring_agent_acl_enabled | bool
+    - monitoring_agent_acl_needs_apply | bool
+    - monitoring_agent_acl_jump_exists | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Insert monitoring ACL chain jump at top of DOCKER-USER
+  ansible.builtin.command: "iptables -w -I DOCKER-USER 1 -j {{ monitoring_agent_acl_chain }}"
+  when:
+    - monitoring_agent_acl_enabled | bool
+    - monitoring_agent_acl_needs_apply | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Add established/related return rule to monitoring ACL chain
+  ansible.builtin.command: >-
+    iptables -w -A {{ monitoring_agent_acl_chain }} -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+  when:
+    - monitoring_agent_acl_enabled | bool
+    - monitoring_agent_acl_needs_apply | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Add allowed source rules to monitoring ACL chain
+  ansible.builtin.command: >-
+    iptables -w -A {{ monitoring_agent_acl_chain }} -s {{ item }} -p tcp -m multiport
+    --dports {{ monitoring_agent_acl_ports | join(",") }} -j RETURN
+  loop: "{{ monitoring_agent_acl_allowed_sources_effective }}"
+  when:
+    - monitoring_agent_acl_enabled | bool
+    - monitoring_agent_acl_needs_apply | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Add default drop rule to monitoring ACL chain
+  ansible.builtin.command: >-
+    iptables -w -A {{ monitoring_agent_acl_chain }} -p tcp -m multiport
+    --dports {{ monitoring_agent_acl_ports | join(",") }} -j DROP
+  when:
+    - monitoring_agent_acl_enabled | bool
+    - monitoring_agent_acl_needs_apply | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Add final return rule to monitoring ACL chain
+  ansible.builtin.command: "iptables -w -A {{ monitoring_agent_acl_chain }} -j RETURN"
+  when:
+    - monitoring_agent_acl_enabled | bool
+    - monitoring_agent_acl_needs_apply | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Remove monitoring ACL chain jump from DOCKER-USER when ACL is disabled
+  ansible.builtin.shell: |
+    while iptables -w -C DOCKER-USER -j {{ monitoring_agent_acl_chain }} 2>/dev/null; do
+      iptables -w -D DOCKER-USER -j {{ monitoring_agent_acl_chain }}
+    done
+  when:
+    - monitoring_agent_acl_cleanup_needed | default(false) | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Flush monitoring ACL chain when ACL is disabled
+  ansible.builtin.command: "iptables -w -F {{ monitoring_agent_acl_chain }}"
+  when:
+    - monitoring_agent_acl_cleanup_needed | default(false) | bool
+    - monitoring_agent_acl_chain_exists | default(false) | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, agent, firewall]
+
+- name: Delete monitoring ACL chain when ACL is disabled
+  ansible.builtin.command: "iptables -w -X {{ monitoring_agent_acl_chain }}"
+  when:
+    - monitoring_agent_acl_cleanup_needed | default(false) | bool
+    - monitoring_agent_acl_chain_exists | default(false) | bool
+    - not ansible_check_mode | bool
+  changed_when: true
+  tags: [monitoring, metrics, agent, firewall]
