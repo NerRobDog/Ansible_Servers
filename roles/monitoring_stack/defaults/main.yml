@@ -15,6 +15,6 @@ monitoring_stack_grafana_port: 3000
 monitoring_stack_loki_port: 3100
 
 monitoring_stack_grafana_admin_user: admin
-monitoring_stack_grafana_admin_password: change_me
+monitoring_stack_grafana_admin_password: ""
 monitoring_stack_scrape_fleet_agents: true
 monitoring_stack_scrape_openwrt_agents: true

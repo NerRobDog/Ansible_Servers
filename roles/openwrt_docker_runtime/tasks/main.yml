@@ -29,8 +29,18 @@
   failed_when: openwrt_docker_runtime_install.rc != 0
   tags: [openwrt, docker]
 
+- name: Validate daemon config path when daemon config is managed
+  ansible.builtin.assert:
+    that:
+      - openwrt_docker_runtime_daemon_config_path | trim | length > 0
+    fail_msg: "openwrt_docker_runtime_daemon_config_path must be non-empty when daemon config management is enabled."
+  when:
+    - openwrt_docker_manage_runtime | bool
+    - openwrt_docker_runtime_manage_daemon_config | bool
+  tags: [openwrt, docker]
+
 - name: Ensure docker daemon config parent directory exists
-  ansible.builtin.raw: "mkdir -p $(dirname {{ openwrt_docker_runtime_daemon_config_path }})"
+  ansible.builtin.raw: "mkdir -p \"$(dirname -- {{ openwrt_docker_runtime_daemon_config_path | quote }})\""
   when:
     - openwrt_docker_manage_runtime | bool
     - openwrt_docker_runtime_manage_daemon_config | bool
@@ -66,4 +76,20 @@
     echo "OK"
   when: openwrt_docker_manage_runtime | bool
   changed_when: false
+  tags: [openwrt, docker]
+
+- name: Restart dockerd when daemon config changed
+  ansible.builtin.raw: |
+    /etc/init.d/dockerd restart >/dev/null 2>&1 || {
+      /etc/init.d/dockerd stop >/dev/null 2>&1 || true
+      /etc/init.d/dockerd start >/dev/null 2>&1
+    }
+  when:
+    - openwrt_docker_manage_runtime | bool
+    - openwrt_docker_runtime_manage_daemon_config | bool
+    - openwrt_docker_runtime_daemon is defined
+    - "'CHANGED' in (openwrt_docker_runtime_daemon.stdout | default(''))"
+  changed_when: true
+  failed_when: openwrt_docker_runtime_restart.rc != 0
+  register: openwrt_docker_runtime_restart
   tags: [openwrt, docker]

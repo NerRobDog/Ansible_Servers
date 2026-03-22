@@ -124,6 +124,13 @@ if [[ "${check_mode}" != "true" && "${check_mode}" != "false" ]]; then
   exit 1
 fi
 
+for dep in ssh jq ansible-playbook; do
+  if ! command -v "${dep}" >/dev/null 2>&1; then
+    echo "Required dependency not found: ${dep}" >&2
+    exit 1
+  fi
+done
+
 mkdir -p "${repo_root}/.ansible/runtime"
 
 if [[ "${mode}" != "bootstrap" && -n "${ZEROTIER_API_TOKEN:-}" ]]; then

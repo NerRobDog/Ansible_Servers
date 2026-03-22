@@ -13,6 +13,7 @@
       - (monitoring_stack_loki_port | int) < 65536
       - monitoring_stack_grafana_admin_user | trim | length > 0
       - monitoring_stack_grafana_admin_password | trim | length > 0
+      - monitoring_stack_grafana_admin_password != "change_me"
     fail_msg: "Invalid monitoring_stack settings. Check ports, retention and grafana credentials."
   tags: [monitoring, metrics, grafana, prometheus, loki]
 

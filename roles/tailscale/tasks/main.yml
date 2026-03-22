@@ -254,7 +254,8 @@
   tags: [tailscale]
 
 - name: Join tailnet on OpenWrt when not authenticated
-  ansible.builtin.raw: "tailscale up --auth-key='{{ tailscale_auth_key_value }}' {{ tailscale_extra_args | join(' ') }}"
+  ansible.builtin.raw: >-
+    tailscale up --auth-key={{ tailscale_auth_key_value | quote }}{% for arg in (tailscale_extra_args | default([])) %} {{ arg | quote }}{% endfor %}
   register: tailscale_up_cmd
   changed_when: tailscale_up_cmd.rc == 0
   failed_when: tailscale_up_cmd.rc != 0

@@ -183,7 +183,7 @@ jobs:
         env:
           LIMIT: ${{ inputs.limit }}
           ZEROTIER_API_TOKEN: ${{ secrets.ZEROTIER_API_TOKEN }}
-          ZEROTIER_NETWORK_ID: ${{ secrets.ZEROTIER_NETWORK_ID }}
+          ZEROTIER_NETWORK_ID: ${{ vars.ZEROTIER_NETWORK_ID || secrets.ZEROTIER_NETWORK_ID }}
         run: |
           if [[ -z "${ZEROTIER_API_TOKEN}" ]]; then
             echo "Secret ZEROTIER_API_TOKEN is required for mode=${{ inputs.mode }}." >&2

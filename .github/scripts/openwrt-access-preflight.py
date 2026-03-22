@@ -85,9 +85,11 @@ def run_ssh(host: str, port: str, user: str, proxy_jump: str, key_file: str, tim
     return proc.returncode, proc.stdout, proc.stderr
 
 
-def run_jump_probe(jump: str, timeout: int) -> tuple[int, str, str]:
+def run_jump_probe(jump: str, key_file: str, timeout: int) -> tuple[int, str, str]:
     cmd = [
         "ssh",
+        "-i",
+        key_file,
         "-o",
         "BatchMode=yes",
         "-o",
@@ -112,7 +114,7 @@ def classify_failure(stderr: str, jump_reachable: bool) -> str:
     if "connection timed out" in lower or "operation timed out" in lower:
         return "router_offline"
     if "permission denied" in lower:
-        return "router_offline"
+        return "auth_failed"
     return "router_offline"
 
 
@@ -221,7 +223,7 @@ def main() -> None:
                 if not str(jump).strip():
                     continue
                 jump = str(jump).strip()
-                jump_ok_rc, _, jump_err = run_jump_probe(jump, timeout=args.timeout)
+                jump_ok_rc, _, jump_err = run_jump_probe(jump, key_file, timeout=args.timeout)
                 if jump_ok_rc != 0:
                     jump_errors[jump] = jump_err.strip()
                     continue

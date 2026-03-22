@@ -44,8 +44,20 @@
   loop: "{{ openwrt_docker_stacks }}"
   when: (item.enabled | default(true)) | bool
   register: openwrt_stack_compose_files
-  changed_when: "'CHANGED' in openwrt_stack_compose_files.stdout"
-  failed_when: openwrt_stack_compose_files.rc != 0
+  changed_when: >-
+    (
+      openwrt_stack_compose_files.results | default([])
+      | selectattr('stdout', 'search', 'CHANGED')
+      | list
+      | length
+    ) > 0
+  failed_when: >-
+    (
+      openwrt_stack_compose_files.results | default([])
+      | selectattr('rc', 'ne', 0)
+      | list
+      | length
+    ) > 0
   tags: [openwrt, docker]
 
 - name: Write stack env files when env vars are provided
@@ -73,8 +85,20 @@
     - item.env is defined
     - item.env | length > 0
   register: openwrt_stack_env_files
-  changed_when: "'CHANGED' in openwrt_stack_env_files.stdout"
-  failed_when: openwrt_stack_env_files.rc != 0
+  changed_when: >-
+    (
+      openwrt_stack_env_files.results | default([])
+      | selectattr('stdout', 'search', 'CHANGED')
+      | list
+      | length
+    ) > 0
+  failed_when: >-
+    (
+      openwrt_stack_env_files.results | default([])
+      | selectattr('rc', 'ne', 0)
+      | list
+      | length
+    ) > 0
   tags: [openwrt, docker]
 
 - name: Run docker compose stacks
@@ -87,10 +111,20 @@
     - openwrt_docker_manage_runtime | bool
   register: openwrt_stack_up
   changed_when: >-
-    ('Creating ' in openwrt_stack_up.stdout) or
-    ('Recreating ' in openwrt_stack_up.stdout) or
-    ('Pulling ' in openwrt_stack_up.stdout) or
-    ('Starting ' in openwrt_stack_up.stdout) or
-    ('Building ' in openwrt_stack_up.stdout)
-  failed_when: openwrt_stack_up.rc != 0
+    (
+      openwrt_stack_up.results | default([])
+      | map(attribute='stdout')
+      | map('default', '')
+      | map('regex_search', 'Creating |Recreating |Pulling |Starting |Building ')
+      | select('string')
+      | list
+      | length
+    ) > 0
+  failed_when: >-
+    (
+      openwrt_stack_up.results | default([])
+      | selectattr('rc', 'ne', 0)
+      | list
+      | length
+    ) > 0
   tags: [openwrt, docker]
