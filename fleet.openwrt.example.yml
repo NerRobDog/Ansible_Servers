@@ -76,6 +76,15 @@ defaults:
     pppoe_username: ""
     pppoe_password: ""
     pppoe_ipv6: auto
+    # Boot failover:
+    # 1) force DHCP on boot
+    # 2) if no internet, apply this configured WAN profile above (static/pppoe/dhcp)
+    boot_try_dhcp_first: true
+    boot_try_dhcp_wait_sec: 35
+    boot_try_dhcp_probe_host: 1.1.1.1
+    boot_try_dhcp_probe_count: 2
+    boot_try_dhcp_service_name: wan_failover
+    boot_try_dhcp_start_priority: 97
 
 hosts:
   wrt_de:
@@ -128,6 +137,8 @@ hosts:
       dns:
         - 1.1.1.1
         - 8.8.8.8
+      # Example: keep "DHCP first, static fallback" behavior for this host.
+      boot_try_dhcp_first: true
     passwall2:
       subscribe_url: "https://provider.example/sub/nl"
     features:

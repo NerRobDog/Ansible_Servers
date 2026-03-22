@@ -208,9 +208,16 @@ features:
   - `openwrt_wan_gateway`
   - `openwrt_wan_dns` (list)
   - `openwrt_wan_pppoe_ipv6` (`auto|0|1`)
+  - `openwrt_wan_boot_try_dhcp_first` (`true|false`, default `true`)
+  - `openwrt_wan_boot_try_dhcp_wait_sec`
+  - `openwrt_wan_boot_try_dhcp_probe_host`
+  - `openwrt_wan_boot_try_dhcp_probe_count`
+  - `openwrt_wan_boot_try_dhcp_service_name`
+  - `openwrt_wan_boot_try_dhcp_start_priority`
 - Поведение:
   - роль меняет только `network.wan`;
   - при изменении делает `uci commit network` + `network reload/restart`.
+  - для `static|pppoe` может ставить boot-service `wan_failover`: на старте сначала пробует DHCP, при неуспехе применяет configured fallback профиль WAN.
 
 ### `openwrt_zerotier`
 - Назначение: установка ZeroTier, UCI-конфиг и join к сети.

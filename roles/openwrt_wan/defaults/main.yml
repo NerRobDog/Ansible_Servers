@@ -11,3 +11,13 @@ openwrt_wan_dns:
 openwrt_wan_pppoe_username: ""
 openwrt_wan_pppoe_password: ""
 openwrt_wan_pppoe_ipv6: auto
+
+# Boot-time WAN strategy:
+# 1) try DHCP first
+# 2) if DHCP path is unhealthy, apply configured WAN profile above
+openwrt_wan_boot_try_dhcp_first: true
+openwrt_wan_boot_try_dhcp_wait_sec: 35
+openwrt_wan_boot_try_dhcp_probe_host: 1.1.1.1
+openwrt_wan_boot_try_dhcp_probe_count: 2
+openwrt_wan_boot_try_dhcp_service_name: wan_failover
+openwrt_wan_boot_try_dhcp_start_priority: 97

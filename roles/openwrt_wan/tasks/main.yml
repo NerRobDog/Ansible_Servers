@@ -11,7 +11,14 @@
       - openwrt_wan_pppoe_ipv6 in ['auto', '0', '1']
       - openwrt_wan_dns is iterable
       - openwrt_wan_dns is not string
-    fail_msg: "Invalid OpenWrt WAN config. Check wan proto/device/static/pppoe fields."
+      - (openwrt_wan_boot_try_dhcp_wait_sec | int) > 0
+      - (openwrt_wan_boot_try_dhcp_probe_count | int) > 0
+      - openwrt_wan_boot_try_dhcp_probe_host | trim | length > 0
+      - openwrt_wan_boot_try_dhcp_service_name | trim | length > 0
+      - openwrt_wan_boot_try_dhcp_service_name is match('^[A-Za-z0-9_-]+$')
+      - (openwrt_wan_boot_try_dhcp_start_priority | int) > 0
+      - (openwrt_wan_boot_try_dhcp_start_priority | int) < 100
+    fail_msg: "Invalid OpenWrt WAN config. Check WAN profile and boot failover fields."
   tags: [openwrt, wan, network]
 
 - name: Configure OpenWrt WAN interface
@@ -107,4 +114,103 @@
   register: openwrt_wan_configure
   changed_when: "'CHANGED' in openwrt_wan_configure.stdout"
   failed_when: openwrt_wan_configure.rc != 0
+  tags: [openwrt, wan, network]
+
+- name: Deploy WAN boot failover UCI config
+  ansible.builtin.raw: |
+    set -eu
+    cfg="/etc/config/{{ openwrt_wan_boot_try_dhcp_service_name }}"
+    old_sum="$(md5sum "${cfg}" 2>/dev/null | awk '{print $1}')"
+    cat <<'EOF_WAN_FAILOVER_CFG' > "${cfg}"
+    {{ lookup('template', 'wan-failover-config.j2') | trim }}
+    EOF_WAN_FAILOVER_CFG
+    new_sum="$(md5sum "${cfg}" | awk '{print $1}')"
+
+    if [ "${old_sum}" != "${new_sum}" ]; then
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  when:
+    - openwrt_wan_boot_try_dhcp_first | bool
+    - openwrt_wan_proto != 'dhcp'
+  register: openwrt_wan_failover_config
+  changed_when: "'CHANGED' in openwrt_wan_failover_config.stdout"
+  failed_when: openwrt_wan_failover_config.rc != 0
+  tags: [openwrt, wan, network]
+
+- name: Deploy WAN boot failover init script
+  ansible.builtin.raw: |
+    set -eu
+    init="/etc/init.d/{{ openwrt_wan_boot_try_dhcp_service_name }}"
+    old_sum="$(md5sum "${init}" 2>/dev/null | awk '{print $1}')"
+    cat <<'EOF_WAN_FAILOVER_INIT' > "${init}"
+    {{ lookup('template', 'wan-failover-init.j2') | trim }}
+    EOF_WAN_FAILOVER_INIT
+    chmod 755 "${init}"
+    new_sum="$(md5sum "${init}" | awk '{print $1}')"
+
+    if [ "${old_sum}" != "${new_sum}" ]; then
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  when:
+    - openwrt_wan_boot_try_dhcp_first | bool
+    - openwrt_wan_proto != 'dhcp'
+  register: openwrt_wan_failover_init
+  changed_when: "'CHANGED' in openwrt_wan_failover_init.stdout"
+  failed_when: openwrt_wan_failover_init.rc != 0
+  tags: [openwrt, wan, network]
+
+- name: Enable WAN boot failover init service
+  ansible.builtin.raw: |
+    set -eu
+    service="/etc/init.d/{{ openwrt_wan_boot_try_dhcp_service_name }}"
+    if [ -x "${service}" ]; then
+      "${service}" disable >/dev/null 2>&1 || true
+      "${service}" enable >/dev/null 2>&1 || true
+    fi
+    echo "OK"
+  when:
+    - openwrt_wan_boot_try_dhcp_first | bool
+    - openwrt_wan_proto != 'dhcp'
+  changed_when: false
+  tags: [openwrt, wan, network]
+
+- name: Remove WAN boot failover service when disabled or not needed
+  ansible.builtin.raw: |
+    set -eu
+    name="{{ openwrt_wan_boot_try_dhcp_service_name }}"
+    changed='0'
+
+    if [ -x "/etc/init.d/${name}" ]; then
+      "/etc/init.d/${name}" disable >/dev/null 2>&1 || true
+    fi
+
+    for link in /etc/rc.d/*"${name}"; do
+      [ -e "${link}" ] || continue
+      rm -f "${link}"
+      changed='1'
+    done
+
+    if [ -e "/etc/init.d/${name}" ]; then
+      rm -f "/etc/init.d/${name}"
+      changed='1'
+    fi
+
+    if [ -e "/etc/config/${name}" ]; then
+      rm -f "/etc/config/${name}"
+      changed='1'
+    fi
+
+    if [ "${changed}" = "1" ]; then
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  when: not (openwrt_wan_boot_try_dhcp_first | bool and openwrt_wan_proto != 'dhcp')
+  register: openwrt_wan_failover_cleanup
+  changed_when: "'CHANGED' in openwrt_wan_failover_cleanup.stdout"
+  failed_when: openwrt_wan_failover_cleanup.rc != 0
   tags: [openwrt, wan, network]

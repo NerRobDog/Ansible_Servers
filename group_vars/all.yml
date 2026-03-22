@@ -150,6 +150,12 @@ openwrt_wan_dns:
 openwrt_wan_pppoe_username: ""
 openwrt_wan_pppoe_password: ""
 openwrt_wan_pppoe_ipv6: auto
+openwrt_wan_boot_try_dhcp_first: true
+openwrt_wan_boot_try_dhcp_wait_sec: 35
+openwrt_wan_boot_try_dhcp_probe_host: 1.1.1.1
+openwrt_wan_boot_try_dhcp_probe_count: 2
+openwrt_wan_boot_try_dhcp_service_name: wan_failover
+openwrt_wan_boot_try_dhcp_start_priority: 97
 
 openwrt_network_lan_device: br-lan
 openwrt_network_lan_ipaddr: 192.168.1.1

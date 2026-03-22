@@ -102,6 +102,18 @@
         openwrt_wan_pppoe_username: "{{ fleet_host_cfg.get('wan', {}).get('pppoe_username', openwrt_wan_pppoe_username) }}"
         openwrt_wan_pppoe_password: "{{ fleet_host_cfg.get('wan', {}).get('pppoe_password', openwrt_wan_pppoe_password) }}"
         openwrt_wan_pppoe_ipv6: "{{ fleet_host_cfg.get('wan', {}).get('pppoe_ipv6', openwrt_wan_pppoe_ipv6) | lower }}"
+        openwrt_wan_boot_try_dhcp_first: >-
+          {{ fleet_host_cfg.get('wan', {}).get('boot_try_dhcp_first', openwrt_wan_boot_try_dhcp_first) | bool }}
+        openwrt_wan_boot_try_dhcp_wait_sec: >-
+          {{ fleet_host_cfg.get('wan', {}).get('boot_try_dhcp_wait_sec', openwrt_wan_boot_try_dhcp_wait_sec) | int }}
+        openwrt_wan_boot_try_dhcp_probe_host: >-
+          {{ fleet_host_cfg.get('wan', {}).get('boot_try_dhcp_probe_host', openwrt_wan_boot_try_dhcp_probe_host) }}
+        openwrt_wan_boot_try_dhcp_probe_count: >-
+          {{ fleet_host_cfg.get('wan', {}).get('boot_try_dhcp_probe_count', openwrt_wan_boot_try_dhcp_probe_count) | int }}
+        openwrt_wan_boot_try_dhcp_service_name: >-
+          {{ fleet_host_cfg.get('wan', {}).get('boot_try_dhcp_service_name', openwrt_wan_boot_try_dhcp_service_name) }}
+        openwrt_wan_boot_try_dhcp_start_priority: >-
+          {{ fleet_host_cfg.get('wan', {}).get('boot_try_dhcp_start_priority', openwrt_wan_boot_try_dhcp_start_priority) | int }}
         passwall2_enabled: "{{ fleet_host_cfg.get('passwall2', {}).get('enabled', passwall2_enabled) | bool }}"
         passwall2_subscribe_url: "{{ fleet_host_cfg.get('passwall2', {}).get('subscribe_url', passwall2_subscribe_url) }}"
         passwall2_probe_url: "{{ fleet_host_cfg.get('passwall2', {}).get('probe_url', passwall2_probe_url) }}"

@@ -326,6 +326,9 @@ WAN-профили во fleet (DHCP/static/PPPoE):
 - включите `features.feature_openwrt_wan=true` (global или per-host);
 - для `openwrt_profile=prod_update` обязательно включите `features.feature_openwrt_wan_apply_in_prod=true`;
 - задайте `wan.proto` и параметры провайдера per-host.
+- для `wan.proto=static|pppoe` по умолчанию работает boot failover:
+  - сначала пробуется DHCP на WAN,
+  - если нет связности (ping `wan.boot_try_dhcp_probe_host`), применяется configured WAN-профиль.
 
 Базовые managed network/firewall роли:
 - `features.feature_openwrt_network_core` — baseline `network` (LAN/loopback/WAN skeleton);
@@ -343,6 +346,12 @@ defaults:
   wan:
     proto: dhcp
     device: eth0
+    boot_try_dhcp_first: true
+    boot_try_dhcp_wait_sec: 35
+    boot_try_dhcp_probe_host: 1.1.1.1
+    boot_try_dhcp_probe_count: 2
+    boot_try_dhcp_service_name: wan_failover
+    boot_try_dhcp_start_priority: 97
 
 hosts:
   wrt_dhcp:
@@ -358,6 +367,7 @@ hosts:
       netmask: 255.255.255.0
       gateway: 192.0.2.1
       dns: [1.1.1.1, 8.8.8.8]
+      boot_try_dhcp_first: true
 
   wrt_pppoe:
     wan:
@@ -366,11 +376,13 @@ hosts:
       pppoe_username: "YOUR_PPPoE_LOGIN"
       pppoe_password: "YOUR_PPPoE_PASSWORD"
       pppoe_ipv6: auto
+      boot_try_dhcp_first: true
 ```
 
 Важно:
 - `wan` хранится внутри `OPENWRT_FLEET_CONFIG_B64`, поэтому логин/пароль PPPoE не попадают в git;
 - для `static` обязательны `ipaddr` и `netmask`;
+- `wan.boot_try_dhcp_first=false` отключает boot failover и оставляет только configured WAN профиль;
 - роль меняет только `network.wan` и перезагружает сеть только при изменении.
 
 Rollback guard (v1.2):

@@ -41,7 +41,7 @@
 - `openwrt_base` — базовая подготовка OpenWrt и bootstrap key.
 - `openwrt_network_core` — managed baseline секций `network` (LAN/loopback/WAN skeleton).
 - `openwrt_firewall_core` — managed baseline секций `firewall` + fail-safe SSH (LAN + ZeroTier CIDR).
-- `openwrt_wan` — managed настройка `network.wan` (DHCP/static/PPPoE).
+- `openwrt_wan` — managed настройка `network.wan` (DHCP/static/PPPoE) + опциональный boot failover (DHCP first -> fallback profile).
 - `openwrt_rollback_guard` — авто-rollback guard с snapshot/watchdog/confirm.
 - `openwrt_zerotier` — join/config ZeroTier.
 - `openwrt_passwall2` — полностью managed `/etc/config/passwall2`.
