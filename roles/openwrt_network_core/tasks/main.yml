@@ -54,8 +54,10 @@
     ensure_set network.lan.netmask '{{ openwrt_network_lan_netmask }}'
     ensure_set network.lan.ip6assign '{{ openwrt_network_lan_ip6assign }}'
 
-    if [ "{{ (openwrt_network_manage_wan_baseline | bool) | ternary('1', '0') }}" = "1" ] && \
-       [ "{{ ((effective_openwrt_profile | default('fresh')) == 'fresh' or (effective_feature_openwrt_wan_apply_in_prod | default(false) | bool)) | ternary('1', '0') }}" = "1" ]; then
+    manage_wan_baseline="{{ (openwrt_network_manage_wan_baseline | bool) | ternary('1', '0') }}"
+    allow_wan_baseline="{{ (effective_openwrt_wan_change_allowed | default(false) | bool) | ternary('1', '0') }}"
+
+    if [ "${manage_wan_baseline}" = "1" ] && [ "${allow_wan_baseline}" = "1" ]; then
       ensure_type "wan" "interface"
       ensure_set network.wan.device '{{ openwrt_wan_device }}'
       ensure_set network.wan.proto "dhcp"

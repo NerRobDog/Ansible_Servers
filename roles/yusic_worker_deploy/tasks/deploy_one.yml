@@ -80,11 +80,11 @@
   ansible.builtin.command: >-
     skopeo copy
     --override-arch {{ yusic_worker.arch }}
-    {% if yusic_worker_skopeo_authfile | default('') | length > 0 -%}
+    {% if yusic_worker_skopeo_authfile | default('') | length > 0 %}
     --src-authfile {{ yusic_worker_skopeo_authfile }}
-    {%- elif yusic_worker_skopeo_src_creds | default('') | length > 0 -%}
+    {% elif yusic_worker_skopeo_src_creds | default('') | length > 0 %}
     --src-creds {{ yusic_worker_skopeo_src_creds }}
-    {%- endif %}
+    {% endif %}
     docker://{{ yusic_worker_image_ref }}
     docker-archive:{{ yusic_worker_archive_path }}:{{ yusic_worker_image_ref }}
   changed_when: true

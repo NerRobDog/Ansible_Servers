@@ -44,6 +44,17 @@
               feature_openwrt_wan_apply_in_prod
             ) | bool
           }}
+        effective_openwrt_wan_change_allowed: >-
+          {{
+            (
+              fleet_host_cfg.get('profile', openwrt_profile) | default('prod_update', true)
+            ) == 'fresh' or (
+              fleet_host_cfg.get('features', {}).get(
+                'feature_openwrt_wan_apply_in_prod',
+                feature_openwrt_wan_apply_in_prod
+              ) | bool
+            )
+          }}
         effective_feature_openwrt_zerotier: >-
           {{ fleet_host_cfg.get('features', {}).get('feature_openwrt_zerotier', feature_openwrt_zerotier) | bool }}
         effective_feature_openwrt_passwall2: >-
@@ -192,7 +203,7 @@
       when:
         - effective_feature_openwrt_wan | bool
         - openwrt_wan_enabled | bool
-        - effective_openwrt_profile == 'fresh' or (effective_feature_openwrt_wan_apply_in_prod | bool)
+        - effective_openwrt_wan_change_allowed | bool
       tags: [openwrt, wan, network]
 
     - role: openwrt_zerotier
