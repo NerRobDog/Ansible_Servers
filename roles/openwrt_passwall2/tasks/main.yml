@@ -154,6 +154,68 @@
   changed_when: false
   tags: [openwrt, passwall2]
 
+- name: Collect geosite tags used by effective passwall2 profile
+  ansible.builtin.set_fact:
+    passwall2_geosite_tags_effective: >-
+      {{
+        (
+          (passwall2_profile_effective.block_domains | default([]))
+          + (passwall2_profile_effective.direct_domains | default([]))
+          + (passwall2_profile_effective.ban_ru_domains | default([]))
+          + (passwall2_profile_effective.proxy_domains | default([]))
+        )
+        | select('match', '^geosite:')
+        | map('regex_replace', '^geosite:', '')
+        | map('upper')
+        | unique
+        | list
+      }}
+  when: passwall2_enabled | bool
+  changed_when: false
+  tags: [openwrt, passwall2]
+
+- name: Validate geosite tags exist in local geosite.dat
+  ansible.builtin.raw: |
+    set -eu
+    geosite_file=""
+    for candidate in /usr/share/v2ray/geosite.dat /usr/share/xray/geosite.dat; do
+      if [ -s "${candidate}" ]; then
+        geosite_file="${candidate}"
+        break
+      fi
+    done
+
+    if [ -z "${geosite_file}" ]; then
+      echo "MISSING_GEOSITE_FILE"
+      exit 2
+    fi
+
+    tags_cache="$(mktemp)"
+    strings "${geosite_file}" | tr '[:lower:]' '[:upper:]' | sort -u > "${tags_cache}"
+
+    missing=""
+    for tag in {{ passwall2_geosite_tags_effective | join(' ') }}; do
+      if ! grep -Fx "${tag}" "${tags_cache}" >/dev/null 2>&1; then
+        missing="${missing} ${tag}"
+      fi
+    done
+
+    rm -f "${tags_cache}"
+
+    if [ -n "${missing}" ]; then
+      echo "MISSING_GEOSITE_TAGS:${missing}"
+      exit 3
+    fi
+
+    echo "OK"
+  when:
+    - passwall2_enabled | bool
+    - (passwall2_geosite_tags_effective | default([]) | length) > 0
+  register: openwrt_passwall2_geosite_validation
+  changed_when: false
+  failed_when: openwrt_passwall2_geosite_validation.rc != 0
+  tags: [openwrt, passwall2]
+
 - name: Resolve managed Passwall2 ACL bypass MAC list
   ansible.builtin.set_fact:
     passwall2_acl_bypass_macs_effective: >-
@@ -575,3 +637,126 @@
     - passwall2_enabled | bool
     - "'ABSENT' in (openwrt_passwall2_service_probe.stdout | default(''))"
   tags: [openwrt, passwall2]
+
+- name: Flush handlers before passwall2 self-tests
+  ansible.builtin.meta: flush_handlers
+  when:
+    - passwall2_enabled | bool
+    - passwall2_selftest_enabled | bool
+  tags: [openwrt, passwall2, verify]
+
+- name: Passwall2 routing self-test (shunt node bindings)
+  ansible.builtin.raw: |
+    set -eu
+    shunt_id='{{ passwall2_shunt_node_id }}'
+    proxy_node="$(uci -q get passwall2.${shunt_id}.Proxy || true)"
+    default_node="$(uci -q get passwall2.${shunt_id}.default_node || true)"
+    ban_ru_node="$(uci -q get passwall2.${shunt_id}.Ban_RU || true)"
+
+    [ -n "${proxy_node}" ] || { echo "MISSING_PROXY_NODE"; exit 10; }
+    [ -n "${default_node}" ] || { echo "MISSING_DEFAULT_NODE"; exit 11; }
+    [ -n "${ban_ru_node}" ] || { echo "MISSING_BAN_RU_NODE"; exit 12; }
+
+    if [ "{{ passwall2_selftest_require_proxy_equals_default | bool }}" = "True" ] && [ "${proxy_node}" != "${default_node}" ]; then
+      echo "PROXY_DEFAULT_MISMATCH:${proxy_node}:${default_node}"
+      exit 13
+    fi
+
+    check_node() {
+      node_id="$1"
+      label="$2"
+      case "${node_id}" in
+        _*)
+          return 0
+          ;;
+      esac
+      proto="$(uci -q get passwall2.${node_id}.protocol || true)"
+      if [ -z "${proto}" ]; then
+        echo "NODE_NOT_FOUND:${label}:${node_id}"
+        exit 14
+      fi
+    }
+
+    check_node "${proxy_node}" "Proxy"
+    check_node "${default_node}" "Default"
+    check_node "${ban_ru_node}" "Ban_RU"
+    echo "OK"
+  when:
+    - passwall2_enabled | bool
+    - passwall2_selftest_enabled | bool
+  register: openwrt_passwall2_routing_nodes_selftest
+  changed_when: false
+  failed_when: openwrt_passwall2_routing_nodes_selftest.rc != 0
+  tags: [openwrt, passwall2, verify]
+
+- name: Passwall2 routing self-test (required geosite tags per lane)
+  ansible.builtin.raw: |
+    set -eu
+    direct_list="$(uci -q get passwall2.Direct.domain_list || true)"
+    ban_ru_list="$(uci -q get passwall2.Ban_RU.domain_list || true)"
+    proxy_list="$(uci -q get passwall2.Proxy.domain_list || true)"
+
+    for tag in {{ passwall2_selftest_expected_direct_tags | join(' ') }}; do
+      printf '%s\n' "${direct_list}" | grep -Fx "${tag}" >/dev/null || { echo "DIRECT_MISSING_TAG:${tag}"; exit 20; }
+    done
+    for tag in {{ passwall2_selftest_expected_ban_ru_tags | join(' ') }}; do
+      printf '%s\n' "${ban_ru_list}" | grep -Fx "${tag}" >/dev/null || { echo "BAN_RU_MISSING_TAG:${tag}"; exit 21; }
+    done
+    for tag in {{ passwall2_selftest_expected_proxy_tags | join(' ') }}; do
+      printf '%s\n' "${proxy_list}" | grep -Fx "${tag}" >/dev/null || { echo "PROXY_MISSING_TAG:${tag}"; exit 22; }
+    done
+    echo "OK"
+  when:
+    - passwall2_enabled | bool
+    - passwall2_selftest_enabled | bool
+  register: openwrt_passwall2_routing_tags_selftest
+  changed_when: false
+  failed_when: openwrt_passwall2_routing_tags_selftest.rc != 0
+  tags: [openwrt, passwall2, verify]
+
+- name: Passwall2 DNS self-test (config values)
+  ansible.builtin.raw: |
+    set -eu
+    getv() { uci -q get "passwall2.@global[0].$1" || true; }
+
+    [ "$(getv remote_dns_protocol)" = "{{ passwall2_profile_effective.remote_dns_protocol }}" ] || { echo "DNS_PROTOCOL_MISMATCH"; exit 30; }
+    [ "$(getv remote_dns)" = "{{ passwall2_profile_effective.remote_dns }}" ] || { echo "REMOTE_DNS_MISMATCH"; exit 31; }
+    [ "$(getv remote_dns_doh)" = "{{ passwall2_profile_effective.remote_dns_doh }}" ] || { echo "REMOTE_DOH_MISMATCH"; exit 32; }
+    [ "$(getv remote_dns_detour)" = "{{ passwall2_profile_effective.remote_dns_detour }}" ] || { echo "REMOTE_DETOUR_MISMATCH"; exit 33; }
+    [ "$(getv dns_redirect)" = "1" ] || { echo "DNS_REDIRECT_DISABLED"; exit 34; }
+
+    dns_cfg="/tmp/etc/passwall2/acl/default/dns_global_direct.conf"
+    [ -s "${dns_cfg}" ] || { echo "DNS_CONF_MISSING"; exit 35; }
+    grep -F "{{ passwall2_profile_effective.remote_dns }}" "${dns_cfg}" >/dev/null || { echo "REMOTE_DNS_NOT_IN_RUNTIME_CONF"; exit 36; }
+    echo "OK"
+  when:
+    - passwall2_enabled | bool
+    - passwall2_selftest_enabled | bool
+  register: openwrt_passwall2_dns_config_selftest
+  changed_when: false
+  failed_when: openwrt_passwall2_dns_config_selftest.rc != 0
+  tags: [openwrt, passwall2, verify]
+
+- name: Passwall2 DNS self-test (runtime resolve via local resolver)
+  ansible.builtin.raw: |
+    set -eu
+    for domain in {{ passwall2_selftest_dns_domains | join(' ') }}; do
+      answers="$(
+        nslookup "${domain}" 127.0.0.1 2>/dev/null |
+          awk '/^Address:[[:space:]]/{print $2}' |
+          grep -Ev '^(127\.0\.0\.1(:53)?|::1(:53)?)$' || true
+      )"
+      if [ -z "${answers}" ]; then
+        echo "DNS_RESOLVE_FAILED:${domain}"
+        exit 40
+      fi
+    done
+    echo "OK"
+  when:
+    - passwall2_enabled | bool
+    - passwall2_selftest_enabled | bool
+    - (passwall2_selftest_dns_domains | default([]) | length) > 0
+  register: openwrt_passwall2_dns_runtime_selftest
+  changed_when: false
+  failed_when: openwrt_passwall2_dns_runtime_selftest.rc != 0
+  tags: [openwrt, passwall2, verify]

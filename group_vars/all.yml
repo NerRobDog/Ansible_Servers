@@ -183,9 +183,9 @@ passwall2_probe_url: https://www.gstatic.com/generate_204
 passwall2_socks_port: 1070
 passwall2_profile_overrides: {}
 passwall2_acl_bypass_macs: []
-passwall2_dns_provider: quad9
-passwall2_geoip_url_v2ray: https://github.com/hydraponique/roscomvpn-geoip/releases/download/202510180601/geoip.dat
-passwall2_geosite_url_v2ray: https://github.com/hydraponique/roscomvpn-geosite/releases/download/202510180849/geosite.dat
+passwall2_dns_provider: cloudflare
+passwall2_geoip_url_v2ray: https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/geoip.dat
+passwall2_geosite_url_v2ray: https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/geosite.dat
 passwall2_geoip_url_singbox: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.db
 passwall2_geosite_url_singbox: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.db
 passwall2_packages:
@@ -199,6 +199,14 @@ passwall2_packages:
   - naiveproxy
 
 passwall2_dns_profiles:
+  cloudflare:
+    remote_dns_protocol: doh
+    remote_dns: 1.1.1.1
+    remote_dns_detour: direct
+    remote_dns_doh: https://cloudflare-dns.com/dns-query
+    dns_hosts:
+      - cloudflare-dns.com 1.1.1.1
+      - cloudflare-dns.com 1.0.0.1
   quad9:
     remote_dns_protocol: doh
     remote_dns: 9.9.9.9

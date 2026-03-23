@@ -11,15 +11,29 @@ passwall2_probe_url: https://www.gstatic.com/generate_204
 passwall2_socks_port: 1070
 passwall2_profile_overrides: {}
 passwall2_acl_bypass_macs: []
-passwall2_dns_provider: quad9
+passwall2_dns_provider: cloudflare
 passwall2_auto_enable_when_nodes: true
 passwall2_require_nodes_for_enable: true
 passwall2_shunt_node_id: uOEn2cRl
 passwall2_balance_node_id: QA84CBXY
 passwall2_enforce_package_versions: true
+passwall2_selftest_enabled: true
+passwall2_selftest_require_proxy_equals_default: true
+passwall2_selftest_expected_direct_tags:
+  - geosite:category-ru
+  - geosite:category-gov-ru
+passwall2_selftest_expected_ban_ru_tags:
+  - geosite:ru-blocked
+passwall2_selftest_expected_proxy_tags:
+  - geosite:openai
+  - geosite:github
+passwall2_selftest_dns_domains:
+  - openai.com
+  - github.com
+  - yandex.ru
 
-passwall2_geoip_url_v2ray: https://github.com/hydraponique/roscomvpn-geoip/releases/download/202510180601/geoip.dat
-passwall2_geosite_url_v2ray: https://github.com/hydraponique/roscomvpn-geosite/releases/download/202510180849/geosite.dat
+passwall2_geoip_url_v2ray: https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/geoip.dat
+passwall2_geosite_url_v2ray: https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/geosite.dat
 passwall2_geoip_url_singbox: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.db
 passwall2_geosite_url_singbox: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.db
 
@@ -34,6 +48,14 @@ passwall2_packages:
   - naiveproxy
 
 passwall2_dns_profiles:
+  cloudflare:
+    remote_dns_protocol: doh
+    remote_dns: 1.1.1.1
+    remote_dns_detour: direct
+    remote_dns_doh: https://cloudflare-dns.com/dns-query
+    dns_hosts:
+      - cloudflare-dns.com 1.1.1.1
+      - cloudflare-dns.com 1.0.0.1
   quad9:
     remote_dns_protocol: doh
     remote_dns: 9.9.9.9
@@ -51,39 +73,33 @@ passwall2_profile_defaults:
   tcp_redir_ports: 22,25,53,143,465,587,853,993,995,80,443
   udp_redir_ports: 1:65535
   remote_dns_protocol: doh
-  remote_dns: 9.9.9.9
+  remote_dns: 1.1.1.1
   remote_dns_detour: direct
-  remote_dns_doh: https://dns.quad9.net/dns-query
+  remote_dns_doh: https://cloudflare-dns.com/dns-query
   dns_hosts:
-    - dns.quad9.net 9.9.9.9
-    - dns11.quad9.net 149.112.112.112
+    - cloudflare-dns.com 1.1.1.1
+    - cloudflare-dns.com 1.0.0.1
   block_domains: []
   direct_domains:
     - geosite:private
     - geosite:category-ru
-    - geosite:microsoft
+    - geosite:category-gov-ru
+    - geosite:ru-available-only-inside
     - geosite:apple
-    - geosite:twitch
-    - geosite:steam
-    - playstation.com
-    - store.playstation.com
-    - sony.com
+    - geosite:yandex
   proxy_domains:
-    - soundcloud.com
-    - chat.openai.com
-    - openai.com
-    - x.ai
-    - netflix.com
-    - copilot.microsoft.com
-    - tiktok.com
-    - web.telegram.org
-    - telegram.org
-    - t.me
+    - geosite:openai
+    - geosite:github
+    - geosite:netflix
+    - geosite:meta
+    - geosite:twitter
+    - geosite:telegram
+    - geosite:tiktok
+    - geosite:signal
   ban_ru_domains:
-    - youtube.com
-    - discord.com
-    - instagram.com
-    - rutracker.org
+    - geosite:ru-blocked
+    - geosite:youtube
+    - geosite:discord
   direct_ip_list: ""
   proxy_ip_list: ""
   acl_bypass_macs: []
