@@ -57,24 +57,6 @@
         remnawave_caddy_monitor_port: "{{ fleet_host_cfg.get('remnawave', {}).get('caddy_monitor_port', remnawave_caddy_monitor_port) }}"
         remnawave_ipv6_state: "{{ fleet_host_cfg.get('remnawave', {}).get('ipv6_state', remnawave_ipv6_state) }}"
         remnawave_warp_enabled: "{{ fleet_host_cfg.get('remnawave', {}).get('warp_enabled', remnawave_warp_enabled) }}"
-        remnawave_shaper_interface: >-
-          {{ fleet_host_cfg.get('remnawave', {}).get('shaper', {}).get('interface', remnawave_shaper_interface) }}
-        remnawave_shaper_ports: >-
-          {{ fleet_host_cfg.get('remnawave', {}).get('shaper', {}).get('ports', remnawave_shaper_ports) }}
-        remnawave_shaper_down_limit_mbit: >-
-          {{ fleet_host_cfg.get('remnawave', {}).get('shaper', {}).get('down_limit_mbit', remnawave_shaper_down_limit_mbit) }}
-        remnawave_shaper_up_limit_mbit: >-
-          {{ fleet_host_cfg.get('remnawave', {}).get('shaper', {}).get('up_limit_mbit', remnawave_shaper_up_limit_mbit) }}
-        remnawave_shaper_total_limit_mbit: >-
-          {{ fleet_host_cfg.get('remnawave', {}).get('shaper', {}).get('total_limit_mbit', remnawave_shaper_total_limit_mbit) }}
-        remnawave_shaper_max_buckets: >-
-          {{ fleet_host_cfg.get('remnawave', {}).get('shaper', {}).get('max_buckets', remnawave_shaper_max_buckets) }}
-        remnawave_shaper_rate_mode: >-
-          {{ fleet_host_cfg.get('remnawave', {}).get('shaper', {}).get('rate_mode', remnawave_shaper_rate_mode) }}
-        remnawave_shaper_direction: >-
-          {{ fleet_host_cfg.get('remnawave', {}).get('shaper', {}).get('direction', remnawave_shaper_direction) }}
-        remnawave_shaper_ifb_device: >-
-          {{ fleet_host_cfg.get('remnawave', {}).get('shaper', {}).get('ifb_device', remnawave_shaper_ifb_device) }}
         monitoring_agent_bind_address: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_bind_address', monitoring_agent_bind_address) }}"
         monitoring_agent_node_exporter_port: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_node_exporter_port', monitoring_agent_node_exporter_port) }}"
         monitoring_agent_cadvisor_port: "{{ fleet_host_cfg.get('monitoring', {}).get('agent_cadvisor_port', monitoring_agent_cadvisor_port) }}"
