@@ -34,12 +34,29 @@
     proto: tcp
   loop: "{{ firewall_public_tcp_ports }}"
 
+- name: Build effective extra TCP ports list (including remnawave node port)
+  ansible.builtin.set_fact:
+    firewall_effective_allowed_tcp_ports: >-
+      {{
+        (
+          (firewall_allowed_tcp_ports | default([], true))
+          + (
+            ((effective_feature_remnawave_node | default(feature_remnawave_node | default(false), true)) | bool)
+            | ternary([remnawave_node_port | int], [])
+          )
+        )
+        | map('int')
+        | unique
+        | list
+      }}
+  changed_when: false
+
 - name: Allow extra TCP ports through UFW
   community.general.ufw:
     rule: allow
     port: "{{ item | string }}"
     proto: tcp
-  loop: "{{ firewall_allowed_tcp_ports }}"
+  loop: "{{ firewall_effective_allowed_tcp_ports | default(firewall_allowed_tcp_ports, true) }}"
 
 - name: Allow extra UDP ports through UFW
   community.general.ufw:
