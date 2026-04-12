@@ -26,14 +26,10 @@
         effective_feature_remnawave_node: "{{ fleet_host_cfg.get('features', {}).get('feature_remnawave_node', feature_remnawave_node) | bool }}"
         effective_feature_caddy_node: "{{ fleet_host_cfg.get('features', {}).get('feature_caddy_node', feature_caddy_node) | bool }}"
         effective_feature_node_tuning: "{{ fleet_host_cfg.get('features', {}).get('feature_node_tuning', feature_node_tuning) | bool }}"
-        effective_feature_traffic_shaper: >-
-          {{ fleet_host_cfg.get('features', {}).get('feature_traffic_shaper', feature_traffic_shaper) | bool }}
         effective_feature_monitoring_agent: >-
           {{ fleet_host_cfg.get('features', {}).get('feature_monitoring_agent', feature_monitoring_agent) | bool }}
         effective_feature_monitoring_stack: >-
           {{ fleet_host_cfg.get('features', {}).get('feature_monitoring_stack', feature_monitoring_stack) | bool }}
-        effective_feature_omr_aggregator_node: >-
-          {{ fleet_host_cfg.get('features', {}).get('feature_omr_aggregator_node', feature_omr_aggregator_node) | bool }}
         effective_feature_user_shell: >-
           {{
             (fleet_mode_effective == 'bootstrap')
@@ -87,11 +83,6 @@
           {{ fleet_host_cfg.get('monitoring', {}).get('stack_grafana_admin_user', monitoring_stack_grafana_admin_user) }}
         monitoring_stack_grafana_admin_password: >-
           {{ fleet_host_cfg.get('monitoring', {}).get('stack_grafana_admin_password', monitoring_stack_grafana_admin_password) }}
-        omr_aggregator: >-
-          {{
-            (omr_aggregator | default({}))
-            | combine(fleet_host_cfg.get('omr_aggregator', {}), recursive=True)
-          }}
       changed_when: false
       tags: [always]
 
@@ -144,10 +135,6 @@
       when: effective_feature_monitoring_stack | bool
       tags: [monitoring, metrics, grafana, prometheus, loki]
 
-    - role: omr_aggregator_node
-      when: effective_feature_omr_aggregator_node | bool
-      tags: [omr, aggregator, mptcp]
-
     - role: remnawave_node
       when: effective_feature_remnawave_node | bool
       tags: [remnawave, node]
@@ -159,10 +146,6 @@
     - role: node_tuning
       when: effective_feature_node_tuning | bool
       tags: [remnawave, bbr, ipv6]
-
-    - role: traffic_shaper
-      when: effective_feature_traffic_shaper | bool
-      tags: [remnawave, traffic_shaper]
 
     - role: user_shell
       when: effective_feature_user_shell | bool
