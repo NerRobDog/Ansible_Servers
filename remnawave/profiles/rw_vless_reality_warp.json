@@ -40,10 +40,6 @@
   ],
   "outbounds": [
     {
-      "tag": "DIRECT",
-      "protocol": "freedom"
-    },
-    {
       "tag": "WARP",
       "protocol": "wireguard",
       "settings": {
@@ -62,6 +58,10 @@
         "reserved": "${RW_WARP_RESERVED}",
         "mtu": 1280
       }
+    },
+    {
+      "tag": "DIRECT",
+      "protocol": "freedom"
     },
     {
       "tag": "BLOCK",
