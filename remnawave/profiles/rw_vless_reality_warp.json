@@ -1,0 +1,113 @@
+{
+  "log": {
+    "loglevel": "none"
+  },
+  "inbounds": [
+    {
+      "tag": "${RW_INBOUND_TAG}",
+      "port": 443,
+      "listen": "0.0.0.0",
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ]
+      },
+      "streamSettings": {
+        "network": "raw",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "xver": 0,
+          "target": "${RW_REALITY_TARGET}",
+          "shortIds": [
+            "${RW_REALITY_SHORT_ID}"
+          ],
+          "privateKey": "${RW_REALITY_PRIVATE_KEY}",
+          "serverNames": [
+            "${RW_REALITY_SERVER_NAME}"
+          ]
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "DIRECT",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "WARP",
+      "protocol": "wireguard",
+      "settings": {
+        "secretKey": "${RW_WARP_SECRET_KEY}",
+        "address": "${RW_WARP_ADDRESS}",
+        "peers": [
+          {
+            "publicKey": "${RW_WARP_PUBLIC_KEY}",
+            "allowedIPs": [
+              "0.0.0.0/0",
+              "::/0"
+            ],
+            "endpoint": "${RW_WARP_ENDPOINT}"
+          }
+        ],
+        "reserved": "${RW_WARP_RESERVED}",
+        "mtu": 1280
+      }
+    },
+    {
+      "tag": "BLOCK",
+      "protocol": "blackhole"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "ip": [
+          "geoip:private"
+        ],
+        "type": "field",
+        "outboundTag": "BLOCK"
+      },
+      {
+        "type": "field",
+        "domain": [
+          "geosite:private"
+        ],
+        "outboundTag": "BLOCK"
+      },
+      {
+        "type": "field",
+        "protocol": [
+          "bittorrent"
+        ],
+        "outboundTag": "BLOCK"
+      },
+      {
+        "type": "field",
+        "domain": [
+          "geosite:openai",
+          "geosite:google",
+          "geosite:netflix"
+        ],
+        "outboundTag": "WARP"
+      },
+      {
+        "type": "field",
+        "ip": [
+          "geoip:telegram"
+        ],
+        "outboundTag": "WARP"
+      }
+    ]
+  }
+}

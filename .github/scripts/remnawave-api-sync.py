@@ -32,6 +32,10 @@ except Exception:  # pragma: no cover
 PLACEHOLDER_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 TAG_SAFE_RE = re.compile(r"[^A-Z0-9_]+")
 HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
+PROFILE_PRESET_STANDARD = "standard"
+PROFILE_PRESET_WARP = "warp"
+SUPPORTED_PROFILE_PRESETS = {PROFILE_PRESET_STANDARD, PROFILE_PRESET_WARP}
+WARP_PROFILE_TEMPLATE_REL = "remnawave/profiles/rw_vless_reality_warp.json"
 
 
 def fail(message: str) -> None:
@@ -94,6 +98,47 @@ def ensure_non_empty_str(value: Any, context: str) -> str:
     if not result:
         fail(f"Missing required value: {context}")
     return result
+
+
+def parse_bool(value: Any, context: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    fail(f"{context} must be boolean.")
+
+
+def normalize_profile_preset(value: Any, context: str) -> str:
+    preset = str(value or "").strip().lower()
+    if not preset:
+        return ""
+    if preset not in SUPPORTED_PROFILE_PRESETS:
+        fail(f"{context} must be one of: {', '.join(sorted(SUPPORTED_PROFILE_PRESETS))}.")
+    return preset
+
+
+def resolve_profile_template_rel(
+    *,
+    default_template_rel: str,
+    profile_template_override: str,
+    profile_preset: str,
+    warp_enabled: bool,
+) -> str:
+    if profile_template_override:
+        return profile_template_override
+    if profile_preset == PROFILE_PRESET_WARP:
+        return WARP_PROFILE_TEMPLATE_REL
+    if profile_preset == PROFILE_PRESET_STANDARD:
+        return default_template_rel
+    if warp_enabled:
+        return WARP_PROFILE_TEMPLATE_REL
+    return default_template_rel
 
 
 def resolve_placeholders(value: Any, placeholder_vars: dict[str, Any], context: str) -> Any:
@@ -314,6 +359,16 @@ def normalize_fleet_hosts(fleet_data: dict[str, Any], default_template_rel: str)
     hosts = fleet_data.get("hosts")
     if not isinstance(hosts, dict) or not hosts:
         fail("Fleet config must contain non-empty object field 'hosts'.")
+    defaults = fleet_data.get("defaults", {})
+    if defaults is None:
+        defaults = {}
+    if not isinstance(defaults, dict):
+        fail("Fleet config field 'defaults' must be an object.")
+    default_remnawave = defaults.get("remnawave", {})
+    if default_remnawave is None:
+        default_remnawave = {}
+    if not isinstance(default_remnawave, dict):
+        fail("Fleet config field 'defaults.remnawave' must be an object.")
 
     normalized: dict[str, dict[str, Any]] = {}
     for alias, host_cfg in hosts.items():
@@ -321,11 +376,26 @@ def normalize_fleet_hosts(fleet_data: dict[str, Any], default_template_rel: str)
             fail(f"Fleet host '{alias}' must be an object.")
         ansible_host = ensure_non_empty_str(host_cfg.get("ansible_host", ""), f"hosts.{alias}.ansible_host")
 
-        remnawave = host_cfg.get("remnawave", {})
-        if remnawave is None:
-            remnawave = {}
-        if not isinstance(remnawave, dict):
+        host_remnawave = host_cfg.get("remnawave", {})
+        if host_remnawave is None:
+            host_remnawave = {}
+        if not isinstance(host_remnawave, dict):
             fail(f"Fleet host '{alias}' remnawave block must be an object.")
+        remnawave = dict(default_remnawave)
+        remnawave.update(host_remnawave)
+
+        warp_enabled = parse_bool(remnawave.get("warp_enabled", False), f"Fleet host '{alias}' remnawave.warp_enabled")
+        profile_preset = normalize_profile_preset(
+            remnawave.get("profile_preset", ""),
+            f"Fleet host '{alias}' remnawave.profile_preset",
+        )
+        profile_template_override = str(remnawave.get("profile_template", "") or "").strip()
+        resolved_profile_template = resolve_profile_template_rel(
+            default_template_rel=default_template_rel,
+            profile_template_override=profile_template_override,
+            profile_preset=profile_preset,
+            warp_enabled=warp_enabled,
+        )
 
         profile_name = str(remnawave.get("target_profile_name", "") or "").strip()
         if not profile_name:
@@ -355,7 +425,9 @@ def normalize_fleet_hosts(fleet_data: dict[str, Any], default_template_rel: str)
             "panel_node_uuid": str(remnawave.get("panel_node_uuid", "") or "").strip(),
             "target_profile_name": profile_name,
             "target_inbound_tags": [str(tag).strip() for tag in target_inbound_tags if str(tag).strip()],
-            "profile_template": str(remnawave.get("profile_template", "") or default_template_rel).strip(),
+            "profile_template": resolved_profile_template,
+            "profile_preset": profile_preset,
+            "warp_enabled": warp_enabled,
             "inbound_tag": inbound_tag,
             "reality_target": reality_target,
             "reality_short_id": str(remnawave.get("reality_short_id", "") or "").strip(),
