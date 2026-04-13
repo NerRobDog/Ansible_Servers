@@ -307,6 +307,8 @@
   ansible.builtin.shell: |
     set -o pipefail
     wg show {{ remnawave_warp_interface_name | quote }} latest-handshakes | awk 'NR==1 {print $2}'
+  args:
+    executable: /bin/bash
   register: remnawave_warp_handshake_ts
   changed_when: false
   failed_when: false
