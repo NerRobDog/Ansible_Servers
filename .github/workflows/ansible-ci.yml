@@ -2,8 +2,8 @@
 name: ansible-ci
 
 on:
-  push:
   pull_request:
+  workflow_dispatch:
 
 env:
   ANSIBLE_LOCAL_TEMP: .ansible/tmp
