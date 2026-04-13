@@ -5,21 +5,26 @@
       - ansible_os_family == "Debian"
       - ansible_distribution in ["Debian", "Ubuntu"]
     fail_msg: "Role node_tuning supports Debian/Ubuntu only."
-  tags: [remnawave, bbr, ipv6]
+  tags: [remnawave, bbr, ipv6, warp]
 
 - name: Resolve effective IPv6 state
   ansible.builtin.set_fact:
     remnawave_ipv6_state_effective: "{{ remnawave_ipv6_state_resolved | default(remnawave_ipv6_state, true) | string }}"
   changed_when: false
-  tags: [remnawave, bbr, ipv6]
+  tags: [remnawave, bbr, ipv6, warp]
 
 - name: Validate supported tuning values
   ansible.builtin.assert:
     that:
       - remnawave_ipv6_state_effective in ["enabled", "disabled"]
-      - not (remnawave_warp_enabled | bool)
-    fail_msg: "remnawave_ipv6_state must be enabled|disabled and WARP is intentionally unsupported in v1."
-  tags: [remnawave, bbr, ipv6]
+      - remnawave_warp_trace_verify_mode in ["soft", "strict"]
+      - (remnawave_warp_handshake_timeout_seconds | int) > 0
+    fail_msg: >-
+      Invalid node_tuning settings:
+      remnawave_ipv6_state=enabled|disabled,
+      remnawave_warp_trace_verify_mode=soft|strict,
+      remnawave_warp_handshake_timeout_seconds>0.
+  tags: [remnawave, bbr, ipv6, warp]
 
 - name: Enable BBR default qdisc
   ansible.posix.sysctl:
@@ -74,3 +79,298 @@
     reload: true
     sysctl_file: /etc/sysctl.d/99-remnawave-ipv6.conf
   tags: [remnawave, ipv6]
+
+- name: Resolve wgcf architecture label
+  ansible.builtin.set_fact:
+    remnawave_warp_wgcf_arch: >-
+      {{
+        {
+          'x86_64': 'amd64',
+          'amd64': 'amd64',
+          'aarch64': 'arm64',
+          'arm64': 'arm64',
+          'armv7l': 'armv7',
+          'armv7': 'armv7'
+        }.get(ansible_architecture, '')
+      }}
+  changed_when: false
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Validate supported architecture for WARP
+  ansible.builtin.assert:
+    that:
+      - remnawave_warp_wgcf_arch | length > 0
+    fail_msg: "Unsupported architecture for WARP wgcf binary: {{ ansible_architecture }}"
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Install WARP prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - wireguard
+    state: present
+    update_cache: true
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Read latest wgcf release metadata
+  ansible.builtin.uri:
+    url: https://api.github.com/repos/ViRb3/wgcf/releases/latest
+    method: GET
+    return_content: true
+    status_code: [200]
+    timeout: 20
+  register: remnawave_warp_wgcf_release
+  changed_when: false
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Build wgcf download URL
+  ansible.builtin.set_fact:
+    remnawave_warp_wgcf_version: "{{ remnawave_warp_wgcf_release.json.tag_name | default('') | string }}"
+    remnawave_warp_wgcf_download_url: >-
+      https://github.com/ViRb3/wgcf/releases/download/{{ remnawave_warp_wgcf_release.json.tag_name }}/
+      wgcf_{{ remnawave_warp_wgcf_release.json.tag_name | regex_replace('^v', '') }}_linux_{{ remnawave_warp_wgcf_arch }}
+  changed_when: false
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Validate wgcf release version
+  ansible.builtin.assert:
+    that:
+      - remnawave_warp_wgcf_version | length > 0
+    fail_msg: "Could not detect latest wgcf release tag from GitHub API."
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Install wgcf binary
+  ansible.builtin.get_url:
+    url: "{{ remnawave_warp_wgcf_download_url | regex_replace('\\s+', '') }}"
+    dest: /usr/local/bin/wgcf
+    owner: root
+    group: root
+    mode: "0755"
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Ensure WARP config directory exists
+  ansible.builtin.file:
+    path: "{{ remnawave_warp_conf_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Check if WARP account is already registered
+  ansible.builtin.stat:
+    path: "{{ remnawave_warp_account_file }}"
+  register: remnawave_warp_account_file_stat
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Register WARP account with wgcf (retry on transient errors)
+  ansible.builtin.command:
+    argv:
+      - wgcf
+      - register
+      - --accept-tos
+    chdir: "{{ remnawave_warp_conf_dir }}"
+  register: remnawave_warp_register_cmd
+  failed_when: false
+  changed_when: remnawave_warp_register_cmd.rc == 0
+  retries: 3
+  delay: 8
+  until: remnawave_warp_register_cmd.rc == 0
+  when:
+    - remnawave_warp_enabled | bool
+    - not (remnawave_warp_account_file_stat.stat.exists | default(false))
+  tags: [remnawave, warp]
+
+- name: Re-check WARP account file after registration attempts
+  ansible.builtin.stat:
+    path: "{{ remnawave_warp_account_file }}"
+  register: remnawave_warp_account_file_stat_after
+  when:
+    - remnawave_warp_enabled | bool
+    - not (remnawave_warp_account_file_stat.stat.exists | default(false))
+  tags: [remnawave, warp]
+
+- name: Fail when WARP account file is still missing
+  ansible.builtin.fail:
+    msg: >-
+      wgcf registration failed after retries (rc={{ remnawave_warp_register_cmd.rc | default('n/a') }}).
+      stdout={{ remnawave_warp_register_cmd.stdout | default('') | trim | regex_replace('\\s+', ' ') | truncate(240, true, '...') }};
+      stderr={{ remnawave_warp_register_cmd.stderr | default('') | trim | regex_replace('\\s+', ' ') | truncate(240, true, '...') }}.
+      Known transient reasons include Cloudflare 429/500 or network timeout.
+  when:
+    - remnawave_warp_enabled | bool
+    - not (remnawave_warp_account_file_stat.stat.exists | default(false))
+    - not (remnawave_warp_account_file_stat_after.stat.exists | default(false))
+  tags: [remnawave, warp]
+
+- name: Generate wgcf profile
+  ansible.builtin.command:
+    argv:
+      - wgcf
+      - generate
+    chdir: "{{ remnawave_warp_conf_dir }}"
+    creates: "{{ remnawave_warp_profile_file }}"
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Remove DNS from wgcf profile
+  ansible.builtin.lineinfile:
+    path: "{{ remnawave_warp_profile_file }}"
+    regexp: '^DNS = '
+    state: absent
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Ensure Table=off in wgcf profile
+  ansible.builtin.lineinfile:
+    path: "{{ remnawave_warp_profile_file }}"
+    regexp: '^Table = '
+    line: Table = off
+    insertafter: '^MTU = '
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Ensure PersistentKeepalive in wgcf profile
+  ansible.builtin.lineinfile:
+    path: "{{ remnawave_warp_profile_file }}"
+    regexp: '^PersistentKeepalive = '
+    line: PersistentKeepalive = 25
+    insertafter: '^Endpoint = '
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Remove WARP IPv6 route from AllowedIPs when IPv6 is disabled
+  ansible.builtin.replace:
+    path: "{{ remnawave_warp_profile_file }}"
+    regexp: ',\s*[0-9A-Fa-f:]+/128'
+    replace: ''
+  when:
+    - remnawave_warp_enabled | bool
+    - remnawave_ipv6_state_effective == 'disabled'
+  tags: [remnawave, warp]
+
+- name: Remove WARP IPv6 address when IPv6 is disabled
+  ansible.builtin.lineinfile:
+    path: "{{ remnawave_warp_profile_file }}"
+    regexp: '^Address = [0-9A-Fa-f:]+/128$'
+    state: absent
+  when:
+    - remnawave_warp_enabled | bool
+    - remnawave_ipv6_state_effective == 'disabled'
+  tags: [remnawave, warp]
+
+- name: Install WARP wireguard configuration
+  ansible.builtin.copy:
+    src: "{{ remnawave_warp_profile_file }}"
+    dest: "{{ remnawave_warp_conf_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+    remote_src: true
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Enable and start WARP interface
+  ansible.builtin.systemd:
+    name: "wg-quick@{{ remnawave_warp_interface_name }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Verify WARP interface is visible in WireGuard
+  ansible.builtin.command:
+    argv:
+      - wg
+      - show
+      - "{{ remnawave_warp_interface_name }}"
+  register: remnawave_warp_wg_show
+  changed_when: false
+  retries: 5
+  delay: 2
+  until: remnawave_warp_wg_show.rc == 0
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Wait for WARP handshake timestamp
+  ansible.builtin.shell: |
+    set -o pipefail
+    wg show {{ remnawave_warp_interface_name | quote }} latest-handshakes | awk 'NR==1 {print $2}'
+  register: remnawave_warp_handshake_ts
+  changed_when: false
+  failed_when: false
+  retries: "{{ [remnawave_warp_handshake_timeout_seconds | int, 1] | max }}"
+  delay: 1
+  until: (remnawave_warp_handshake_ts.stdout | default('0') | trim | int) > 0
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Fail when WARP handshake was not established
+  ansible.builtin.assert:
+    that:
+      - (remnawave_warp_handshake_ts.stdout | default('0') | trim | int) > 0
+    fail_msg: "WARP interface started but no handshake was observed."
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Probe Cloudflare trace through WARP interface
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --silent
+      - --show-error
+      - --fail
+      - --interface
+      - "{{ remnawave_warp_interface_name }}"
+      - https://www.cloudflare.com/cdn-cgi/trace
+  register: remnawave_warp_trace_result
+  changed_when: false
+  failed_when: false
+  when: remnawave_warp_enabled | bool
+  tags: [remnawave, warp]
+
+- name: Fail in strict mode when Cloudflare trace did not confirm warp=on
+  ansible.builtin.fail:
+    msg: >-
+      WARP strict verification failed. curl_rc={{ remnawave_warp_trace_result.rc }};
+      output={{ remnawave_warp_trace_result.stdout | default('') | trim | regex_replace('\\s+', ' ') | truncate(240, true, '...') }};
+      error={{ remnawave_warp_trace_result.stderr | default('') | trim | regex_replace('\\s+', ' ') | truncate(240, true, '...') }}.
+  when:
+    - remnawave_warp_enabled | bool
+    - remnawave_warp_trace_verify_mode == 'strict'
+    - remnawave_warp_trace_result.rc != 0 or ('warp=on' not in (remnawave_warp_trace_result.stdout | default('')))
+  tags: [remnawave, warp]
+
+- name: Warn in soft mode when Cloudflare trace did not confirm warp=on
+  ansible.builtin.debug:
+    msg: >-
+      WARP soft verification warning: curl_rc={{ remnawave_warp_trace_result.rc }};
+      output={{ remnawave_warp_trace_result.stdout | default('') | trim | regex_replace('\\s+', ' ') | truncate(240, true, '...') }};
+      error={{ remnawave_warp_trace_result.stderr | default('') | trim | regex_replace('\\s+', ' ') | truncate(240, true, '...') }}.
+  when:
+    - remnawave_warp_enabled | bool
+    - remnawave_warp_trace_verify_mode == 'soft'
+    - remnawave_warp_trace_result.rc != 0 or ('warp=on' not in (remnawave_warp_trace_result.stdout | default('')))
+  tags: [remnawave, warp]
+
+- name: Disable WARP interface when feature is off
+  ansible.builtin.systemd:
+    name: "wg-quick@{{ remnawave_warp_interface_name }}"
+    enabled: false
+    state: stopped
+  failed_when: false
+  when:
+    - not (remnawave_warp_enabled | bool)
+    - remnawave_warp_disable_service_when_disabled | bool
+  tags: [remnawave, warp]

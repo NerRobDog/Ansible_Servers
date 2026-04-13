@@ -2,3 +2,11 @@
 remnawave_bbr_enabled: true
 remnawave_ipv6_state: enabled
 remnawave_warp_enabled: false
+remnawave_warp_conf_dir: /etc/wireguard
+remnawave_warp_account_file: "{{ remnawave_warp_conf_dir }}/wgcf-account.toml"
+remnawave_warp_profile_file: "{{ remnawave_warp_conf_dir }}/wgcf-profile.conf"
+remnawave_warp_interface_name: warp
+remnawave_warp_conf_file: "{{ remnawave_warp_conf_dir }}/{{ remnawave_warp_interface_name }}.conf"
+remnawave_warp_disable_service_when_disabled: true
+remnawave_warp_handshake_timeout_seconds: 15
+remnawave_warp_trace_verify_mode: soft
