@@ -1,0 +1,12 @@
+{% for mac in passwall2_acl_bypass_macs_effective | default([]) %}
+{% set mac_trimmed = mac | string | trim %}
+{% if mac_trimmed | length > 0 %}
+config acl_rule 'ansible_acl_bypass_{{ loop.index }}'
+	option enabled '1'
+	option remarks 'Ansible bypass {{ loop.index }}'
+	option source_mac '{{ mac_trimmed }}'
+	option tcp_proxy_mode 'disable'
+	option udp_proxy_mode 'disable'
+{% endif %}
+{% endfor %}
+

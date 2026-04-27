@@ -1,0 +1,4 @@
+config prometheus-node-exporter-lua 'main'
+	option listen_interface '*'
+	option listen_port '{{ openwrt_node_exporter_port }}'
+	option omit_zero_values '0'

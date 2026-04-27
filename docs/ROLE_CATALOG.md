@@ -23,6 +23,16 @@
 - Дефолт: включена (`feature_docker=true`).
 - Когда выключать: если Docker уже управляется внешней системой.
 
+### `tailscale`
+- Назначение: установка Tailscale, запуск сервиса и минимальный join в tailnet.
+- Дефолт: выключена (`feature_tailscale=false`).
+- Ключевые параметры:
+  - `tailscale_auth_key_env` (по умолчанию `TAILSCALE_AUTH_KEY`)
+  - `tailscale_extra_args` (доп. args для `tailscale up`)
+- Поведение:
+  - если хост уже авторизован, `tailscale up` не выполняется;
+  - если хост не авторизован, нужен ключ из GitHub Secrets.
+
 ### `remnawave_node`
 - Назначение: deploy контейнера `remnawave/node`.
 - Требует:
@@ -55,6 +65,25 @@
 - Требует: `feature_node_tuning=true`.
 - Основной параметр:
   - `remnawave.ipv6_state` = `enabled|disabled`.
+
+### `monitoring_agent`
+- Назначение: запуск `node_exporter` и `cadvisor` на ноде для удалённого scrape.
+- Требует: `feature_monitoring_agent=true`.
+- Основные параметры:
+  - `monitoring.agent_bind_address` (по умолчанию `0.0.0.0`)
+  - `monitoring.agent_node_exporter_port` (по умолчанию `9100`)
+  - `monitoring.agent_cadvisor_port` (по умолчанию `8080`)
+
+### `monitoring_stack`
+- Назначение: центральный стек `Prometheus + Alertmanager + Grafana + Loki + Promtail`.
+- Требует: `feature_monitoring_stack=true`.
+- Основные параметры:
+  - `monitoring.stack_retention_days`
+  - `monitoring.stack_grafana_admin_user`
+  - `monitoring.stack_grafana_admin_password`
+- Подключение нод:
+  - автоматически берёт хосты с `feature_monitoring_agent=true` из `fleet_hosts`.
+  - скрапит `node_exporter`/`cadvisor` по `ansible_host` и monitoring-портам.
 
 ### `user_shell`
 - Назначение: пользователь, authorized_keys, sudo, shell-окружение.
@@ -111,15 +140,160 @@ features:
   feature_base: true
   feature_firewall: true
   feature_docker: true
+  feature_tailscale: false
   feature_remnawave_node: false
   feature_caddy_node: false
   feature_node_tuning: false
+  feature_monitoring_agent: false
+  feature_monitoring_stack: false
   feature_user_shell: false
 ```
 
 Правило:
 - база включена почти везде;
 - дополнительные роли включайте только там, где это действительно нужно.
+
+## OpenWrt roles
+
+### `openwrt_rollback_guard`
+- Назначение: авто-rollback guard перед изменениями OpenWrt (snapshot managed paths + пакеты, watchdog, confirm).
+- Дефолт: включён для `deploy/lockdown`, отключён в `--check` и в `bootstrap`.
+- Ключевые параметры:
+  - `openwrt_rollback_enabled`
+  - `openwrt_rollback_timeout_minutes`
+  - `openwrt_rollback_reboot_on_restore`
+  - `openwrt_rollback_snapshot_dir`
+  - `openwrt_rollback_managed_paths`
+  - `openwrt_rollback_managed_services`
+- Поведение:
+  - если confirm не выполнен после деплоя, запускается rollback и reboot.
+  - подтверждение делается через `/usr/local/sbin/openwrt-rollback-guard confirm`.
+
+### `openwrt_base`
+- Назначение: проверка OpenWrt, базовые пакеты, bootstrap SSH key (в `bootstrap` режиме).
+- Дефолт: включена (`feature_openwrt_base=true`).
+- Ключевые параметры:
+  - `openwrt_base_packages`
+  - `openwrt_bootstrap_public_key`
+
+### `openwrt_network_core`
+- Назначение: managed baseline для `network` (loopback/LAN/WAN skeleton).
+- Дефолт: выключена (`feature_openwrt_network_core=false`).
+- Ключевые параметры:
+  - `openwrt_network_lan_device`
+  - `openwrt_network_lan_ipaddr`
+  - `openwrt_network_lan_netmask`
+  - `openwrt_network_lan_ip6assign`
+  - `openwrt_network_ula_prefix`
+
+### `openwrt_firewall_core`
+- Назначение: managed baseline для `firewall` + fail-safe SSH.
+- Дефолт: выключена (`feature_openwrt_firewall_core=false`).
+- Поведение:
+  - всегда держит allow SSH из LAN;
+  - при включённом ZeroTier добавляет allow SSH из `openwrt_firewall_zerotier_src_cidr`.
+- Ключевые параметры:
+  - `openwrt_firewall_allow_zerotier_ssh`
+  - `openwrt_firewall_zerotier_src_cidr`
+
+### `openwrt_wan`
+- Назначение: managed конфиг `network.wan` для разных провайдеров.
+- Дефолт: выключена (`feature_openwrt_wan=false`), включайте осознанно во fleet.
+- В `openwrt_profile=prod_update` требует явный opt-in: `feature_openwrt_wan_apply_in_prod=true`.
+- Поддерживаемые режимы:
+  - `openwrt_wan_proto=dhcp`
+  - `openwrt_wan_proto=static` (нужны `openwrt_wan_ipaddr` + `openwrt_wan_netmask`)
+  - `openwrt_wan_proto=pppoe` (нужны `openwrt_wan_pppoe_username` + `openwrt_wan_pppoe_password`)
+- Ключевые параметры:
+  - `openwrt_wan_device` (обычно `eth0` или DSA-имя интерфейса)
+  - `openwrt_wan_gateway`
+  - `openwrt_wan_dns` (list)
+  - `openwrt_wan_pppoe_ipv6` (`auto|0|1`)
+  - `openwrt_wan_boot_try_dhcp_first` (`true|false`, default `true`)
+  - `openwrt_wan_boot_try_dhcp_wait_sec`
+  - `openwrt_wan_boot_try_dhcp_probe_host`
+  - `openwrt_wan_boot_try_dhcp_probe_count`
+  - `openwrt_wan_boot_try_dhcp_service_name`
+  - `openwrt_wan_boot_try_dhcp_start_priority`
+- Поведение:
+  - роль меняет только `network.wan`;
+  - при изменении делает `uci commit network` + `network reload/restart`.
+  - для `static|pppoe` может ставить boot-service `wan_failover`: на старте сначала пробует DHCP, при неуспехе применяет configured fallback профиль WAN.
+
+### `openwrt_zerotier`
+- Назначение: установка ZeroTier, UCI-конфиг и join к сети.
+- Дефолт: включена (`feature_openwrt_zerotier=true`).
+- Ключевые параметры:
+  - `zerotier_network_id` (обязателен при включённой роли)
+  - `zerotier_manage_secret` / `zerotier_secret`
+- Примечание: может работать одновременно с `feature_tailscale=true`.
+
+### `openwrt_passwall2`
+- Назначение: полностью managed `/etc/config/passwall2` из шаблона.
+- Дефолт: включена (`feature_openwrt_passwall2=true`).
+- Политика безопасности: `passwall2.global.enabled=0` по умолчанию (safe mode).
+- Ключевые параметры:
+  - `passwall2_subscribe_url` (обязателен)
+  - `passwall2_probe_url`
+  - `passwall2_socks_port`
+  - `passwall2_profile_overrides`
+  - `passwall2_acl_bypass_macs`
+  - `passwall2_auto_enable_when_nodes`
+  - `passwall2_require_nodes_for_enable`
+- Шаблон разделён на логические блоки (rules/nodes/global/acl/runtime/subscribe) и собирается в единый managed конфиг.
+
+### `openwrt_homeproxy_cleanup`
+- Назначение: stop/disable/remove HomeProxy и его конфиг, чтобы не держать mixed-mode.
+- Дефолт: включена (`feature_openwrt_homeproxy_cleanup=true`).
+
+### `openwrt_docker_runtime`
+- Назначение: managed Docker runtime на OpenWrt (пакеты/daemon/service) без destructive reset.
+- Дефолт: включена (`feature_openwrt_docker_runtime=true`).
+- Ключевые параметры:
+  - `openwrt_docker_manage_runtime`
+  - `openwrt_docker_runtime_packages`
+  - `openwrt_docker_runtime_manage_daemon_config`
+  - `openwrt_docker_runtime_daemon_config`
+
+### `openwrt_docker_stacks`
+- Назначение: управляемые docker-compose стеки на OpenWrt.
+- Дефолт: включена (`feature_openwrt_docker_stacks=true`).
+- Ключевые параметры:
+  - `openwrt_docker_compose_command`
+  - `openwrt_docker_stacks`
+
+### `openwrt_monitoring_agent`
+- Назначение: OpenWrt exporter + textfile probes (direct и via Passwall2).
+- Дефолт: включена (`feature_openwrt_monitoring_agent=true`).
+- Ключевые параметры:
+  - `openwrt_node_exporter_port`
+  - `openwrt_probe_interval_minutes`
+  - `passwall2_probe_url`
+  - `passwall2_socks_port`
+
+### `openwrt_ssh_lockdown`
+- Назначение: выключение `PasswordAuth` и `RootPasswordAuth` в Dropbear.
+- Дефолт: выключена (`feature_openwrt_ssh_lockdown=false`).
+- Обычно включается в режиме workflow `lockdown`.
+
+## OpenWrt feature flags reference
+
+```yaml
+features:
+  feature_openwrt_base: true
+  feature_openwrt_network_core: false
+  feature_openwrt_firewall_core: false
+  feature_openwrt_wan: false
+  feature_openwrt_wan_apply_in_prod: false
+  feature_openwrt_zerotier: true
+  feature_tailscale: false
+  feature_openwrt_passwall2: true
+  feature_openwrt_homeproxy_cleanup: true
+  feature_openwrt_docker_runtime: true
+  feature_openwrt_docker_stacks: true
+  feature_openwrt_monitoring_agent: true
+  feature_openwrt_ssh_lockdown: false
+```
 
 ## RemaWave Panel Sync (CI pre-step)
 

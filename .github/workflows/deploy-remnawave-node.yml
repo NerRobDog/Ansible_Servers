@@ -127,6 +127,14 @@ jobs:
           fi
           echo "${RW_FLEET_CONFIG_B64}" | base64 --decode > .ansible/runtime/fleet_config.yaml
 
+      - name: Decode optional OpenWrt fleet config from secret
+        env:
+          OPENWRT_FLEET_CONFIG_B64: ${{ secrets.OPENWRT_FLEET_CONFIG_B64 }}
+        run: |
+          if [[ -n "${OPENWRT_FLEET_CONFIG_B64}" ]]; then
+            echo "${OPENWRT_FLEET_CONFIG_B64}" | base64 --decode > .ansible/runtime/openwrt_fleet_config.yaml
+          fi
+
       - name: Render runtime inventory and vars
         env:
           MODE: ${{ inputs.mode }}
@@ -150,6 +158,45 @@ jobs:
               '. + {remnawave_api_endpoint_template: $endpoint}' \
               .ansible/runtime/runtime_vars.json > .ansible/runtime/runtime_vars.tmp.json
             mv .ansible/runtime/runtime_vars.tmp.json .ansible/runtime/runtime_vars.json
+          fi
+
+      - name: Validate yusic worker dispatch inputs
+        if: ${{ inputs.target == 'yusic_worker' }}
+        env:
+          WORKER_MODE: ${{ inputs.worker_mode }}
+          WORKER_IMAGE_TAG: ${{ inputs.worker_image_tag }}
+        run: |
+          if [[ "${WORKER_MODE}" == "deploy" || "${WORKER_MODE}" == "update" ]]; then
+            if [[ -z "${WORKER_IMAGE_TAG}" ]]; then
+              echo "worker_image_tag is required for worker_mode=${WORKER_MODE}." >&2
+              exit 1
+            fi
+            if [[ ! "${WORKER_IMAGE_TAG}" =~ ^sha-[0-9a-f]{7,64}$ ]]; then
+              echo "worker_image_tag must match immutable format sha-<hex>, got '${WORKER_IMAGE_TAG}'." >&2
+              exit 1
+            fi
+          fi
+
+      - name: Merge OpenWrt scrape targets into runtime vars
+        run: |
+          if [[ -f .ansible/runtime/openwrt_fleet_config.yaml ]]; then
+            .github/scripts/render-openwrt-fleet-runtime.py \
+              --fleet-config .ansible/runtime/openwrt_fleet_config.yaml \
+              --mode deploy \
+              --inventory-out .ansible/runtime/openwrt_hosts.ini \
+              --vars-out .ansible/runtime/openwrt_runtime_vars.json \
+              --bootstrap-out .ansible/runtime/openwrt_bootstrap_map.json \
+              --skip-connectivity-check
+
+            jq -s '
+              .[0] * {
+                openwrt_fleet_hosts: (.[1].openwrt_fleet_hosts // {})
+              }
+            ' \
+              .ansible/runtime/runtime_vars.json \
+              .ansible/runtime/openwrt_runtime_vars.json > .ansible/runtime/runtime_vars.merged.json
+
+            mv .ansible/runtime/runtime_vars.merged.json .ansible/runtime/runtime_vars.json
           fi
 
       - name: Validate yusic worker dispatch inputs
@@ -333,6 +380,7 @@ jobs:
           CHECK_MODE: ${{ inputs.check_mode }}
           TAGS: ${{ inputs.tags }}
           CI_DEPLOY_PUBLIC_KEY: ${{ steps.ssh_key.outputs.public_key }}
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
           MODE: ${{ inputs.mode }}
           WORKER_MODE: ${{ inputs.worker_mode }}
           WORKER_IMAGE_TAG: ${{ inputs.worker_image_tag }}

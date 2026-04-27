@@ -1,0 +1,105 @@
+---
+passwall2_enabled: true
+passwall2_feed_name: openwrt_kiddin9
+passwall2_feed_url: "https://master.dl.sourceforge.net/project/openwrt-passwall-build/releases/packages-24.10/aarch64_cortex-a53/passwall2"
+passwall2_dep_feed_name: openwrt_passwall2_deps
+passwall2_dep_feed_url: "https://downloads.immortalwrt.org/releases/23.05.3/packages/aarch64_cortex-a53/packages"
+passwall2_download_timeout: 20
+passwall2_download_retries: 2
+passwall2_subscribe_url: ""
+passwall2_probe_url: https://www.gstatic.com/generate_204
+passwall2_socks_port: 1070
+passwall2_profile_overrides: {}
+passwall2_acl_bypass_macs: []
+passwall2_dns_provider: cloudflare
+passwall2_auto_enable_when_nodes: true
+passwall2_require_nodes_for_enable: true
+passwall2_shunt_node_id: uOEn2cRl
+passwall2_balance_node_id: QA84CBXY
+passwall2_enforce_package_versions: true
+passwall2_selftest_enabled: true
+passwall2_selftest_require_proxy_equals_default: true
+passwall2_selftest_expected_direct_tags:
+  - geosite:category-ru
+  - geosite:category-gov-ru
+passwall2_selftest_expected_ban_ru_tags:
+  - geosite:ru-blocked
+passwall2_selftest_expected_proxy_tags:
+  - geosite:openai
+  - geosite:github
+passwall2_selftest_dns_domains:
+  - openai.com
+  - github.com
+  - yandex.ru
+
+passwall2_geoip_url_v2ray: https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/geoip.dat
+passwall2_geosite_url_v2ray: https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/geosite.dat
+passwall2_geoip_url_singbox: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.db
+passwall2_geosite_url_singbox: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.db
+
+passwall2_packages:
+  - luci-app-passwall2
+  - sing-box
+  - xray-core
+  - chinadns-ng
+  - dns2socks
+  - ipt2socks
+  - microsocks
+  - naiveproxy
+
+passwall2_dns_profiles:
+  cloudflare:
+    remote_dns_protocol: doh
+    remote_dns: 1.1.1.1
+    remote_dns_detour: direct
+    remote_dns_doh: https://cloudflare-dns.com/dns-query
+    dns_hosts:
+      - cloudflare-dns.com 1.1.1.1
+      - cloudflare-dns.com 1.0.0.1
+  quad9:
+    remote_dns_protocol: doh
+    remote_dns: 9.9.9.9
+    remote_dns_detour: direct
+    remote_dns_doh: https://dns.quad9.net/dns-query
+    dns_hosts:
+      - dns.quad9.net 9.9.9.9
+      - dns11.quad9.net 149.112.112.112
+
+passwall2_profile_defaults:
+  enabled: "0"
+  localhost_proxy: "0"
+  acl_enable: "1"
+  loglevel: error
+  tcp_redir_ports: 22,25,53,143,465,587,853,993,995,80,443
+  udp_redir_ports: 1:65535
+  remote_dns_protocol: doh
+  remote_dns: 1.1.1.1
+  remote_dns_detour: direct
+  remote_dns_doh: https://cloudflare-dns.com/dns-query
+  dns_hosts:
+    - cloudflare-dns.com 1.1.1.1
+    - cloudflare-dns.com 1.0.0.1
+  block_domains: []
+  direct_domains:
+    - geosite:private
+    - geosite:category-ru
+    - geosite:category-gov-ru
+    - geosite:ru-available-only-inside
+    - geosite:apple
+    - geosite:yandex
+  proxy_domains:
+    - geosite:openai
+    - geosite:github
+    - geosite:netflix
+    - geosite:meta
+    - geosite:twitter
+    - geosite:telegram
+    - geosite:tiktok
+    - geosite:signal
+  ban_ru_domains:
+    - geosite:ru-blocked
+    - geosite:youtube
+    - geosite:discord
+  direct_ip_list: ""
+  proxy_ip_list: ""
+  acl_bypass_macs: []

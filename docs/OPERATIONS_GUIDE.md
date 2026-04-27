@@ -27,6 +27,10 @@ Target:
 Перед `ansible-playbook` workflow выполняет panel pre-step:
 - upsert Config Profiles из `remnawave/profiles/*.json`;
 - назначение profile/inbounds существующим нодам в панели.
+Для мониторинга используется отдельный workflow:
+- `.github/workflows/monitor-remnawave-node.yml`
+- запускается вручную (`workflow_dispatch`) или по расписанию (`cron`);
+- выполняет smoke-checks и отправляет алерты в Telegram topic.
 
 ## 3) Что нужно хранить в GitHub
 
@@ -35,13 +39,21 @@ Target:
 ### Обязательные Secrets
 
 - `RW_FLEET_CONFIG_B64` — base64 от JSON/YAML-конфига серверов.
+- `OPENWRT_FLEET_CONFIG_B64` — base64 от JSON/YAML-конфига OpenWrt роутеров (для OpenWrt workflow).
 - `ANSIBLE_SSH_PRIVATE_KEY` — приватный ключ, которым потом идёт деплой.
 - `RW_PANEL_API_TOKEN` — API токен панели RemaWave (Bearer).
+- `TAILSCALE_AUTH_KEY` — auth key для автоприсоединения хостов с `feature_tailscale=true`, если они ещё не joined.
+- `ZEROTIER_API_TOKEN` — токен ZeroTier Central API для read+authorize в OpenWrt workflow.
 
 ### Опциональные Secrets
 
 - `RW_PROFILE_VARS_B64` — optional global placeholder values (обычно не нужен).
 - `ANSIBLE_VAULT_PASSWORD` — если используете vault-зашифрованные данные.
+- `ALERT_TELEGRAM_BOT_TOKEN` — bot token для уведомлений.
+- `ALERT_TELEGRAM_CHAT_ID` — chat id чата/группы Telegram.
+- `ALERT_TELEGRAM_TOPIC_ID` — topic id (message_thread_id), если отправка нужна в конкретный топик.
+- `ALERT_TELEGRAM_TOPIC_ID_OPENWRT` — отдельный topic id для OpenWrt алертов (fallback на общий).
+- `ZEROTIER_NETWORK_ID` — default network id для OpenWrt ZT API sync (можно не задавать, если network_id указан в fleet).
 
 ### Обязательная Environment Variable
 
@@ -61,9 +73,12 @@ defaults:
     feature_base: true
     feature_firewall: true
     feature_docker: true
+    feature_tailscale: false
     feature_remnawave_node: false
     feature_caddy_node: false
     feature_node_tuning: false
+    feature_monitoring_agent: false
+    feature_monitoring_stack: false
     feature_user_shell: false
 
 hosts:
@@ -77,6 +92,7 @@ hosts:
       feature_remnawave_node: true
       feature_caddy_node: true
       feature_node_tuning: true
+      feature_monitoring_agent: true
     remnawave:
       node_secret_key: "SECRET_FROM_PANEL"
       node_port: 3001
@@ -100,6 +116,13 @@ hosts:
       reality_private_key: ""
       reality_server_name: "node1.example.com"
       target_inbound_tags: []
+    monitoring:
+      agent_bind_address: "0.0.0.0"
+      agent_node_exporter_port: 9100
+      agent_cadvisor_port: 8080
+      stack_retention_days: 7
+      stack_grafana_admin_user: "admin"
+      stack_grafana_admin_password: "CHANGE_ME_STRONG_PASSWORD"
     custom_roles:
       - test_stack
 
@@ -112,6 +135,8 @@ hosts:
       feature_remnawave_node: false
       feature_caddy_node: false
       feature_node_tuning: false
+      feature_monitoring_agent: false
+      feature_monitoring_stack: false
     custom_roles:
       - test_stack
 ```
@@ -204,6 +229,13 @@ base64 -i fleet.yaml | tr -d '\n' | gh secret set RW_FLEET_CONFIG_B64 --env prod
 }
 ```
 
+Мониторинг:
+1. Actions -> `monitor-remnawave-node` -> Run workflow.
+2. Выберите:
+   - `environment`;
+   - `limit`;
+   - `notify_on_success` (`false`, если нужны только алерты при проблемах).
+
 ## 7) Рекомендуемая последовательность для нового хоста
 
 1. Добавить хост в fleet-конфиг и обновить `RW_FLEET_CONFIG_B64`.
@@ -216,6 +248,7 @@ base64 -i fleet.yaml | tr -d '\n' | gh secret set RW_FLEET_CONFIG_B64 --env prod
 Автоматически (`run_smoke=true`) выполняются:
 - SSH-доступ по ключу (`ansible ping`);
 - `systemctl is-active docker` (если `feature_docker=true`);
+- `tailscale status --json` и рабочий backend state (если `feature_tailscale=true`);
 - контейнер `remnanode` в host network + `NET_ADMIN` (если `feature_remnawave_node=true`);
 - `caddy validate` + `https://<domain>:<monitor_port>/healthz` (если `feature_caddy_node=true`);
 - sysctl BBR/IPv6 (если `feature_node_tuning=true`).
@@ -237,6 +270,7 @@ base64 -i fleet.yaml | tr -d '\n' | gh secret set RW_FLEET_CONFIG_B64 --env prod
 - `Missing remnawave_node_secret_key`: включена node-роль, но не передан секрет ноды.
 - `Profile ... not found`/`missing inbound tags`: mismatch манифеста sync и профилей в панели.
 - Нет интернета у клиентов при активной подписке: часто `dest` в панели указывает на `:443` этой же ноды вместо локального decoy.
+- `Telegram secrets are not configured`: не заданы `ALERT_TELEGRAM_BOT_TOKEN`/`ALERT_TELEGRAM_CHAT_ID` в выбранном Environment.
 
 ## 10) Что делать помощнику при изменениях
 
@@ -246,7 +280,131 @@ base64 -i fleet.yaml | tr -d '\n' | gh secret set RW_FLEET_CONFIG_B64 --env prod
 2. Внести правки.
 3. Прогнать:
    - `python .github/scripts/test-render-fleet-runtime.py`
+   - `python .github/scripts/test-render-openwrt-fleet-runtime.py`
    - `ansible-playbook -i hosts.example.ini playbook.yml --syntax-check`
-   - `ansible-lint playbook.yml roles`
+   - `ansible-playbook -i hosts.example.ini playbook.openwrt.yml --syntax-check`
+   - `ansible-lint playbook.yml playbook.openwrt.yml roles`
    - `yamllint .`
 4. Обновить документацию и примеры, если менялся контракт.
+
+## 11) Настройка Telegram topic для алертов
+
+1. Создайте бота через `@BotFather`, получите token.
+2. Добавьте бота в группу, где включены topics, и дайте право писать сообщения.
+3. Получите `chat_id`:
+   - отправьте любое сообщение в группу;
+   - выполните `https://api.telegram.org/bot<TOKEN>/getUpdates`;
+   - возьмите `message.chat.id` (для групп обычно начинается с `-100`).
+4. Получите `topic id`:
+   - отправьте сообщение в нужный топик;
+   - снова вызовите `getUpdates`;
+   - возьмите `message.message_thread_id`.
+5. Сохраните в GitHub Environment secrets:
+   - `ALERT_TELEGRAM_BOT_TOKEN`
+   - `ALERT_TELEGRAM_CHAT_ID`
+   - `ALERT_TELEGRAM_TOPIC_ID`
+
+## 12) OpenWrt lifecycle (bootstrap -> deploy -> lockdown)
+
+Workflow для раскатки роутеров:
+- `.github/workflows/deploy-openwrt.yml`
+
+Workflow для мониторинговых smoke-проверок роутеров:
+- `.github/workflows/monitor-openwrt-fleet.yml`
+
+Пример OpenWrt fleet-конфига:
+- `fleet.openwrt.example.yml`
+
+Рекомендуемая последовательность:
+1. Обновите secret `OPENWRT_FLEET_CONFIG_B64`.
+2. Запустите `deploy-openwrt` с `mode=bootstrap`, `openwrt_profile=fresh` и `limit` на новые роутеры.
+3. Запустите `deploy-openwrt` с `mode=deploy`, `openwrt_profile=prod_update` (сначала `check_mode=true`, затем `false`).
+4. После проверки key-based доступа запустите `mode=lockdown`.
+5. Включите расписание/ручные запуски `monitor-openwrt-fleet`.
+
+WAN-профили во fleet (DHCP/static/PPPoE):
+- включите `features.feature_openwrt_wan=true` (global или per-host);
+- для `openwrt_profile=prod_update` обязательно включите `features.feature_openwrt_wan_apply_in_prod=true`;
+- задайте `wan.proto` и параметры провайдера per-host.
+- для `wan.proto=static|pppoe` по умолчанию работает boot failover:
+  - сначала пробуется DHCP на WAN,
+  - если нет связности (ping `wan.boot_try_dhcp_probe_host`), применяется configured WAN-профиль.
+
+Базовые managed network/firewall роли:
+- `features.feature_openwrt_network_core` — baseline `network` (LAN/loopback/WAN skeleton);
+- `features.feature_openwrt_firewall_core` — baseline `firewall` + fail-safe SSH (LAN + ZeroTier CIDR).
+
+Минимальные примеры:
+```yaml
+defaults:
+  profile: prod_update
+  features:
+    feature_openwrt_network_core: true
+    feature_openwrt_firewall_core: true
+    feature_openwrt_wan: true
+    feature_openwrt_wan_apply_in_prod: true
+  wan:
+    proto: dhcp
+    device: eth0
+    boot_try_dhcp_first: true
+    boot_try_dhcp_wait_sec: 35
+    boot_try_dhcp_probe_host: 1.1.1.1
+    boot_try_dhcp_probe_count: 2
+    boot_try_dhcp_service_name: wan_failover
+    boot_try_dhcp_start_priority: 97
+
+hosts:
+  wrt_dhcp:
+    wan:
+      proto: dhcp
+      device: eth0
+
+  wrt_static:
+    wan:
+      proto: static
+      device: eth0
+      ipaddr: 192.0.2.10
+      netmask: 255.255.255.0
+      gateway: 192.0.2.1
+      dns: [1.1.1.1, 8.8.8.8]
+      boot_try_dhcp_first: true
+
+  wrt_pppoe:
+    wan:
+      proto: pppoe
+      device: eth0
+      pppoe_username: "YOUR_PPPoE_LOGIN"
+      pppoe_password: "YOUR_PPPoE_PASSWORD"
+      pppoe_ipv6: auto
+      boot_try_dhcp_first: true
+```
+
+Важно:
+- `wan` хранится внутри `OPENWRT_FLEET_CONFIG_B64`, поэтому логин/пароль PPPoE не попадают в git;
+- для `static` обязательны `ipaddr` и `netmask`;
+- `wan.boot_try_dhcp_first=false` отключает boot failover и оставляет только configured WAN профиль;
+- роль меняет только `network.wan` и перезагружает сеть только при изменении.
+
+Rollback guard (v1.2):
+- в `deploy/lockdown` при `check_mode=false` роль `openwrt_rollback_guard` автоматически вооружает watchdog;
+- workflow подтверждает guard после успешного smoke;
+- если деплой/проверки упали до confirm, роутер автоматически делает rollback и reboot;
+- лог отката: `/root/.ansible-rollback/<run_id>/rollback.log`.
+
+Локальный деплой с тем же контрактом:
+- используйте `scripts/deploy-openwrt-local.sh` (он делает `ZT API sync (optional) -> access preflight -> deploy -> smoke -> confirm`);
+- прямой запуск `ansible-playbook playbook.openwrt.yml` используйте только для диагностики, без гарантии полного rollback-контракта.
+
+Что проверяет OpenWrt smoke:
+- SSH-доступ;
+- состояние rollback guard (`ARMED|CONFIRMED`);
+- ZeroTier service (если фича включена);
+- tailscale backend state (если `feature_tailscale=true`);
+- managed Passwall2 (safe mode по умолчанию) + SOCKS probe только если proxy включён;
+- dockerd (если включено);
+- exporter + textfile probe-метрики;
+- Dropbear lockdown-параметры (если включено).
+
+Проверка:
+- запустите `monitor-remnawave-node` вручную c `notify_on_success=true`;
+- убедитесь, что сообщение пришло именно в нужный топик.

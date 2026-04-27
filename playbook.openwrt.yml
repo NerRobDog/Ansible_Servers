@@ -1,0 +1,264 @@
+---
+- name: Configure OpenWrt fleet
+  hosts: all
+  gather_facts: false
+  become: false
+
+  pre_tasks:
+    - name: Resolve fleet mode and host config
+      ansible.builtin.set_fact:
+        fleet_mode_effective: "{{ fleet_mode | default('deploy') }}"
+        fleet_host_cfg: "{{ (fleet_hosts | default({})).get(inventory_hostname, {}) }}"
+      changed_when: false
+      tags: [always]
+
+    - name: Validate fleet host config when provided
+      ansible.builtin.assert:
+        that:
+          - fleet_host_cfg is mapping
+      when: (fleet_hosts | default({})) | length > 0
+      tags: [always]
+
+    - name: Resolve effective OpenWrt feature flags
+      ansible.builtin.set_fact:
+        effective_openwrt_profile: >-
+          {{ fleet_host_cfg.get('profile', openwrt_profile) | default('prod_update', true) }}
+        openwrt_rollback_guard_active: >-
+          {{
+            (fleet_mode_effective in ['deploy', 'lockdown'])
+            and (openwrt_rollback_enabled | bool)
+            and (not ansible_check_mode)
+          }}
+        effective_feature_openwrt_base: >-
+          {{ fleet_host_cfg.get('features', {}).get('feature_openwrt_base', feature_openwrt_base) | bool }}
+        effective_feature_openwrt_network_core: >-
+          {{ fleet_host_cfg.get('features', {}).get('feature_openwrt_network_core', feature_openwrt_network_core) | bool }}
+        effective_feature_openwrt_firewall_core: >-
+          {{ fleet_host_cfg.get('features', {}).get('feature_openwrt_firewall_core', feature_openwrt_firewall_core) | bool }}
+        effective_feature_openwrt_wan: >-
+          {{ fleet_host_cfg.get('features', {}).get('feature_openwrt_wan', feature_openwrt_wan) | bool }}
+        effective_feature_openwrt_wan_apply_in_prod: >-
+          {{
+            fleet_host_cfg.get('features', {}).get(
+              'feature_openwrt_wan_apply_in_prod',
+              feature_openwrt_wan_apply_in_prod
+            ) | bool
+          }}
+        effective_openwrt_wan_change_allowed: >-
+          {{
+            (
+              fleet_host_cfg.get('profile', openwrt_profile) | default('prod_update', true)
+            ) == 'fresh' or (
+              fleet_host_cfg.get('features', {}).get(
+                'feature_openwrt_wan_apply_in_prod',
+                feature_openwrt_wan_apply_in_prod
+              ) | bool
+            )
+          }}
+        effective_feature_openwrt_zerotier: >-
+          {{ fleet_host_cfg.get('features', {}).get('feature_openwrt_zerotier', feature_openwrt_zerotier) | bool }}
+        effective_feature_openwrt_passwall2: >-
+          {{ fleet_host_cfg.get('features', {}).get('feature_openwrt_passwall2', feature_openwrt_passwall2) | bool }}
+        effective_feature_tailscale: >-
+          {{ fleet_host_cfg.get('features', {}).get('feature_tailscale', feature_tailscale) | bool }}
+        effective_feature_openwrt_homeproxy_cleanup: >-
+          {{ fleet_host_cfg.get('features', {}).get('feature_openwrt_homeproxy_cleanup', feature_openwrt_homeproxy_cleanup) | bool }}
+        effective_feature_openwrt_docker_runtime: >-
+          {{ fleet_host_cfg.get('features', {}).get('feature_openwrt_docker_runtime', feature_openwrt_docker_runtime) | bool }}
+        effective_feature_openwrt_docker_stacks: >-
+          {{ fleet_host_cfg.get('features', {}).get('feature_openwrt_docker_stacks', feature_openwrt_docker_stacks) | bool }}
+        effective_feature_openwrt_monitoring_agent: >-
+          {{ fleet_host_cfg.get('features', {}).get('feature_openwrt_monitoring_agent', feature_openwrt_monitoring_agent) | bool }}
+        effective_feature_openwrt_ssh_lockdown: >-
+          {{
+            (fleet_mode_effective == 'lockdown')
+            or (
+              fleet_host_cfg.get('features', {}).get(
+                'feature_openwrt_ssh_lockdown',
+                feature_openwrt_ssh_lockdown
+              ) | bool
+            )
+          }}
+        effective_custom_roles: "{{ fleet_host_cfg.custom_roles | default(custom_roles, true) }}"
+      changed_when: false
+      tags: [always]
+
+    - name: Validate OpenWrt profile
+      ansible.builtin.assert:
+        that:
+          - effective_openwrt_profile in ['fresh', 'prod_update']
+        fail_msg: "openwrt_profile must be one of: fresh, prod_update."
+      tags: [always]
+
+    - name: Validate custom roles type
+      ansible.builtin.assert:
+        that:
+          - effective_custom_roles is iterable
+          - effective_custom_roles is not string
+        fail_msg: "custom_roles must be a list of local role names."
+      tags: [always]
+
+    - name: Resolve host-level OpenWrt variables from fleet config
+      ansible.builtin.set_fact:
+        zerotier_network_id: "{{ fleet_host_cfg.get('zerotier', {}).get('network_id', zerotier_network_id) }}"
+        zerotier_manage_secret: "{{ fleet_host_cfg.get('zerotier', {}).get('manage_secret', zerotier_manage_secret) | bool }}"
+        zerotier_secret: "{{ fleet_host_cfg.get('zerotier', {}).get('secret', zerotier_secret) }}"
+        openwrt_wan_enabled: "{{ fleet_host_cfg.get('wan', {}).get('enabled', openwrt_wan_enabled) | bool }}"
+        openwrt_wan_proto: "{{ fleet_host_cfg.get('wan', {}).get('proto', openwrt_wan_proto) | lower }}"
+        openwrt_wan_device: "{{ fleet_host_cfg.get('wan', {}).get('device', openwrt_wan_device) }}"
+        openwrt_wan_ipaddr: "{{ fleet_host_cfg.get('wan', {}).get('ipaddr', openwrt_wan_ipaddr) }}"
+        openwrt_wan_netmask: "{{ fleet_host_cfg.get('wan', {}).get('netmask', openwrt_wan_netmask) }}"
+        openwrt_wan_gateway: "{{ fleet_host_cfg.get('wan', {}).get('gateway', openwrt_wan_gateway) }}"
+        openwrt_wan_dns: "{{ fleet_host_cfg.get('wan', {}).get('dns', openwrt_wan_dns) }}"
+        openwrt_wan_pppoe_username: "{{ fleet_host_cfg.get('wan', {}).get('pppoe_username', openwrt_wan_pppoe_username) }}"
+        openwrt_wan_pppoe_password: "{{ fleet_host_cfg.get('wan', {}).get('pppoe_password', openwrt_wan_pppoe_password) }}"
+        openwrt_wan_pppoe_ipv6: "{{ fleet_host_cfg.get('wan', {}).get('pppoe_ipv6', openwrt_wan_pppoe_ipv6) | lower }}"
+        openwrt_wan_boot_try_dhcp_first: >-
+          {{ fleet_host_cfg.get('wan', {}).get('boot_try_dhcp_first', openwrt_wan_boot_try_dhcp_first) | bool }}
+        openwrt_wan_boot_try_dhcp_wait_sec: >-
+          {{ fleet_host_cfg.get('wan', {}).get('boot_try_dhcp_wait_sec', openwrt_wan_boot_try_dhcp_wait_sec) | int }}
+        openwrt_wan_boot_try_dhcp_probe_host: >-
+          {{ fleet_host_cfg.get('wan', {}).get('boot_try_dhcp_probe_host', openwrt_wan_boot_try_dhcp_probe_host) }}
+        openwrt_wan_boot_try_dhcp_probe_count: >-
+          {{ fleet_host_cfg.get('wan', {}).get('boot_try_dhcp_probe_count', openwrt_wan_boot_try_dhcp_probe_count) | int }}
+        openwrt_wan_boot_try_dhcp_service_name: >-
+          {{ fleet_host_cfg.get('wan', {}).get('boot_try_dhcp_service_name', openwrt_wan_boot_try_dhcp_service_name) }}
+        openwrt_wan_boot_try_dhcp_start_priority: >-
+          {{ fleet_host_cfg.get('wan', {}).get('boot_try_dhcp_start_priority', openwrt_wan_boot_try_dhcp_start_priority) | int }}
+        passwall2_enabled: "{{ fleet_host_cfg.get('passwall2', {}).get('enabled', passwall2_enabled) | bool }}"
+        passwall2_subscribe_url: "{{ fleet_host_cfg.get('passwall2', {}).get('subscribe_url', passwall2_subscribe_url) }}"
+        passwall2_probe_url: "{{ fleet_host_cfg.get('passwall2', {}).get('probe_url', passwall2_probe_url) }}"
+        passwall2_socks_port: "{{ fleet_host_cfg.get('passwall2', {}).get('socks_port', passwall2_socks_port) }}"
+        passwall2_profile_overrides: "{{ fleet_host_cfg.get('passwall2', {}).get('profile_overrides', passwall2_profile_overrides) }}"
+        passwall2_acl_bypass_macs: "{{ fleet_host_cfg.get('passwall2', {}).get('acl_bypass_macs', passwall2_acl_bypass_macs) }}"
+        openwrt_network_ula_prefix: "{{ fleet_host_cfg.get('network', {}).get('ula_prefix', openwrt_network_ula_prefix) }}"
+        openwrt_network_lan_device: "{{ fleet_host_cfg.get('network', {}).get('lan_device', openwrt_network_lan_device) }}"
+        openwrt_network_lan_ipaddr: "{{ fleet_host_cfg.get('network', {}).get('lan_ipaddr', openwrt_network_lan_ipaddr) }}"
+        openwrt_network_lan_netmask: "{{ fleet_host_cfg.get('network', {}).get('lan_netmask', openwrt_network_lan_netmask) }}"
+        openwrt_network_lan_ip6assign: "{{ fleet_host_cfg.get('network', {}).get('lan_ip6assign', openwrt_network_lan_ip6assign) }}"
+        openwrt_firewall_zerotier_src_cidr: "{{ fleet_host_cfg.get('zerotier', {}).get('src_cidr', openwrt_firewall_zerotier_src_cidr) }}"
+        openwrt_docker_stacks: "{{ fleet_host_cfg.get('docker', {}).get('stacks', openwrt_docker_stacks) }}"
+        openwrt_docker_manage_runtime: "{{ fleet_host_cfg.get('docker', {}).get('manage_runtime', openwrt_docker_manage_runtime) | bool }}"
+        openwrt_docker_compose_command: "{{ fleet_host_cfg.get('docker', {}).get('compose_command', openwrt_docker_compose_command) }}"
+        openwrt_docker_runtime_packages: "{{ fleet_host_cfg.get('docker', {}).get('runtime_packages', openwrt_docker_runtime_packages) }}"
+        openwrt_docker_runtime_manage_daemon_config: >-
+          {{ fleet_host_cfg.get('docker', {}).get('manage_daemon_config', openwrt_docker_runtime_manage_daemon_config) | bool }}
+        openwrt_docker_runtime_daemon_config: "{{ fleet_host_cfg.get('docker', {}).get('daemon_config', openwrt_docker_runtime_daemon_config) }}"
+        openwrt_monitoring_enabled: "{{ fleet_host_cfg.get('monitoring', {}).get('openwrt_monitoring_enabled', openwrt_monitoring_enabled) | bool }}"
+        openwrt_node_exporter_port: >-
+          {{ fleet_host_cfg.get('monitoring', {}).get('openwrt_node_exporter_port', openwrt_node_exporter_port) }}
+        openwrt_probe_interval_minutes: >-
+          {{ fleet_host_cfg.get('monitoring', {}).get('openwrt_probe_interval_minutes', openwrt_probe_interval_minutes) }}
+        openwrt_ssh_lockdown_enabled: "{{ effective_feature_openwrt_ssh_lockdown | bool }}"
+      changed_when: false
+      tags: [always]
+
+    - name: Block unsafe WAN changes in prod_update without explicit opt-in
+      ansible.builtin.assert:
+        that:
+          - false
+        fail_msg: >-
+          WAN changes are disabled for openwrt_profile=prod_update unless
+          feature_openwrt_wan_apply_in_prod=true for the host.
+      when:
+        - effective_openwrt_profile == 'prod_update'
+        - effective_feature_openwrt_wan | bool
+        - openwrt_wan_enabled | bool
+        - not (effective_feature_openwrt_wan_apply_in_prod | bool)
+      tags: [always]
+
+    - name: Ensure CI public key is available in bootstrap mode
+      ansible.builtin.assert:
+        that:
+          - (lookup('env', 'CI_DEPLOY_PUBLIC_KEY') | trim | length) > 0
+        fail_msg: "CI_DEPLOY_PUBLIC_KEY environment variable is required for fleet bootstrap mode."
+      when: fleet_mode_effective == 'bootstrap'
+      tags: [always]
+
+    - name: Set bootstrap public key variable
+      ansible.builtin.set_fact:
+        openwrt_bootstrap_public_key: >-
+          {{ (fleet_mode_effective == 'bootstrap') | ternary(lookup('env', 'CI_DEPLOY_PUBLIC_KEY'), '') }}
+      changed_when: false
+      tags: [always]
+
+  roles:
+    - role: openwrt_rollback_guard
+      when: openwrt_rollback_guard_active | bool
+      tags: [openwrt, rollback]
+
+    - role: openwrt_base
+      when: effective_feature_openwrt_base | bool
+      tags: [openwrt, base]
+
+    - role: openwrt_network_core
+      when: effective_feature_openwrt_network_core | bool
+      tags: [openwrt, network]
+
+    - role: openwrt_firewall_core
+      when: effective_feature_openwrt_firewall_core | bool
+      tags: [openwrt, firewall]
+
+    - role: openwrt_wan
+      when:
+        - effective_feature_openwrt_wan | bool
+        - openwrt_wan_enabled | bool
+        - effective_openwrt_wan_change_allowed | bool
+      tags: [openwrt, wan, network]
+
+    - role: openwrt_zerotier
+      when: effective_feature_openwrt_zerotier | bool
+      tags: [openwrt, zerotier]
+
+    - role: tailscale
+      when: effective_feature_tailscale | bool
+      tags: [openwrt, tailscale]
+
+    - role: openwrt_passwall2
+      when: effective_feature_openwrt_passwall2 | bool
+      tags: [openwrt, passwall2]
+
+    - role: openwrt_homeproxy_cleanup
+      when: effective_feature_openwrt_homeproxy_cleanup | bool
+      tags: [openwrt, homeproxy]
+
+    - role: openwrt_docker_runtime
+      when: effective_feature_openwrt_docker_runtime | bool
+      tags: [openwrt, docker]
+
+    - role: openwrt_docker_stacks
+      when: effective_feature_openwrt_docker_stacks | bool
+      tags: [openwrt, docker]
+
+    - role: openwrt_monitoring_agent
+      when: effective_feature_openwrt_monitoring_agent | bool
+      tags: [openwrt, monitoring]
+
+    - role: openwrt_ssh_lockdown
+      when: effective_feature_openwrt_ssh_lockdown | bool
+      tags: [openwrt, ssh, lockdown]
+
+  tasks:
+    - name: Validate custom role paths exist locally
+      ansible.builtin.stat:
+        path: "{{ playbook_dir }}/roles/{{ item }}"
+      loop: "{{ effective_custom_roles }}"
+      register: custom_roles_stats
+      delegate_to: localhost
+      become: false
+      tags: [custom]
+
+    - name: Assert all custom roles exist
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isdir
+        fail_msg: "Custom role '{{ item.item }}' not found under roles/."
+      loop: "{{ custom_roles_stats.results | default([]) }}"
+      tags: [custom]
+
+    - name: Run custom local roles
+      ansible.builtin.include_role:
+        name: "{{ item }}"
+      loop: "{{ effective_custom_roles }}"
+      tags: [custom]

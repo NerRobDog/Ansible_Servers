@@ -1,0 +1,10 @@
+---
+tailscale_enabled: true
+tailscale_state: present
+tailscale_auth_key_env: TAILSCALE_AUTH_KEY
+tailscale_extra_args: []
+
+tailscale_package: tailscale
+tailscale_service_name: tailscaled
+tailscale_openwrt_service_name: tailscale
+tailscale_openwrt_prereq_packages: []

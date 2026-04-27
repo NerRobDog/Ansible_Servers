@@ -1,0 +1,7 @@
+---
+zerotier_enabled: true
+zerotier_package: zerotier
+zerotier_service_name: zerotier
+zerotier_network_id: ""
+zerotier_manage_secret: false
+zerotier_secret: ""

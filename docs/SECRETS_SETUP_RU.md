@@ -1,4 +1,4 @@
-# Настройка секретов GitHub Actions (Fleet + RemaWave API Sync)
+# Настройка секретов GitHub Actions (Fleet + RemaWave API Sync + OpenWrt)
 
 Этот документ объясняет, как настроить деплой так, чтобы менять только Secrets/Variables в GitHub Environment, без коммитов `hosts.ini`.
 
@@ -11,7 +11,9 @@
 
 Шаблоны:
 - `fleet.two-servers.example.yml` — пример для 2 серверов.
+- `fleet.two-nodes-plus-monitoring.example.yml` — пример для 2 нод + отдельного monitoring сервера.
 - `fleet.example.yml` — общий multi-server шаблон.
+- `fleet.openwrt.example.yml` — пример OpenWrt флота (LAN/ZT, Passwall2, probes).
 - `remnawave/profile-sync.yml` — правила sync профилей/нод в панели.
 - `remnawave/profiles/*.json` — JSON-шаблоны config profile без секретов.
 
@@ -63,13 +65,18 @@
 ### Обязательные Secrets
 
 1. `RW_FLEET_CONFIG_B64`
-2. `ANSIBLE_SSH_PRIVATE_KEY`
-3. `RW_PANEL_API_TOKEN`
+2. `OPENWRT_FLEET_CONFIG_B64` (обязателен только для OpenWrt workflows)
+3. `ANSIBLE_SSH_PRIVATE_KEY`
+4. `RW_PANEL_API_TOKEN`
+5. `TAILSCALE_AUTH_KEY` (обязателен, если включаете `feature_tailscale=true` для неавторизованных хостов)
+6. `ZEROTIER_API_TOKEN` (обязателен для `deploy-openwrt` в режимах `deploy|lockdown`)
 
 ### Опциональные Secrets
 
 1. `RW_PROFILE_VARS_B64`
 2. `ANSIBLE_VAULT_PASSWORD`
+3. `ALERT_TELEGRAM_TOPIC_ID_OPENWRT` (если OpenWrt алерты хотите в отдельный topic)
+4. `ZEROTIER_NETWORK_ID` (default network id для OpenWrt ZT API sync; можно не задавать, если network_id указан per-host)
 
 ### Обязательные Variables
 
@@ -106,6 +113,23 @@ base64 -w 0 fleet.yml
 
 3. Полученную строку сохраните в `RW_FLEET_CONFIG_B64`.
 
+## 6.1) Как подготовить `OPENWRT_FLEET_CONFIG_B64`
+
+1. Заполните `fleet.openwrt.example.yml` под ваши роутеры.
+2. Закодируйте:
+
+macOS:
+```bash
+base64 -i fleet.openwrt.yml | tr -d '\n'
+```
+
+Linux:
+```bash
+base64 -w 0 fleet.openwrt.yml
+```
+
+3. Полученную строку сохраните в `OPENWRT_FLEET_CONFIG_B64`.
+
 ## 7) Как подготовить `RW_PROFILE_VARS_B64` (опционально)
 
 Обычно этот секрет не нужен, потому что основные Reality значения берутся из fleet per-host.
@@ -133,9 +157,12 @@ base64 -i profile-vars.json | tr -d '\n'
 1. GitHub -> `Settings` -> `Environments` -> нужное окружение (`Testing`/`Production`).
 2. В `Environment secrets` добавьте:
    - `RW_FLEET_CONFIG_B64`
+   - `OPENWRT_FLEET_CONFIG_B64` (если используете OpenWrt workflows)
    - `ANSIBLE_SSH_PRIVATE_KEY`
    - `RW_PANEL_API_TOKEN`
-   - опционально `RW_PROFILE_VARS_B64`, `ANSIBLE_VAULT_PASSWORD`
+   - `TAILSCALE_AUTH_KEY` (если используете `feature_tailscale=true`)
+   - `ZEROTIER_API_TOKEN` (для OpenWrt read+authorize pre-step)
+   - опционально `RW_PROFILE_VARS_B64`, `ANSIBLE_VAULT_PASSWORD`, `ALERT_TELEGRAM_TOPIC_ID_OPENWRT`
 3. В `Environment variables` добавьте:
    - `RW_PANEL_API_BASE_URL`
 
@@ -146,11 +173,15 @@ REPO="OWNER/REPO"
 ENV_NAME="production"
 
 openssl base64 -A -in fleet.yml | gh secret set RW_FLEET_CONFIG_B64 --repo "$REPO" --env "$ENV_NAME"
+openssl base64 -A -in fleet.openwrt.yml | gh secret set OPENWRT_FLEET_CONFIG_B64 --repo "$REPO" --env "$ENV_NAME"
 gh secret set ANSIBLE_SSH_PRIVATE_KEY --repo "$REPO" --env "$ENV_NAME" < ~/.ssh/ansible_actions
 gh secret set RW_PANEL_API_TOKEN --repo "$REPO" --env "$ENV_NAME"
+gh secret set TAILSCALE_AUTH_KEY --repo "$REPO" --env "$ENV_NAME"
+gh secret set ZEROTIER_API_TOKEN --repo "$REPO" --env "$ENV_NAME"
 openssl base64 -A -in profile-vars.json | gh secret set RW_PROFILE_VARS_B64 --repo "$REPO" --env "$ENV_NAME"
 
 gh variable set RW_PANEL_API_BASE_URL --repo "$REPO" --env "$ENV_NAME" --body "https://panel.example.com"
+gh variable set ZEROTIER_NETWORK_ID --repo "$REPO" --env "$ENV_NAME" --body "a84ac5c10a8906ee"
 ```
 
 ## 10) Запуск workflow
@@ -166,6 +197,10 @@ gh variable set RW_PANEL_API_BASE_URL --repo "$REPO" --env "$ENV_NAME" --body "h
 - `panel_sync_write`:
   - `false` = только отчёт рассинхронизации панели (read-only);
   - `true` = применить изменения профилей/назначений.
+
+OpenWrt workflows:
+- `deploy-openwrt` (режимы `bootstrap|deploy|lockdown`)
+- `monitor-openwrt-fleet` (smoke + Telegram уведомления)
 
 ## 11) Проверка и безопасность
 

@@ -1,0 +1,80 @@
+---
+- name: Validate OpenWrt network core inputs
+  ansible.builtin.assert:
+    that:
+      - openwrt_network_lan_device | trim | length > 0
+      - openwrt_network_lan_ipaddr | trim | length > 0
+      - openwrt_network_lan_netmask | trim | length > 0
+      - openwrt_network_lan_ip6assign | string | trim | length > 0
+    fail_msg: "Invalid openwrt_network_core defaults."
+  tags: [openwrt, network]
+
+- name: Apply OpenWrt network baseline sections
+  ansible.builtin.raw: |
+    set -eu
+
+    changed='0'
+
+    ensure_set() {
+      key="$1"
+      val="$2"
+      current="$(uci -q get "$key" || true)"
+      if [ "$current" != "$val" ]; then
+        uci set "$key=$val"
+        changed='1'
+      fi
+    }
+
+    ensure_type() {
+      section="$1"
+      expected="$2"
+      current="$(uci -q get "network.${section}" || true)"
+      if [ "$current" != "$expected" ]; then
+        uci -q delete "network.${section}" || true
+        uci set "network.${section}=${expected}"
+        changed='1'
+      fi
+    }
+
+    ensure_type "loopback" "interface"
+    ensure_set network.loopback.device "lo"
+    ensure_set network.loopback.proto "static"
+    ensure_set network.loopback.ipaddr "127.0.0.1"
+    ensure_set network.loopback.netmask "255.0.0.0"
+
+    if [ '{{ openwrt_network_ula_prefix | trim }}' != '' ]; then
+      ensure_type "globals" "globals"
+      ensure_set network.globals.ula_prefix '{{ openwrt_network_ula_prefix }}'
+    fi
+
+    ensure_type "lan" "interface"
+    ensure_set network.lan.device '{{ openwrt_network_lan_device }}'
+    ensure_set network.lan.proto "static"
+    ensure_set network.lan.ipaddr '{{ openwrt_network_lan_ipaddr }}'
+    ensure_set network.lan.netmask '{{ openwrt_network_lan_netmask }}'
+    ensure_set network.lan.ip6assign '{{ openwrt_network_lan_ip6assign }}'
+
+    manage_wan_baseline="{{ (openwrt_network_manage_wan_baseline | bool) | ternary('1', '0') }}"
+    allow_wan_baseline="{{ (effective_openwrt_wan_change_allowed | default(false) | bool) | ternary('1', '0') }}"
+
+    if [ "${manage_wan_baseline}" = "1" ] && [ "${allow_wan_baseline}" = "1" ]; then
+      ensure_type "wan" "interface"
+      ensure_set network.wan.device '{{ openwrt_wan_device }}'
+      ensure_set network.wan.proto "dhcp"
+
+      ensure_type "wan6" "interface"
+      ensure_set network.wan6.device '{{ openwrt_wan_device }}'
+      ensure_set network.wan6.proto "dhcpv6"
+    fi
+
+    if [ "$changed" = "1" ]; then
+      uci commit network
+      /etc/init.d/network reload >/dev/null 2>&1 || /etc/init.d/network restart
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  register: openwrt_network_core_result
+  changed_when: "'CHANGED' in openwrt_network_core_result.stdout"
+  failed_when: openwrt_network_core_result.rc != 0
+  tags: [openwrt, network]

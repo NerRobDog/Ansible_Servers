@@ -1,0 +1,68 @@
+---
+- name: Validate zerotier network id when enabled
+  ansible.builtin.assert:
+    that:
+      - zerotier_network_id | trim | length > 0
+    fail_msg: "zerotier_network_id is required when zerotier role is enabled"
+  when: zerotier_enabled | bool
+  tags: [openwrt, zerotier]
+
+- name: Install ZeroTier package
+  ansible.builtin.raw: |
+    if opkg list-installed | grep -q "^{{ zerotier_package }} "; then
+      echo "NOCHANGE"
+    else
+      opkg update >/dev/null 2>&1 || opkg update
+      opkg install {{ zerotier_package }}
+      echo "CHANGED"
+    fi
+  when: zerotier_enabled | bool
+  register: openwrt_zerotier_install
+  changed_when: "'CHANGED' in openwrt_zerotier_install.stdout"
+  failed_when: openwrt_zerotier_install.rc != 0
+  tags: [openwrt, zerotier]
+
+- name: Enable ZeroTier service at boot
+  ansible.builtin.raw: "/etc/init.d/{{ zerotier_service_name }} enable"
+  when: zerotier_enabled | bool
+  changed_when: false
+  tags: [openwrt, zerotier]
+
+- name: Configure ZeroTier UCI settings
+  ansible.builtin.raw: |
+    CHANGED=0
+
+    if [ "$(uci -q get zerotier.global.enabled || echo 0)" != "1" ]; then
+      uci set zerotier.global.enabled='1'
+      CHANGED=1
+    fi
+
+    if [ "$(uci -q get zerotier.mynet 2>/dev/null)" != "network" ]; then
+      uci set zerotier.mynet='network'
+      CHANGED=1
+    fi
+
+    if [ "$(uci -q get zerotier.mynet.id 2>/dev/null)" != "{{ zerotier_network_id }}" ]; then
+      uci set zerotier.mynet.id='{{ zerotier_network_id }}'
+      CHANGED=1
+    fi
+
+    if [ "{{ (zerotier_manage_secret | bool) | ternary('1', '0') }}" = "1" ] && [ -n "{{ zerotier_secret | trim }}" ]; then
+      if [ "$(uci -q get zerotier.global.secret 2>/dev/null)" != "{{ zerotier_secret }}" ]; then
+        uci set zerotier.global.secret='{{ zerotier_secret }}'
+        CHANGED=1
+      fi
+    fi
+
+    if [ "$CHANGED" -eq 1 ]; then
+      uci commit zerotier
+      /etc/init.d/{{ zerotier_service_name }} restart
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  when: zerotier_enabled | bool
+  register: openwrt_zerotier_config
+  changed_when: "'CHANGED' in openwrt_zerotier_config.stdout"
+  failed_when: openwrt_zerotier_config.rc != 0
+  tags: [openwrt, zerotier]

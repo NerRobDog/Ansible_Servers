@@ -1,0 +1,4 @@
+---
+openwrt_ssh_lockdown_enabled: false
+openwrt_ssh_password_authentication: "off"
+openwrt_ssh_root_password_authentication: "off"

@@ -1,0 +1,37 @@
+---
+- name: Remove HomeProxy service and packages
+  ansible.builtin.raw: |
+    CHANGED=0
+
+    if [ -x /etc/init.d/homeproxy ]; then
+      /etc/init.d/homeproxy stop >/dev/null 2>&1 || true
+      /etc/init.d/homeproxy disable >/dev/null 2>&1 || true
+      CHANGED=1
+    fi
+
+    remove=""
+    for pkg in {{ openwrt_homeproxy_cleanup_packages | join(' ') }}; do
+      if opkg list-installed | grep -q "^${pkg} "; then
+        remove="${remove} ${pkg}"
+      fi
+    done
+
+    if [ -n "${remove}" ]; then
+      opkg remove ${remove}
+      CHANGED=1
+    fi
+
+    if [ -f /etc/config/homeproxy ]; then
+      rm -f /etc/config/homeproxy
+      CHANGED=1
+    fi
+
+    if [ "$CHANGED" -eq 1 ]; then
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  register: openwrt_homeproxy_cleanup
+  changed_when: "'CHANGED' in openwrt_homeproxy_cleanup.stdout"
+  failed_when: openwrt_homeproxy_cleanup.rc != 0
+  tags: [openwrt, homeproxy]

@@ -1,0 +1,349 @@
+---
+name: deploy-openwrt
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub Environment containing OpenWrt fleet secrets
+        required: true
+        default: production
+      mode:
+        description: Deployment mode
+        required: true
+        type: choice
+        default: deploy
+        options:
+          - bootstrap
+          - deploy
+          - lockdown
+      openwrt_profile:
+        description: OpenWrt configuration profile
+        required: true
+        type: choice
+        default: prod_update
+        options:
+          - prod_update
+          - fresh
+      limit:
+        description: Host aliases list (comma-separated) or all
+        required: false
+        default: all
+      check_mode:
+        description: Run in check mode
+        required: true
+        type: choice
+        default: "false"
+        options:
+          - "false"
+          - "true"
+      run_smoke:
+        description: Run post-deploy smoke checks
+        required: true
+        type: choice
+        default: "true"
+        options:
+          - "true"
+          - "false"
+      tags:
+        description: Optional ansible tags filter
+        required: false
+        default: ""
+
+env:
+  ANSIBLE_LOCAL_TEMP: .ansible/tmp
+  ANSIBLE_REMOTE_TEMP: .ansible/tmp
+  ANSIBLE_HOST_KEY_CHECKING: "True"
+  PY_COLORS: "1"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install OS tools for bootstrap/runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends jq sshpass openssh-client
+
+      - name: Install Ansible collections
+        run: ansible-galaxy collection install -r requirements.yml
+
+      - name: Prepare runtime directories
+        run: mkdir -p .ansible/tmp .ansible/runtime
+
+      - name: Decode OpenWrt fleet config from secret
+        env:
+          OPENWRT_FLEET_CONFIG_B64: ${{ secrets.OPENWRT_FLEET_CONFIG_B64 }}
+        run: |
+          if [[ -z "${OPENWRT_FLEET_CONFIG_B64}" ]]; then
+            echo "Secret OPENWRT_FLEET_CONFIG_B64 is required." >&2
+            exit 1
+          fi
+          echo "${OPENWRT_FLEET_CONFIG_B64}" | base64 --decode > .ansible/runtime/openwrt_fleet_config.yaml
+
+      - name: Render OpenWrt runtime inventory and vars
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          .github/scripts/render-openwrt-fleet-runtime.py \
+            --fleet-config .ansible/runtime/openwrt_fleet_config.yaml \
+            --mode "${MODE}" \
+            --inventory-out .ansible/runtime/openwrt_hosts.ini \
+            --vars-out .ansible/runtime/openwrt_runtime_vars.json \
+            --bootstrap-out .ansible/runtime/openwrt_bootstrap_map.json
+
+      - name: Create vault password file when provided
+        env:
+          ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+        run: |
+          if [[ -n "${ANSIBLE_VAULT_PASSWORD}" ]]; then
+            printf '%s' "${ANSIBLE_VAULT_PASSWORD}" > .ansible/runtime/vault_pass.txt
+            chmod 600 .ansible/runtime/vault_pass.txt
+          fi
+
+      - name: Setup SSH private key
+        id: ssh_key
+        env:
+          ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
+        run: |
+          if [[ -z "${ANSIBLE_SSH_PRIVATE_KEY}" ]]; then
+            echo "Secret ANSIBLE_SSH_PRIVATE_KEY is required." >&2
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${ANSIBLE_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keygen -y -f ~/.ssh/id_ed25519 > ~/.ssh/id_ed25519.pub
+          chmod 644 ~/.ssh/id_ed25519.pub
+          echo "public_key=$(tr -d '\n' < ~/.ssh/id_ed25519.pub)" >> "${GITHUB_OUTPUT}"
+
+      - name: Build known_hosts via ssh-keyscan
+        run: |
+          : > ~/.ssh/known_hosts
+
+          awk '
+            /^[^[]/ {
+              host="";
+              port="22";
+              for (i=1; i<=NF; i++) {
+                if ($i ~ /^ansible_host=/) { split($i, a, "="); host=a[2]; }
+                if ($i ~ /^ansible_port=/) { split($i, a, "="); port=a[2]; }
+              }
+              if (host != "") { print host " " port; }
+            }
+          ' .ansible/runtime/openwrt_hosts.ini | sort -u > .ansible/runtime/host_ports.txt
+
+          jq -r '.[] | (.proxy_jumps // [])[]' .ansible/runtime/openwrt_bootstrap_map.json | sed '/^$/d' | while read -r jump; do
+            jump_host="${jump#*@}"
+            jump_port="22"
+            if [[ "${jump_host}" == \[*\]:* ]]; then
+              jump_port="${jump_host##*:}"
+              jump_host="${jump_host#\[}"
+              jump_host="${jump_host%%\]*}"
+            elif [[ "${jump_host}" == *:* ]]; then
+              jump_port="${jump_host##*:}"
+              jump_host="${jump_host%%:*}"
+            fi
+            echo "${jump_host} ${jump_port}" >> .ansible/runtime/host_ports.txt
+          done
+
+          sort -u .ansible/runtime/host_ports.txt -o .ansible/runtime/host_ports.txt
+
+          if [[ ! -s .ansible/runtime/host_ports.txt ]]; then
+            echo "No hosts were generated from OpenWrt fleet config." >&2
+            exit 1
+          fi
+
+          while read -r host port; do
+            ssh-keyscan -p "${port}" -H "${host}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          done < .ansible/runtime/host_ports.txt
+
+          sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Validate and authorize ZeroTier members in Central API
+        if: ${{ inputs.mode != 'bootstrap' }}
+        env:
+          LIMIT: ${{ inputs.limit }}
+          ZEROTIER_API_TOKEN: ${{ secrets.ZEROTIER_API_TOKEN }}
+          ZEROTIER_NETWORK_ID: ${{ vars.ZEROTIER_NETWORK_ID || secrets.ZEROTIER_NETWORK_ID }}
+        run: |
+          if [[ -z "${ZEROTIER_API_TOKEN}" ]]; then
+            echo "Secret ZEROTIER_API_TOKEN is required for mode=${{ inputs.mode }}." >&2
+            exit 1
+          fi
+          .github/scripts/zerotier-central-sync.py \
+            --runtime-vars .ansible/runtime/openwrt_runtime_vars.json \
+            --limit "${LIMIT}" \
+            --authorize \
+            --network-id "${ZEROTIER_NETWORK_ID:-}" \
+            --report-out .ansible/runtime/openwrt_zerotier_report.json
+
+      - name: Access preflight (multi-jump fallback + RCA)
+        env:
+          LIMIT: ${{ inputs.limit }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          .github/scripts/openwrt-access-preflight.py \
+            --inventory .ansible/runtime/openwrt_hosts.ini \
+            --bootstrap-map .ansible/runtime/openwrt_bootstrap_map.json \
+            --output-inventory .ansible/runtime/openwrt_hosts.ini \
+            --report-out .ansible/runtime/openwrt_access_preflight.json \
+            --mode "${MODE}" \
+            --limit "${LIMIT}"
+
+      - name: Bootstrap hosts by password and copy SSH key
+        if: ${{ inputs.mode == 'bootstrap' }}
+        env:
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          if [[ "${LIMIT}" == "all" || -z "${LIMIT}" ]]; then
+            targets="$(jq -r 'keys[]' .ansible/runtime/openwrt_bootstrap_map.json)"
+          else
+            targets="$(echo "${LIMIT}" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | sed '/^$/d')"
+          fi
+
+          for alias in ${targets}; do
+            if ! jq -e --arg alias "${alias}" '.[$alias]' .ansible/runtime/openwrt_bootstrap_map.json >/dev/null; then
+              echo "Host alias '${alias}' not found in OpenWrt fleet config." >&2
+              exit 1
+            fi
+
+            host="$(jq -r --arg alias "${alias}" '.[$alias].ansible_host' .ansible/runtime/openwrt_bootstrap_map.json)"
+            port="$(jq -r --arg alias "${alias}" '.[$alias].ansible_port' .ansible/runtime/openwrt_bootstrap_map.json)"
+            username="$(jq -r --arg alias "${alias}" '.[$alias].bootstrap_username' .ansible/runtime/openwrt_bootstrap_map.json)"
+            password="$(jq -r --arg alias "${alias}" '.[$alias].bootstrap_password // ""' .ansible/runtime/openwrt_bootstrap_map.json)"
+            proxy_jump="$(jq -r --arg alias "${alias}" '.[$alias].proxy_jump // ""' .ansible/runtime/openwrt_bootstrap_map.json)"
+
+            if [[ -z "${password}" ]]; then
+              echo "Bootstrap password is missing for host '${alias}'." >&2
+              exit 1
+            fi
+
+            ssh_opts=(-o StrictHostKeyChecking=yes -p "${port}")
+            if [[ -n "${proxy_jump}" ]]; then
+              ssh_opts+=(-o "ProxyJump=${proxy_jump}")
+            fi
+
+            SSHPASS="${password}" sshpass -e ssh-copy-id \
+              -f \
+              -i ~/.ssh/id_ed25519.pub \
+              "${ssh_opts[@]}" \
+              "${username}@${host}"
+
+            ssh -i ~/.ssh/id_ed25519 \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              "${ssh_opts[@]}" \
+              "${username}@${host}" "echo bootstrap-key-ok"
+          done
+
+      - name: Syntax check
+        env:
+          OPENWRT_PROFILE: ${{ inputs.openwrt_profile }}
+        run: |
+          cmd=(
+            ansible-playbook
+            -i .ansible/runtime/openwrt_hosts.ini
+            playbook.openwrt.yml
+            --syntax-check
+            --extra-vars @.ansible/runtime/openwrt_runtime_vars.json
+            --extra-vars "openwrt_profile=${OPENWRT_PROFILE}"
+          )
+          if [[ -f .ansible/runtime/vault_pass.txt ]]; then
+            cmd+=(--vault-id "secrets@.ansible/runtime/vault_pass.txt")
+          fi
+          "${cmd[@]}"
+
+      - name: Run playbook
+        env:
+          LIMIT: ${{ inputs.limit }}
+          CHECK_MODE: ${{ inputs.check_mode }}
+          TAGS: ${{ inputs.tags }}
+          OPENWRT_PROFILE: ${{ inputs.openwrt_profile }}
+          CI_DEPLOY_PUBLIC_KEY: ${{ steps.ssh_key.outputs.public_key }}
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          cmd=(
+            ansible-playbook
+            -i .ansible/runtime/openwrt_hosts.ini
+            playbook.openwrt.yml
+            --limit "${LIMIT}"
+            --extra-vars @.ansible/runtime/openwrt_runtime_vars.json
+            --extra-vars "openwrt_profile=${OPENWRT_PROFILE}"
+          )
+          if [[ -n "${TAGS}" ]]; then
+            cmd+=(--tags "${TAGS}")
+          fi
+          if [[ "${CHECK_MODE}" == "true" ]]; then
+            cmd+=(--check --diff)
+          fi
+          if [[ -f .ansible/runtime/vault_pass.txt ]]; then
+            cmd+=(--vault-id "secrets@.ansible/runtime/vault_pass.txt")
+          fi
+          "${cmd[@]}"
+
+      - name: Run post-deploy smoke checks
+        if: ${{ inputs.mode != 'bootstrap' && inputs.check_mode == 'false' && inputs.run_smoke == 'true' }}
+        env:
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          .github/scripts/smoke-openwrt.sh \
+            --inventory .ansible/runtime/openwrt_hosts.ini \
+            --runtime-vars .ansible/runtime/openwrt_runtime_vars.json \
+            --limit "${LIMIT}"
+
+      - name: Confirm OpenWrt rollback guard
+        if: ${{ inputs.mode != 'bootstrap' && inputs.check_mode == 'false' }}
+        env:
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          .github/scripts/confirm-openwrt-rollback.sh \
+            --inventory .ansible/runtime/openwrt_hosts.ini \
+            --limit "${LIMIT}"
+
+      - name: Verify deploy-user key access after bootstrap
+        if: ${{ inputs.mode == 'bootstrap' }}
+        env:
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          if [[ "${LIMIT}" == "all" || -z "${LIMIT}" ]]; then
+            targets="$(jq -r 'keys[]' .ansible/runtime/openwrt_bootstrap_map.json)"
+          else
+            targets="$(echo "${LIMIT}" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | sed '/^$/d')"
+          fi
+
+          for alias in ${targets}; do
+            host="$(jq -r --arg alias "${alias}" '.[$alias].ansible_host' .ansible/runtime/openwrt_bootstrap_map.json)"
+            port="$(jq -r --arg alias "${alias}" '.[$alias].ansible_port' .ansible/runtime/openwrt_bootstrap_map.json)"
+            deploy_user="$(jq -r --arg alias "${alias}" '.[$alias].deploy_user' .ansible/runtime/openwrt_bootstrap_map.json)"
+            proxy_jump="$(jq -r --arg alias "${alias}" '.[$alias].proxy_jump // ""' .ansible/runtime/openwrt_bootstrap_map.json)"
+
+            ssh_opts=(-o StrictHostKeyChecking=yes -p "${port}")
+            if [[ -n "${proxy_jump}" ]]; then
+              ssh_opts+=(-o "ProxyJump=${proxy_jump}")
+            fi
+
+            ssh -i ~/.ssh/id_ed25519 \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              "${ssh_opts[@]}" \
+              "${deploy_user}@${host}" "echo deploy-user-key-ok"
+          done

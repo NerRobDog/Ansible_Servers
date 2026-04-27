@@ -1,0 +1,7 @@
+---
+- name: Restart passwall2
+  ansible.builtin.raw: |
+    if [ -x /etc/init.d/passwall2 ]; then
+      /etc/init.d/passwall2 restart || /etc/init.d/passwall2 reload || true
+    fi
+  changed_when: false

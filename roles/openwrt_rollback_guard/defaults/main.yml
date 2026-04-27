@@ -1,0 +1,23 @@
+---
+openwrt_rollback_enabled: true
+openwrt_rollback_timeout_minutes: 10
+openwrt_rollback_reboot_on_restore: true
+openwrt_rollback_snapshot_dir: /root/.ansible-rollback
+openwrt_rollback_control_script: /usr/local/sbin/openwrt-rollback-guard
+openwrt_rollback_managed_paths:
+  - /etc/config/dropbear
+  - /etc/dropbear/authorized_keys
+  - /etc/config/zerotier
+  - /etc/config/passwall2
+  - /etc/config/homeproxy
+  - /etc/config/prometheus-node-exporter-lua
+  - /etc/crontabs/root
+  - /usr/local/bin/openwrt-connectivity-probe.sh
+  - /opt/docker-stacks
+openwrt_rollback_managed_services:
+  - dropbear
+  - zerotier
+  - passwall2
+  - prometheus-node-exporter-lua
+  - cron
+  - dockerd

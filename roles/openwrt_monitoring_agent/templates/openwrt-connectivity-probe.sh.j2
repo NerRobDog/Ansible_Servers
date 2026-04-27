@@ -1,0 +1,53 @@
+#!/bin/sh
+set -eu
+
+probe_url='{{ passwall2_probe_url }}'
+probe_timeout='{{ openwrt_probe_timeout_seconds }}'
+socks_port='{{ passwall2_socks_port }}'
+out_file='{{ openwrt_probe_metrics_path }}'
+tmp_file="/tmp/openwrt-connectivity.prom.$$"
+
+probe_direct() {
+  latency="$(curl --silent --show-error --fail --max-time "${probe_timeout}" --output /dev/null --write-out '%{time_total}' "${probe_url}" 2>/dev/null || true)"
+  if [ -n "${latency}" ]; then
+    echo "1 ${latency}"
+  else
+    echo "0 0"
+  fi
+}
+
+probe_passwall2() {
+  latency="$(curl --silent --show-error --fail --max-time "${probe_timeout}" --socks5-hostname "127.0.0.1:${socks_port}" --output /dev/null --write-out '%{time_total}' "${probe_url}" 2>/dev/null || true)"
+  if [ -n "${latency}" ]; then
+    echo "1 ${latency}"
+  else
+    echo "0 0"
+  fi
+}
+
+set -- $(probe_direct)
+direct_up="$1"
+direct_latency="$2"
+
+set -- $(probe_passwall2)
+passwall_up="$1"
+passwall_latency="$2"
+
+cat > "${tmp_file}" <<METRICS
+# HELP openwrt_probe_direct_up Direct internet probe status (1=up,0=down)
+# TYPE openwrt_probe_direct_up gauge
+openwrt_probe_direct_up ${direct_up}
+# HELP openwrt_probe_direct_latency_seconds Direct internet probe latency in seconds
+# TYPE openwrt_probe_direct_latency_seconds gauge
+openwrt_probe_direct_latency_seconds ${direct_latency}
+# HELP openwrt_probe_passwall2_up Passwall2 proxy internet probe status (1=up,0=down)
+# TYPE openwrt_probe_passwall2_up gauge
+openwrt_probe_passwall2_up ${passwall_up}
+# HELP openwrt_probe_passwall2_latency_seconds Passwall2 proxy internet probe latency in seconds
+# TYPE openwrt_probe_passwall2_latency_seconds gauge
+openwrt_probe_passwall2_latency_seconds ${passwall_latency}
+METRICS
+
+mkdir -p "$(dirname "${out_file}")"
+mv "${tmp_file}" "${out_file}"
+chmod 644 "${out_file}"

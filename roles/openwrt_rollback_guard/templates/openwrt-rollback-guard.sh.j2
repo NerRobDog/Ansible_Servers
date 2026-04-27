@@ -1,0 +1,85 @@
+#!/bin/sh
+set -eu
+
+BASE_DIR="{{ openwrt_rollback_snapshot_dir }}"
+CURRENT_LINK="${BASE_DIR}/current"
+
+resolve_current() {
+  if [ -L "${CURRENT_LINK}" ]; then
+    readlink -f "${CURRENT_LINK}" || true
+    return 0
+  fi
+  echo ""
+}
+
+print_status() {
+  run_dir="$(resolve_current)"
+  if [ -z "${run_dir}" ] || [ ! -d "${run_dir}/meta" ]; then
+    echo "DISABLED no_active_guard"
+    return 0
+  fi
+
+  run_id="$(basename "${run_dir}")"
+  if [ -f "${run_dir}/meta/rolling_back" ] || [ -f "${run_dir}/meta/rolled_back_at" ]; then
+    echo "ROLLED_BACK ${run_id}"
+    return 0
+  fi
+  if [ -f "${run_dir}/meta/confirmed" ]; then
+    echo "CONFIRMED ${run_id}"
+    return 0
+  fi
+  if [ -f "${run_dir}/meta/armed_at" ]; then
+    echo "ARMED ${run_id}"
+    return 0
+  fi
+  echo "DISABLED no_state"
+}
+
+confirm_current() {
+  run_dir="$(resolve_current)"
+  if [ -z "${run_dir}" ] || [ ! -d "${run_dir}/meta" ]; then
+    echo "DISABLED no_active_guard"
+    return 0
+  fi
+
+  mkdir -p "${run_dir}/meta"
+  touch "${run_dir}/meta/confirmed"
+  date -u '+%Y-%m-%dT%H:%M:%SZ' > "${run_dir}/meta/confirmed_at"
+  echo "confirmed" > "${run_dir}/meta/state"
+
+  if [ -f "${run_dir}/meta/watchdog.pid" ]; then
+    pid="$(cat "${run_dir}/meta/watchdog.pid" 2>/dev/null || true)"
+    if [ -n "${pid}" ]; then
+      kill "${pid}" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  echo "CONFIRMED $(basename "${run_dir}")"
+}
+
+rollback_now() {
+  run_dir="$(resolve_current)"
+  if [ -z "${run_dir}" ] || [ ! -x "${run_dir}/rollback.sh" ]; then
+    echo "No active rollback script found."
+    return 1
+  fi
+  "${run_dir}/rollback.sh" manual
+}
+
+command_name="${1:-status}"
+
+case "${command_name}" in
+  status)
+    print_status
+    ;;
+  confirm)
+    confirm_current
+    ;;
+  rollback-now)
+    rollback_now
+    ;;
+  *)
+    echo "Usage: ${0} {status|confirm|rollback-now}" >&2
+    exit 1
+    ;;
+esac

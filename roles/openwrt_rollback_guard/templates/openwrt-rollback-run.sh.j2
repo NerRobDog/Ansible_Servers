@@ -1,0 +1,96 @@
+#!/bin/sh
+set -eu
+
+RUN_DIR="{{ openwrt_rollback_snapshot_dir }}/{{ openwrt_rollback_run_id }}"
+META_DIR="${RUN_DIR}/meta"
+FILES_DIR="${RUN_DIR}/files"
+LOG_FILE="${RUN_DIR}/rollback.log"
+REASON="${1:-auto}"
+
+mkdir -p "${RUN_DIR}"
+exec >>"${LOG_FILE}" 2>&1
+
+echo "=== rollback start $(date -u '+%Y-%m-%dT%H:%M:%SZ') reason=${REASON} run={{ openwrt_rollback_run_id }} ==="
+
+if [ ! -d "${META_DIR}" ]; then
+  echo "meta directory missing, abort"
+  exit 1
+fi
+
+if [ -f "${META_DIR}/confirmed" ]; then
+  echo "rollback guard already confirmed, skip"
+  exit 0
+fi
+
+if [ -f "${META_DIR}/rolling_back" ]; then
+  echo "rollback is already in progress, skip duplicate trigger"
+  exit 0
+fi
+touch "${META_DIR}/rolling_back"
+
+BEFORE_PKGS_FILE="${META_DIR}/packages_before.txt"
+NOW_PKGS_FILE="${META_DIR}/packages_now.txt"
+ADDED_PKGS_FILE="${META_DIR}/packages_added.txt"
+MISSING_PKGS_FILE="${META_DIR}/packages_missing.txt"
+
+opkg list-installed | awk '{print $1}' | sort -u > "${NOW_PKGS_FILE}" || true
+
+if [ -f "${BEFORE_PKGS_FILE}" ]; then
+  comm -13 "${BEFORE_PKGS_FILE}" "${NOW_PKGS_FILE}" > "${ADDED_PKGS_FILE}" || true
+  comm -23 "${BEFORE_PKGS_FILE}" "${NOW_PKGS_FILE}" > "${MISSING_PKGS_FILE}" || true
+
+  if [ -s "${ADDED_PKGS_FILE}" ]; then
+    while IFS= read -r pkg; do
+      [ -n "${pkg}" ] || continue
+      echo "remove added package: ${pkg}"
+      opkg remove "${pkg}" || true
+    done < "${ADDED_PKGS_FILE}"
+  fi
+
+  if [ -s "${MISSING_PKGS_FILE}" ]; then
+    opkg update >/dev/null 2>&1 || opkg update || true
+    while IFS= read -r pkg; do
+      [ -n "${pkg}" ] || continue
+      echo "reinstall missing package: ${pkg}"
+      opkg install "${pkg}" || true
+    done < "${MISSING_PKGS_FILE}"
+  fi
+fi
+
+if [ -f "${META_DIR}/managed_paths.txt" ]; then
+  while IFS= read -r target; do
+    [ -n "${target}" ] || continue
+    backup="${FILES_DIR}${target}"
+
+    if [ -e "${backup}" ] || [ -L "${backup}" ]; then
+      echo "restore managed path: ${target}"
+      mkdir -p "$(dirname "${target}")"
+      rm -rf "${target}" 2>/dev/null || true
+      cp -a "${backup}" "${target}" || true
+    else
+      if [ -e "${target}" ] || [ -L "${target}" ]; then
+        echo "remove managed path absent in snapshot: ${target}"
+        rm -rf "${target}" 2>/dev/null || true
+      fi
+    fi
+  done < "${META_DIR}/managed_paths.txt"
+fi
+
+if [ -f "${META_DIR}/managed_services.txt" ]; then
+  while IFS= read -r service_name; do
+    [ -n "${service_name}" ] || continue
+    if [ -x "/etc/init.d/${service_name}" ]; then
+      echo "restart service: ${service_name}"
+      /etc/init.d/"${service_name}" restart >/dev/null 2>&1 || /etc/init.d/"${service_name}" start >/dev/null 2>&1 || true
+    fi
+  done < "${META_DIR}/managed_services.txt"
+fi
+
+date -u '+%Y-%m-%dT%H:%M:%SZ' > "${META_DIR}/rolled_back_at"
+echo "rolled_back" > "${META_DIR}/state"
+echo "=== rollback end $(date -u '+%Y-%m-%dT%H:%M:%SZ') ==="
+
+if [ "{{ '1' if openwrt_rollback_reboot_on_restore | bool else '0' }}" = "1" ]; then
+  echo "reboot requested by policy"
+  nohup sh -c "sleep 2; reboot" >/dev/null 2>&1 &
+fi

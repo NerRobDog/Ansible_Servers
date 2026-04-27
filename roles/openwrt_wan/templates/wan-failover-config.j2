@@ -1,0 +1,21 @@
+config main 'main'
+	option enabled '1'
+	option wan_interface 'wan'
+	option wan_device '{{ openwrt_wan_device }}'
+
+	option fallback_proto '{{ openwrt_wan_proto }}'
+	option fallback_ipaddr '{{ openwrt_wan_ipaddr }}'
+	option fallback_netmask '{{ openwrt_wan_netmask }}'
+	option fallback_gateway '{{ openwrt_wan_gateway }}'
+	option fallback_pppoe_username '{{ openwrt_wan_pppoe_username }}'
+	option fallback_pppoe_password '{{ openwrt_wan_pppoe_password }}'
+	option fallback_pppoe_ipv6 '{{ openwrt_wan_pppoe_ipv6 }}'
+
+	option dhcp_wait_sec '{{ openwrt_wan_boot_try_dhcp_wait_sec | int }}'
+	option probe_host '{{ openwrt_wan_boot_try_dhcp_probe_host }}'
+	option probe_count '{{ openwrt_wan_boot_try_dhcp_probe_count | int }}'
+{% for dns in openwrt_wan_dns %}
+{% if dns | trim | length > 0 %}
+	list fallback_dns '{{ dns }}'
+{% endif %}
+{% endfor %}

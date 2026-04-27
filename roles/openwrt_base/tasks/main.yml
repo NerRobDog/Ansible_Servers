@@ -1,0 +1,45 @@
+---
+- name: Validate host is OpenWrt
+  ansible.builtin.raw: "test -f /etc/openwrt_release"
+  changed_when: false
+  tags: [openwrt, base]
+
+- name: Install OpenWrt base packages
+  ansible.builtin.raw: |
+    missing=""
+    for pkg in {{ openwrt_base_packages | join(' ') }}; do
+      opkg list-installed | grep -q "^${pkg} " || missing="${missing} ${pkg}"
+    done
+
+    if [ -n "${missing}" ]; then
+      opkg update >/dev/null 2>&1 || opkg update
+      opkg install ${missing}
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  register: openwrt_base_install
+  changed_when: "'CHANGED' in openwrt_base_install.stdout"
+  failed_when: openwrt_base_install.rc != 0
+  tags: [openwrt, base]
+
+- name: Ensure bootstrap SSH key is present for root
+  ansible.builtin.raw: |
+    set -eu
+    KEY="{{ openwrt_bootstrap_public_key | trim }}"
+
+    mkdir -p /etc/dropbear
+    touch /etc/dropbear/authorized_keys
+
+    if grep -Fqx "$KEY" /etc/dropbear/authorized_keys 2>/dev/null; then
+      echo "NOCHANGE"
+    else
+      echo "$KEY" >> /etc/dropbear/authorized_keys
+      chmod 600 /etc/dropbear/authorized_keys
+      echo "CHANGED"
+    fi
+  when: openwrt_bootstrap_public_key | trim | length > 0
+  register: openwrt_base_key
+  changed_when: "'CHANGED' in openwrt_base_key.stdout"
+  failed_when: openwrt_base_key.rc != 0
+  tags: [openwrt, base, ssh]

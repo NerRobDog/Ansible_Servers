@@ -1,0 +1,72 @@
+---
+- name: Validate OpenWrt firewall core inputs
+  ansible.builtin.assert:
+    that:
+      - openwrt_firewall_zerotier_src_cidr | trim | length > 0
+    fail_msg: "openwrt_firewall_zerotier_src_cidr must be a non-empty CIDR string."
+  when: openwrt_firewall_allow_zerotier_ssh | bool
+  tags: [openwrt, firewall]
+
+- name: Apply OpenWrt firewall baseline with SSH fail-safe
+  ansible.builtin.raw: |
+    set -eu
+
+    changed='0'
+
+    ensure_set() {
+      key="$1"
+      val="$2"
+      current="$(uci -q get "$key" || true)"
+      if [ "$current" != "$val" ]; then
+        uci set "$key=$val"
+        changed='1'
+      fi
+    }
+
+    ensure_type() {
+      section="$1"
+      expected="$2"
+      current="$(uci -q get "firewall.${section}" || true)"
+      if [ "$current" != "$expected" ]; then
+        uci -q delete "firewall.${section}" || true
+        uci set "firewall.${section}=${expected}"
+        changed='1'
+      fi
+    }
+
+    # Keep prod-safe behavior: only ensure SSH fail-safe rules, do not rewrite
+    # existing zones/defaults/forwarding policies.
+    ensure_type rule_ssh_lan rule
+    ensure_set firewall.rule_ssh_lan.name Allow-SSH-LAN
+    ensure_set firewall.rule_ssh_lan.src lan
+    ensure_set firewall.rule_ssh_lan.proto tcp
+    ensure_set firewall.rule_ssh_lan.dest_port 22
+    ensure_set firewall.rule_ssh_lan.target ACCEPT
+
+    if [ "{{ ((openwrt_firewall_allow_zerotier_ssh | bool) and (effective_feature_openwrt_zerotier | bool)) | ternary('1', '0') }}" = "1" ]; then
+      ensure_type rule_ssh_zerotier rule
+      ensure_set firewall.rule_ssh_zerotier.name Allow-SSH-ZeroTier
+      ensure_set firewall.rule_ssh_zerotier.src '*'
+      ensure_set firewall.rule_ssh_zerotier.proto tcp
+      ensure_set firewall.rule_ssh_zerotier.dest_port 22
+      ensure_set firewall.rule_ssh_zerotier.family ipv4
+      ensure_set firewall.rule_ssh_zerotier.src_ip '{{ openwrt_firewall_zerotier_src_cidr }}'
+      ensure_set firewall.rule_ssh_zerotier.target ACCEPT
+    else
+      if uci -q get firewall.rule_ssh_zerotier >/dev/null 2>&1; then
+        uci -q delete firewall.rule_ssh_zerotier
+        changed='1'
+      fi
+    fi
+
+    if [ "$changed" = "1" ]; then
+      uci commit firewall
+      /etc/init.d/firewall reload >/dev/null 2>&1 || /etc/init.d/firewall restart
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  register: openwrt_firewall_core_result
+  changed_when: "'CHANGED' in openwrt_firewall_core_result.stdout"
+  failed_when: openwrt_firewall_core_result.rc != 0
+  tags: [openwrt, firewall]

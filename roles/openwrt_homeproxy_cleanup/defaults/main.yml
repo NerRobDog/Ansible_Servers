@@ -1,0 +1,4 @@
+---
+openwrt_homeproxy_cleanup_packages:
+  - luci-app-homeproxy
+  - homeproxy

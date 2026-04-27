@@ -1,0 +1,9 @@
+---
+openwrt_base_packages:
+  - ca-bundle
+  - curl
+  - jq
+  - coreutils-timeout
+  - openssh-sftp-server
+
+openwrt_bootstrap_public_key: ""

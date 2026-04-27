@@ -10,7 +10,8 @@
    - `docs/ROLE_CATALOG.md`
    - `docs/DOCUMENTATION_RULES.md`
 2. Понять, что source of truth по серверам — это GitHub Environment Secret `RW_FLEET_CONFIG_B64`.
-3. Понять, что новые серверы добавляются без push в git.
+3. Для OpenWrt-флота source of truth — GitHub Environment Secret `OPENWRT_FLEET_CONFIG_B64`.
+4. Понять, что новые серверы/роутеры добавляются без push в git.
 
 ## 2) Базовые правила работы
 
@@ -40,7 +41,9 @@
 ## 5) Checklist перед релизом
 
 - [ ] `python .github/scripts/test-render-fleet-runtime.py` проходит
-- [ ] `ansible-playbook --syntax-check` проходит
+- [ ] `python .github/scripts/test-render-openwrt-fleet-runtime.py` проходит
+- [ ] `ansible-playbook -i hosts.example.ini playbook.yml --syntax-check` проходит
+- [ ] `ansible-playbook -i hosts.example.ini playbook.openwrt.yml --syntax-check` проходит
 - [ ] `ansible-lint` проходит
 - [ ] `yamllint` проходит
 - [ ] README и docs обновлены

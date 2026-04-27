@@ -1,0 +1,130 @@
+---
+- name: Validate docker stacks input type
+  ansible.builtin.assert:
+    that:
+      - openwrt_docker_stacks is iterable
+      - openwrt_docker_stacks is not string
+    fail_msg: "openwrt_docker_stacks must be a list"
+  tags: [openwrt, docker]
+
+- name: Ensure docker stacks root directory exists
+  ansible.builtin.raw: "mkdir -p {{ openwrt_docker_stacks_root }}"
+  changed_when: false
+  tags: [openwrt, docker]
+
+- name: Validate docker stack definitions
+  ansible.builtin.assert:
+    that:
+      - item.name is defined
+      - item.name | string | trim | length > 0
+      - item.compose_content is defined
+      - item.compose_content | string | trim | length > 0
+    fail_msg: "Each docker stack requires non-empty name and compose_content"
+  loop: "{{ openwrt_docker_stacks }}"
+  when: (item.enabled | default(true)) | bool
+  tags: [openwrt, docker]
+
+- name: Write docker compose files for stacks
+  ansible.builtin.raw: |
+    set -eu
+    stack_path="{{ item.path | default(openwrt_docker_stacks_root ~ '/' ~ item.name, true) }}"
+    mkdir -p "${stack_path}"
+
+    old_sum="$(md5sum "${stack_path}/docker-compose.yml" 2>/dev/null | awk '{print $1}')"
+    cat <<'EOF_COMPOSE' > "${stack_path}/docker-compose.yml"
+    {{ item.compose_content | trim }}
+    EOF_COMPOSE
+    new_sum="$(md5sum "${stack_path}/docker-compose.yml" | awk '{print $1}')"
+
+    if [ "${old_sum}" != "${new_sum}" ]; then
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  loop: "{{ openwrt_docker_stacks }}"
+  when: (item.enabled | default(true)) | bool
+  register: openwrt_stack_compose_files
+  changed_when: >-
+    (
+      openwrt_stack_compose_files.results | default([])
+      | selectattr('stdout', 'search', 'CHANGED')
+      | list
+      | length
+    ) > 0
+  failed_when: >-
+    (
+      openwrt_stack_compose_files.results | default([])
+      | selectattr('rc', 'ne', 0)
+      | list
+      | length
+    ) > 0
+  tags: [openwrt, docker]
+
+- name: Write stack env files when env vars are provided
+  ansible.builtin.raw: |
+    set -eu
+    stack_path="{{ item.path | default(openwrt_docker_stacks_root ~ '/' ~ item.name, true) }}"
+    mkdir -p "${stack_path}"
+
+    old_sum="$(md5sum "${stack_path}/.env" 2>/dev/null | awk '{print $1}')"
+    cat <<'EOF_ENV' > "${stack_path}/.env"
+    {% for env_item in item.env | default({}) | dict2items %}
+    {{ env_item.key }}={{ env_item.value }}
+    {% endfor %}
+    EOF_ENV
+    new_sum="$(md5sum "${stack_path}/.env" | awk '{print $1}')"
+
+    if [ "${old_sum}" != "${new_sum}" ]; then
+      echo "CHANGED"
+    else
+      echo "NOCHANGE"
+    fi
+  loop: "{{ openwrt_docker_stacks }}"
+  when:
+    - (item.enabled | default(true)) | bool
+    - item.env is defined
+    - item.env | length > 0
+  register: openwrt_stack_env_files
+  changed_when: >-
+    (
+      openwrt_stack_env_files.results | default([])
+      | selectattr('stdout', 'search', 'CHANGED')
+      | list
+      | length
+    ) > 0
+  failed_when: >-
+    (
+      openwrt_stack_env_files.results | default([])
+      | selectattr('rc', 'ne', 0)
+      | list
+      | length
+    ) > 0
+  tags: [openwrt, docker]
+
+- name: Run docker compose stacks
+  ansible.builtin.raw: |
+    stack_path="{{ item.path | default(openwrt_docker_stacks_root ~ '/' ~ item.name, true) }}"
+    {{ openwrt_docker_compose_command }} -f "${stack_path}/docker-compose.yml" up -d
+  loop: "{{ openwrt_docker_stacks }}"
+  when:
+    - (item.enabled | default(true)) | bool
+    - openwrt_docker_manage_runtime | bool
+  register: openwrt_stack_up
+  changed_when: >-
+    (
+      openwrt_stack_up.results | default([])
+      | map(attribute='stdout')
+      | map('default', '')
+      | map('regex_search', 'Creating |Recreating |Pulling |Starting |Building ')
+      | select('string')
+      | list
+      | length
+    ) > 0
+  failed_when: >-
+    (
+      openwrt_stack_up.results | default([])
+      | selectattr('rc', 'ne', 0)
+      | list
+      | length
+    ) > 0
+  tags: [openwrt, docker]
