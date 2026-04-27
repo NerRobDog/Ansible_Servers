@@ -31,6 +31,8 @@
           {{ fleet_host_cfg.get('features', {}).get('feature_monitoring_agent', feature_monitoring_agent) | bool }}
         effective_feature_monitoring_stack: >-
           {{ fleet_host_cfg.get('features', {}).get('feature_monitoring_stack', feature_monitoring_stack) | bool }}
+        effective_feature_sing_box_proxy: "{{ fleet_host_cfg.get('features', {}).get('feature_sing_box_proxy', feature_sing_box_proxy | default(false)) | bool }}"
+        effective_sing_box_proxy_config: "{{ fleet_host_cfg.get('sing_box_proxy', sing_box_proxy_config | default({})) }}"
         effective_feature_user_shell: >-
           {{
             (fleet_mode_effective == 'bootstrap')
@@ -138,6 +140,12 @@
     - role: ssh_lockdown
       when: effective_ssh_lockdown_enabled | bool
       tags: [ssh, lockdown]
+
+    - role: sing_box_proxy
+      when: effective_run_main_stack | bool and (effective_feature_sing_box_proxy | bool)
+      vars:
+        sing_box_proxy_config: "{{ effective_sing_box_proxy_config }}"
+      tags: [sing_box, proxy]
 
   tasks:
     - name: Validate custom role paths exist locally

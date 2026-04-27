@@ -1,0 +1,45 @@
+---
+# Sing-box proxy role — installs sing-box as a systemd service that exposes a
+# local mixed (HTTP + SOCKS5) proxy. The use-case is a download-worker behind
+# RU IP filtering: the worker container points its HTTP_PROXY at 127.0.0.1
+# and sing-box tunnels traffic to a non-RU outbound (typically a remnawave
+# VLESS REALITY node already deployed in the fleet).
+#
+# Activation: gate this role with `feature_sing_box_proxy: true` in the
+# host's effective features. Per-host config comes from
+# `sing_box_proxy_config` (typically rendered from fleet runtime vars).
+
+sing_box_proxy_version: "1.12.14"
+sing_box_proxy_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+sing_box_proxy_release_url_template: >-
+  https://github.com/SagerNet/sing-box/releases/download/v{{ sing_box_proxy_version }}/sing-box-{{ sing_box_proxy_version }}-linux-{{ sing_box_proxy_arch }}.tar.gz
+sing_box_proxy_sha256_amd64: "b2ae95c753335acd51a18c5a605621c82ca7520f5d17fd3e2dbdea2f159cc834"
+sing_box_proxy_sha256_arm64: ""  # populate when an arm64 host joins the fleet
+
+sing_box_proxy_install_path: /usr/local/bin/sing-box
+sing_box_proxy_config_dir: /etc/sing-box
+sing_box_proxy_config_path: "{{ sing_box_proxy_config_dir }}/config.json"
+sing_box_proxy_systemd_unit_path: /etc/systemd/system/sing-box.service
+
+# Inbound: a single mixed (HTTP+SOCKS5) proxy bound to loopback only. This is
+# safe even on a host with public network exposure — only local processes
+# (e.g. the docker download-worker on the same host) can reach it.
+sing_box_proxy_inbound_listen: "127.0.0.1"
+sing_box_proxy_inbound_port: 1080
+
+# Outbounds + route are caller-supplied via sing_box_proxy_config. See
+# templates/config.json.j2 for the expected shape:
+#   sing_box_proxy_config:
+#     outbounds: [ { type: vless, tag: ..., server: ..., ... }, ... ]
+#     route_final: nl-dhn1   # tag of the default outbound
+#     log_level: info
+sing_box_proxy_config: {}
+
+sing_box_proxy_log_level: info
+
+# Health-check after start: try a HEAD request through the proxy to the
+# SoundCloud CDN (the actual reason this role exists). 0 disables.
+sing_box_proxy_healthcheck_url: "https://i1.sndcdn.com/"
+sing_box_proxy_healthcheck_timeout_seconds: 10

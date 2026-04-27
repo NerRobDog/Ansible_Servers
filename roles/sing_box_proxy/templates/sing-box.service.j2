@@ -1,0 +1,14 @@
+[Unit]
+Description=sing-box proxy (yusic worker tunnel)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={{ sing_box_proxy_install_path }} run -c {{ sing_box_proxy_config_path }}
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

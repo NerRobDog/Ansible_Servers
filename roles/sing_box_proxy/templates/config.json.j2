@@ -1,0 +1,40 @@
+{
+  "log": {
+    "level": "{{ sing_box_proxy_config.log_level | default(sing_box_proxy_log_level) }}",
+    "timestamp": true
+  },
+  "inbounds": [
+    {
+      "type": "mixed",
+      "tag": "mixed-local",
+      "listen": "{{ sing_box_proxy_inbound_listen }}",
+      "listen_port": {{ sing_box_proxy_inbound_port | int }},
+      "sniff": true
+    }
+  ],
+  "outbounds": [
+{% set outbounds = sing_box_proxy_config.outbounds | default([]) %}
+{% for ob in outbounds %}
+    {{ ob | to_nice_json(indent=2) | indent(4) }}{% if not loop.last %},{% endif %}
+
+{% endfor %}
+{% if outbounds | length > 1 %}
+    ,{
+      "type": "urltest",
+      "tag": "auto",
+      "outbounds": {{ outbounds | map(attribute='tag') | list | to_json }},
+      "url": "https://www.gstatic.com/generate_204",
+      "interval": "3m"
+    },
+{% endif %}
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "final": "{{ sing_box_proxy_config.route_final | default((outbounds | length > 1) | ternary('auto', outbounds[0].tag if outbounds else 'direct')) }}",
+    "rules": []
+  }
+}
