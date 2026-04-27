@@ -135,21 +135,20 @@
   ansible.builtin.meta: flush_handlers
 
 - name: Healthcheck — verify proxy reaches downstream
-  ansible.builtin.command: >-
-    curl --silent --show-error
-    --proxy http://{{ sing_box_proxy_inbound_listen }}:{{ sing_box_proxy_inbound_port }}
-    --max-time {{ sing_box_proxy_healthcheck_timeout_seconds }}
-    --output /dev/null
-    --write-out '%{http_code}'
-    "{{ sing_box_proxy_healthcheck_url }}"
+  ansible.builtin.uri:
+    url: "{{ sing_box_proxy_healthcheck_url }}"
+    method: HEAD
+    timeout: "{{ sing_box_proxy_healthcheck_timeout_seconds }}"
+    status_code: [200, 301, 302, 403]
+    follow_redirects: none
+    return_content: false
+  environment:
+    https_proxy: "http://{{ sing_box_proxy_inbound_listen }}:{{ sing_box_proxy_inbound_port }}"
+    http_proxy: "http://{{ sing_box_proxy_inbound_listen }}:{{ sing_box_proxy_inbound_port }}"
   register: sing_box_proxy_healthcheck
   changed_when: false
   retries: 4
   delay: 3
-  until:
-    - sing_box_proxy_healthcheck.rc == 0
-    - sing_box_proxy_healthcheck.stdout in ['200', '301', '302', '403']
-  failed_when:
-    - sing_box_proxy_healthcheck.rc != 0 or sing_box_proxy_healthcheck.stdout not in ['200', '301', '302', '403']
+  until: sing_box_proxy_healthcheck.status in [200, 301, 302, 403]
   when: sing_box_proxy_healthcheck_url | length > 0
   tags: [sing_box, proxy]

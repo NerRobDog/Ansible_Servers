@@ -13,8 +13,9 @@ sing_box_proxy_version: "1.12.14"
 sing_box_proxy_arch_map:
   x86_64: amd64
   aarch64: arm64
+sing_box_proxy_release_base_url: "https://github.com/SagerNet/sing-box/releases/download"
 sing_box_proxy_release_url_template: >-
-  https://github.com/SagerNet/sing-box/releases/download/v{{ sing_box_proxy_version }}/sing-box-{{ sing_box_proxy_version }}-linux-{{ sing_box_proxy_arch }}.tar.gz
+  {{ sing_box_proxy_release_base_url }}/v{{ sing_box_proxy_version }}/sing-box-{{ sing_box_proxy_version }}-linux-{{ sing_box_proxy_arch }}.tar.gz
 sing_box_proxy_sha256_amd64: "b2ae95c753335acd51a18c5a605621c82ca7520f5d17fd3e2dbdea2f159cc834"
 sing_box_proxy_sha256_arm64: ""  # populate when an arm64 host joins the fleet
 
