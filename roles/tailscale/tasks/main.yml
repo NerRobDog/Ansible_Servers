@@ -205,7 +205,7 @@
     - tailscale_is_openwrt | bool
   tags: [tailscale]
 
-- name: Resolve tailscale auth status
+- name: Resolve tailscale status JSON + backend state
   ansible.builtin.set_fact:
     tailscale_status_json: >-
       {{
@@ -213,8 +213,27 @@
           tailscale_backend_state_cmd.stdout | default('') | trim | regex_search('^\{')
         ) | ternary((tailscale_backend_state_cmd.stdout | from_json), {})
       }}
-    tailscale_backend_state: "{{ tailscale_status_json.BackendState | default('NoState') }}"
-    tailscale_is_authenticated: "{{ tailscale_backend_state not in ['NoState', 'NeedsLogin', 'NeedsMachineAuth', 'Stopped', ''] }}"
+    tailscale_backend_state: >-
+      {{
+        (
+          (
+            tailscale_backend_state_cmd.stdout | default('') | trim | regex_search('^\{')
+          ) | ternary((tailscale_backend_state_cmd.stdout | from_json), {})
+        ).BackendState | default('NoState')
+      }}
+  changed_when: false
+  when: tailscale_enabled | bool
+  tags: [tailscale]
+
+- name: Derive tailscale_is_authenticated from backend state
+  ansible.builtin.set_fact:
+    # Ansible's set_fact does not guarantee resolution order between sibling
+    # vars in one block — using `tailscale_backend_state` inside the same
+    # set_fact that defines it produces "undefined" at resolution time. Split
+    # off the dependent flag into its own task that runs after the previous
+    # task has committed `tailscale_backend_state` into the fact cache.
+    tailscale_is_authenticated: >-
+      {{ tailscale_backend_state not in ['NoState', 'NeedsLogin', 'NeedsMachineAuth', 'Stopped', ''] }}
   changed_when: false
   when: tailscale_enabled | bool
   tags: [tailscale]
