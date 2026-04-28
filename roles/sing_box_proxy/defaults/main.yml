@@ -16,7 +16,10 @@ sing_box_proxy_arch_map:
 sing_box_proxy_release_base_url: "https://github.com/SagerNet/sing-box/releases/download"
 sing_box_proxy_release_url_template: >-
   {{ sing_box_proxy_release_base_url }}/v{{ sing_box_proxy_version }}/sing-box-{{ sing_box_proxy_version }}-linux-{{ sing_box_proxy_arch }}.tar.gz
-sing_box_proxy_sha256_amd64: "b2ae95c753335acd51a18c5a605621c82ca7520f5d17fd3e2dbdea2f159cc834"
+# sha256 of the *release archive* (sing-box-<version>-linux-<arch>.tar.gz),
+# NOT of the unpacked binary. Verify with:
+#   curl -sSL <release_url> | shasum -a 256
+sing_box_proxy_sha256_amd64: "da47b82d032048f313f6448843a50162e14ed28f7d0f3bd69266ec0e5a2f458b"
 sing_box_proxy_sha256_arm64: ""  # populate when an arm64 host joins the fleet
 
 sing_box_proxy_install_path: /usr/local/bin/sing-box
