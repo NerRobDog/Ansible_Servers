@@ -133,6 +133,7 @@
 
 - name: Flush handlers (apply restart on config / unit / binary change)
   ansible.builtin.meta: flush_handlers
+  tags: [sing_box, proxy]
 
 - name: Healthcheck — verify proxy reaches downstream
   ansible.builtin.uri:

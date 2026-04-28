@@ -445,6 +445,33 @@ def test_sing_box_proxy_route_final_must_match_outbound() -> None:
     )
 
 
+def test_sing_box_proxy_normalizes_outbound_whitespace() -> None:
+    config = {
+        "hosts": {
+            "node": {
+                "ansible_host": "203.0.113.54",
+                "features": {"feature_sing_box_proxy": True},
+                "sing_box_proxy": {
+                    "outbounds": [
+                        {
+                            "type": "  vless  ",
+                            "tag": "  nl-exit  ",
+                        }
+                    ],
+                    "route_final": "  nl-exit  ",
+                },
+            }
+        }
+    }
+    proc, _, vars_path, _ = run_renderer(json.dumps(config), "deploy", suffix=".json")
+    assert_true(proc.returncode == 0, f"render failed: {proc.stderr or proc.stdout}")
+    runtime_vars = json.loads(vars_path.read_text())
+    sb = runtime_vars["fleet_hosts"]["node"]["sing_box_proxy"]
+    assert_true(sb["outbounds"][0]["tag"] == "nl-exit", "tag should be trimmed in rendered config")
+    assert_true(sb["outbounds"][0]["type"] == "vless", "type should be trimmed in rendered config")
+    assert_true(sb["route_final"] == "nl-exit", "route_final should be trimmed")
+
+
 def main() -> int:
     tests = [
         test_valid_yaml_modes,
@@ -463,6 +490,7 @@ def main() -> int:
         test_sing_box_proxy_requires_outbounds_when_enabled,
         test_sing_box_proxy_valid_config,
         test_sing_box_proxy_route_final_must_match_outbound,
+        test_sing_box_proxy_normalizes_outbound_whitespace,
     ]
 
     for test in tests:

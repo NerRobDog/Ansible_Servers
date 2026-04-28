@@ -1,3 +1,32 @@
+{# Build the full outbounds list (user outbounds + auto urltest if 2+ + direct)
+   as a single Python list, then dump it once via to_nice_json. This avoids the
+   single-outbound trailing-comma trap that broke JSON validation in PR review. -#}
+{%- set user_outbounds = sing_box_proxy_config.outbounds | default([]) -%}
+{%- set rendered_outbounds = [] -%}
+{%- for ob in user_outbounds -%}
+{%-   set _ = rendered_outbounds.append(ob) -%}
+{%- endfor -%}
+{%- if user_outbounds | length > 1 -%}
+{%-   set _ = rendered_outbounds.append({
+        "type": "urltest",
+        "tag": "auto",
+        "outbounds": user_outbounds | map(attribute='tag') | list,
+        "url": "https://www.gstatic.com/generate_204",
+        "interval": "3m",
+      }) -%}
+{%- endif -%}
+{%- set _ = rendered_outbounds.append({"type": "direct", "tag": "direct"}) -%}
+{# route.final selection: explicit -> auto (when many) -> single outbound tag -> direct -#}
+{%- set route_final_raw = sing_box_proxy_config.route_final | default('') -%}
+{%- if route_final_raw | length > 0 -%}
+{%-   set route_final = route_final_raw -%}
+{%- elif user_outbounds | length > 1 -%}
+{%-   set route_final = 'auto' -%}
+{%- elif user_outbounds | length == 1 -%}
+{%-   set route_final = user_outbounds[0].tag -%}
+{%- else -%}
+{%-   set route_final = 'direct' -%}
+{%- endif -%}
 {
   "log": {
     "level": "{{ sing_box_proxy_config.log_level | default(sing_box_proxy_log_level) }}",
@@ -12,29 +41,10 @@
       "sniff": true
     }
   ],
-  "outbounds": [
-{% set outbounds = sing_box_proxy_config.outbounds | default([]) %}
-{% for ob in outbounds %}
-    {{ ob | to_nice_json(indent=2) | indent(4) }}{% if not loop.last %},{% endif %}
-
-{% endfor %}
-{% if outbounds | length > 1 %}
-    ,{
-      "type": "urltest",
-      "tag": "auto",
-      "outbounds": {{ outbounds | map(attribute='tag') | list | to_json }},
-      "url": "https://www.gstatic.com/generate_204",
-      "interval": "3m"
-    },
-{% endif %}
-    {
-      "type": "direct",
-      "tag": "direct"
-    }
-  ],
+  "outbounds": {{ rendered_outbounds | to_nice_json(indent=2) | indent(2) }},
   "route": {
     "auto_detect_interface": true,
-    "final": "{{ sing_box_proxy_config.route_final | default((outbounds | length > 1) | ternary('auto', outbounds[0].tag if outbounds else 'direct')) }}",
+    "final": "{{ route_final }}",
     "rules": []
   }
 }

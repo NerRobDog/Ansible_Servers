@@ -326,9 +326,16 @@ def normalize_sing_box_proxy(alias: str, host_cfg: dict, defaults: dict, feature
         ob_tag = str(ob.get("tag", "") or "").strip()
         if not ob_tag:
             fail(f"Host '{alias}' sing_box_proxy.outbounds[{index}].tag must be non-empty.")
-        if not str(ob.get("type", "") or "").strip():
+        ob_type = str(ob.get("type", "") or "").strip()
+        if not ob_type:
             fail(f"Host '{alias}' sing_box_proxy.outbounds[{index}] (tag={ob_tag}) must define type.")
-        outbounds.append(ob)
+        # Persist trimmed tag/type back into the outbound so downstream
+        # consumers (template, route_final lookup, jinja map(attribute='tag'))
+        # see whitespace-free identifiers.
+        normalized_ob = copy.deepcopy(ob)
+        normalized_ob["tag"] = ob_tag
+        normalized_ob["type"] = ob_type
+        outbounds.append(normalized_ob)
 
     route_final = str(merged.get("route_final", "") or "").strip()
     log_level = str(merged.get("log_level", "info") or "").strip().lower()
