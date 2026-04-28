@@ -20,7 +20,11 @@
 
 - name: Set tailscale host flavor
   ansible.builtin.set_fact:
-    tailscale_is_openwrt: "{{ 'OPENWRT' in (tailscale_openwrt_probe.stdout | default('')) }}"
+    # Equality check: probe outputs literal "OPENWRT" or "NON_OPENWRT", and a
+    # naive `in` substring match returns true for both because "NON_OPENWRT"
+    # contains the substring "OPENWRT". Compare against the trimmed token
+    # instead so non-OpenWrt hosts are classified correctly.
+    tailscale_is_openwrt: "{{ (tailscale_openwrt_probe.stdout | default('') | trim) == 'OPENWRT' }}"
   changed_when: false
   when: tailscale_enabled | bool
   tags: [tailscale]
