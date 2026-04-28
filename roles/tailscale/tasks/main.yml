@@ -310,7 +310,7 @@
     - tailscale_is_openwrt | bool
   tags: [tailscale]
 
-- name: Resolve tailscale post-join status
+- name: Resolve tailscale post-join status JSON + backend state
   ansible.builtin.set_fact:
     tailscale_status_after_json: >-
       {{
@@ -318,7 +318,19 @@
           tailscale_backend_state_after_cmd.stdout | default('') | trim | regex_search('^\{')
         ) | ternary((tailscale_backend_state_after_cmd.stdout | from_json), {})
       }}
-    tailscale_backend_state_after: "{{ tailscale_status_after_json.BackendState | default('NoState') }}"
+    # Inline BackendState extraction — same self-contained pattern as the
+    # pre-join "Resolve tailscale status JSON + backend state" task. Ansible
+    # does not guarantee resolution order between sibling vars in one
+    # set_fact, so a reference to tailscale_status_after_json from a sibling
+    # would resolve as undefined.
+    tailscale_backend_state_after: >-
+      {{
+        (
+          (
+            tailscale_backend_state_after_cmd.stdout | default('') | trim | regex_search('^\{')
+          ) | ternary((tailscale_backend_state_after_cmd.stdout | from_json), {})
+        ).BackendState | default('NoState')
+      }}
   changed_when: false
   when: tailscale_enabled | bool
   tags: [tailscale]
