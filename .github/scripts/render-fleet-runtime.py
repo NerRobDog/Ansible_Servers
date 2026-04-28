@@ -26,6 +26,7 @@ FEATURE_DEFAULTS = {
     "feature_monitoring_agent": False,
     "feature_monitoring_stack": False,
     "feature_user_shell": False,
+    "feature_sing_box_proxy": False,
 }
 
 REMNAWAVE_DEFAULTS = {
@@ -290,6 +291,10 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
         if not isinstance(role_name, str) or not role_name.strip():
             fail(f"Host '{alias}' custom_roles contains invalid item: {role_name!r}")
 
+    sing_box_cfg = normalize_sing_box_proxy(
+        alias, host_cfg, defaults, normalized_features.get("feature_sing_box_proxy", False)
+    )
+
     return {
         "ansible_host": ansible_host.strip(),
         "ansible_port": ansible_port,
@@ -301,7 +306,59 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
         "features": normalized_features,
         "remnawave": remnawave_cfg,
         "monitoring": monitoring_cfg,
+        "sing_box_proxy": sing_box_cfg,
         "custom_roles": custom_roles,
+    }
+
+
+def normalize_sing_box_proxy(alias: str, host_cfg: dict, defaults: dict, feature_enabled: bool) -> dict:
+    default_cfg = ensure_mapping(defaults.get("sing_box_proxy", {}), "defaults.sing_box_proxy")
+    host_specific = ensure_mapping(host_cfg.get("sing_box_proxy", {}), f"Host '{alias}' sing_box_proxy")
+    merged = deep_merge(default_cfg, host_specific)
+
+    outbounds_raw = merged.get("outbounds", [])
+    if not isinstance(outbounds_raw, list):
+        fail(f"Host '{alias}' sing_box_proxy.outbounds must be a list.")
+    outbounds = []
+    for index, ob in enumerate(outbounds_raw):
+        if not isinstance(ob, dict):
+            fail(f"Host '{alias}' sing_box_proxy.outbounds[{index}] must be a mapping.")
+        ob_tag = str(ob.get("tag", "") or "").strip()
+        if not ob_tag:
+            fail(f"Host '{alias}' sing_box_proxy.outbounds[{index}].tag must be non-empty.")
+        ob_type = str(ob.get("type", "") or "").strip()
+        if not ob_type:
+            fail(f"Host '{alias}' sing_box_proxy.outbounds[{index}] (tag={ob_tag}) must define type.")
+        # Persist trimmed tag/type back into the outbound so downstream
+        # consumers (template, route_final lookup, jinja map(attribute='tag'))
+        # see whitespace-free identifiers.
+        normalized_ob = copy.deepcopy(ob)
+        normalized_ob["tag"] = ob_tag
+        normalized_ob["type"] = ob_type
+        outbounds.append(normalized_ob)
+
+    route_final = str(merged.get("route_final", "") or "").strip()
+    log_level = str(merged.get("log_level", "info") or "").strip().lower()
+    if log_level not in {"trace", "debug", "info", "warn", "error", "fatal", "panic"}:
+        fail(f"Host '{alias}' sing_box_proxy.log_level invalid: {log_level!r}")
+
+    if feature_enabled:
+        if len(outbounds) == 0:
+            fail(
+                f"Host '{alias}' has feature_sing_box_proxy=true but sing_box_proxy.outbounds is empty. "
+                "Define at least one outbound (typically a VLESS REALITY entry to a non-RU node)."
+            )
+        outbound_tags = {ob["tag"] for ob in outbounds}
+        if route_final and route_final not in outbound_tags and route_final != "auto" and route_final != "direct":
+            fail(
+                f"Host '{alias}' sing_box_proxy.route_final='{route_final}' references no outbound. "
+                f"Available outbound tags: {sorted(outbound_tags)}"
+            )
+
+    return {
+        "outbounds": outbounds,
+        "route_final": route_final,
+        "log_level": log_level,
     }
 
 

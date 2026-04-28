@@ -346,6 +346,132 @@ def test_invalid_monitoring_port() -> None:
     assert_true("monitoring" in (proc.stderr + proc.stdout), "Error should mention monitoring")
 
 
+def test_sing_box_proxy_disabled_by_default() -> None:
+    config = {
+        "hosts": {
+            "node": {
+                "ansible_host": "203.0.113.50",
+            }
+        }
+    }
+    proc, _, vars_path, _ = run_renderer(json.dumps(config), "deploy", suffix=".json")
+    assert_true(proc.returncode == 0, f"render failed: {proc.stderr or proc.stdout}")
+    runtime_vars = json.loads(vars_path.read_text())
+    host = runtime_vars["fleet_hosts"]["node"]
+    assert_true(
+        host["features"]["feature_sing_box_proxy"] is False,
+        "feature_sing_box_proxy should default to False",
+    )
+    assert_true(
+        host["sing_box_proxy"]["outbounds"] == [],
+        "sing_box_proxy.outbounds should default to empty list",
+    )
+
+
+def test_sing_box_proxy_requires_outbounds_when_enabled() -> None:
+    config = {
+        "hosts": {
+            "node": {
+                "ansible_host": "203.0.113.51",
+                "features": {"feature_sing_box_proxy": True},
+            }
+        }
+    }
+    proc, _, _, _ = run_renderer(json.dumps(config), "deploy", suffix=".json")
+    assert_true(
+        proc.returncode != 0,
+        "Renderer should fail when feature_sing_box_proxy=true but outbounds is empty",
+    )
+    assert_true(
+        "outbounds" in (proc.stderr + proc.stdout),
+        "Error should mention outbounds",
+    )
+
+
+def test_sing_box_proxy_valid_config() -> None:
+    config = {
+        "hosts": {
+            "node": {
+                "ansible_host": "203.0.113.52",
+                "features": {"feature_sing_box_proxy": True},
+                "sing_box_proxy": {
+                    "outbounds": [
+                        {
+                            "type": "vless",
+                            "tag": "nl-exit",
+                            "server": "nl.example.com",
+                            "server_port": 443,
+                            "uuid": "00000000-0000-0000-0000-000000000000",
+                        }
+                    ],
+                    "route_final": "nl-exit",
+                },
+            }
+        }
+    }
+    proc, _, vars_path, _ = run_renderer(json.dumps(config), "deploy", suffix=".json")
+    assert_true(proc.returncode == 0, f"render failed: {proc.stderr or proc.stdout}")
+    runtime_vars = json.loads(vars_path.read_text())
+    host = runtime_vars["fleet_hosts"]["node"]
+    assert_true(host["features"]["feature_sing_box_proxy"] is True, "flag should be True")
+    outs = host["sing_box_proxy"]["outbounds"]
+    assert_true(len(outs) == 1 and outs[0]["tag"] == "nl-exit", "outbound tag mismatch")
+    assert_true(host["sing_box_proxy"]["route_final"] == "nl-exit", "route_final mismatch")
+
+
+def test_sing_box_proxy_route_final_must_match_outbound() -> None:
+    config = {
+        "hosts": {
+            "node": {
+                "ansible_host": "203.0.113.53",
+                "features": {"feature_sing_box_proxy": True},
+                "sing_box_proxy": {
+                    "outbounds": [
+                        {"type": "vless", "tag": "nl-exit"}
+                    ],
+                    "route_final": "us-typo",
+                },
+            }
+        }
+    }
+    proc, _, _, _ = run_renderer(json.dumps(config), "deploy", suffix=".json")
+    assert_true(
+        proc.returncode != 0,
+        "Renderer should fail when route_final references unknown outbound tag",
+    )
+    assert_true(
+        "route_final" in (proc.stderr + proc.stdout),
+        "Error should mention route_final",
+    )
+
+
+def test_sing_box_proxy_normalizes_outbound_whitespace() -> None:
+    config = {
+        "hosts": {
+            "node": {
+                "ansible_host": "203.0.113.54",
+                "features": {"feature_sing_box_proxy": True},
+                "sing_box_proxy": {
+                    "outbounds": [
+                        {
+                            "type": "  vless  ",
+                            "tag": "  nl-exit  ",
+                        }
+                    ],
+                    "route_final": "  nl-exit  ",
+                },
+            }
+        }
+    }
+    proc, _, vars_path, _ = run_renderer(json.dumps(config), "deploy", suffix=".json")
+    assert_true(proc.returncode == 0, f"render failed: {proc.stderr or proc.stdout}")
+    runtime_vars = json.loads(vars_path.read_text())
+    sb = runtime_vars["fleet_hosts"]["node"]["sing_box_proxy"]
+    assert_true(sb["outbounds"][0]["tag"] == "nl-exit", "tag should be trimmed in rendered config")
+    assert_true(sb["outbounds"][0]["type"] == "vless", "type should be trimmed in rendered config")
+    assert_true(sb["route_final"] == "nl-exit", "route_final should be trimmed")
+
+
 def main() -> int:
     tests = [
         test_valid_yaml_modes,
@@ -360,6 +486,11 @@ def main() -> int:
         test_yusic_worker_invalid_alias_rejected,
         test_yusic_worker_invalid_workdir_rejected,
         test_invalid_monitoring_port,
+        test_sing_box_proxy_disabled_by_default,
+        test_sing_box_proxy_requires_outbounds_when_enabled,
+        test_sing_box_proxy_valid_config,
+        test_sing_box_proxy_route_final_must_match_outbound,
+        test_sing_box_proxy_normalizes_outbound_whitespace,
     ]
 
     for test in tests:

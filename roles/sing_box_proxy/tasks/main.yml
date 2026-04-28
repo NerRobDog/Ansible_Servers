@@ -1,0 +1,155 @@
+---
+- name: Validate sing_box_proxy_config has at least one outbound
+  ansible.builtin.assert:
+    that:
+      - sing_box_proxy_config is mapping
+      - (sing_box_proxy_config.outbounds | default([])) | length > 0
+    fail_msg: >-
+      sing_box_proxy_config.outbounds must contain at least one outbound entry.
+      Provide outbounds via fleet host_vars (e.g. defaults.sing_box_proxy or
+      hosts.<alias>.sing_box_proxy).
+  tags: [sing_box, proxy]
+
+- name: Resolve sing-box architecture
+  ansible.builtin.set_fact:
+    sing_box_proxy_arch: "{{ sing_box_proxy_arch_map[ansible_architecture] | default('') }}"
+  tags: [sing_box, proxy]
+
+- name: Fail when host architecture is unsupported
+  ansible.builtin.assert:
+    that:
+      - sing_box_proxy_arch | length > 0
+    fail_msg: "sing-box has no release mapping for architecture '{{ ansible_architecture }}'. Update sing_box_proxy_arch_map."
+  tags: [sing_box, proxy]
+
+- name: Resolve sing-box release URL + checksum for this arch
+  ansible.builtin.set_fact:
+    sing_box_proxy_release_url: "{{ sing_box_proxy_release_url_template | trim }}"
+    sing_box_proxy_release_sha256: >-
+      {{ {'amd64': sing_box_proxy_sha256_amd64, 'arm64': sing_box_proxy_sha256_arm64}[sing_box_proxy_arch] }}
+  tags: [sing_box, proxy]
+
+- name: Fail when checksum for this arch is not pinned
+  ansible.builtin.assert:
+    that:
+      - sing_box_proxy_release_sha256 | trim | length > 0
+    fail_msg: "sing-box checksum for arch '{{ sing_box_proxy_arch }}' is empty. Pin sing_box_proxy_sha256_{{ sing_box_proxy_arch }} in defaults/main.yml."
+  tags: [sing_box, proxy]
+
+- name: Read existing sing-box version (if installed)
+  ansible.builtin.command: "{{ sing_box_proxy_install_path }} version"
+  register: sing_box_proxy_existing_version
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  tags: [sing_box, proxy]
+
+- name: Determine whether sing-box must be (re)installed
+  ansible.builtin.set_fact:
+    sing_box_proxy_install_needed: >-
+      {{
+        sing_box_proxy_existing_version.rc != 0
+        or ('sing-box version ' + sing_box_proxy_version) not in (sing_box_proxy_existing_version.stdout | default(''))
+      }}
+  tags: [sing_box, proxy]
+
+- name: Stage sing-box release tarball
+  ansible.builtin.get_url:
+    url: "{{ sing_box_proxy_release_url }}"
+    dest: "/tmp/sing-box-{{ sing_box_proxy_version }}-linux-{{ sing_box_proxy_arch }}.tar.gz"
+    checksum: "sha256:{{ sing_box_proxy_release_sha256 }}"
+    mode: "0644"
+    timeout: 60
+  when: sing_box_proxy_install_needed
+  tags: [sing_box, proxy]
+
+- name: Extract sing-box binary
+  ansible.builtin.unarchive:
+    src: "/tmp/sing-box-{{ sing_box_proxy_version }}-linux-{{ sing_box_proxy_arch }}.tar.gz"
+    dest: "/tmp/"
+    remote_src: true
+  when: sing_box_proxy_install_needed
+  tags: [sing_box, proxy]
+
+- name: Install sing-box binary to {{ sing_box_proxy_install_path }}
+  ansible.builtin.copy:
+    src: "/tmp/sing-box-{{ sing_box_proxy_version }}-linux-{{ sing_box_proxy_arch }}/sing-box"
+    dest: "{{ sing_box_proxy_install_path }}"
+    mode: "0755"
+    owner: root
+    group: root
+    remote_src: true
+  when: sing_box_proxy_install_needed
+  notify: restart_sing_box
+  tags: [sing_box, proxy]
+
+- name: Clean up sing-box install staging
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/sing-box-{{ sing_box_proxy_version }}-linux-{{ sing_box_proxy_arch }}.tar.gz"
+    - "/tmp/sing-box-{{ sing_box_proxy_version }}-linux-{{ sing_box_proxy_arch }}"
+  when: sing_box_proxy_install_needed
+  tags: [sing_box, proxy]
+
+- name: Ensure sing-box config directory exists
+  ansible.builtin.file:
+    path: "{{ sing_box_proxy_config_dir }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+  tags: [sing_box, proxy]
+
+- name: Render sing-box config.json
+  ansible.builtin.template:
+    src: config.json.j2
+    dest: "{{ sing_box_proxy_config_path }}"
+    mode: "0600"
+    owner: root
+    group: root
+    validate: "{{ sing_box_proxy_install_path }} check -c %s"
+  notify: restart_sing_box
+  tags: [sing_box, proxy]
+
+- name: Install sing-box systemd unit
+  ansible.builtin.template:
+    src: sing-box.service.j2
+    dest: "{{ sing_box_proxy_systemd_unit_path }}"
+    mode: "0644"
+    owner: root
+    group: root
+  notify: restart_sing_box
+  tags: [sing_box, proxy]
+
+- name: Enable + start sing-box
+  ansible.builtin.systemd:
+    name: sing-box
+    enabled: true
+    state: started
+    daemon_reload: true
+  tags: [sing_box, proxy]
+
+- name: Flush handlers (apply restart on config / unit / binary change)
+  ansible.builtin.meta: flush_handlers
+  tags: [sing_box, proxy]
+
+- name: Healthcheck — verify proxy reaches downstream
+  ansible.builtin.uri:
+    url: "{{ sing_box_proxy_healthcheck_url }}"
+    method: HEAD
+    timeout: "{{ sing_box_proxy_healthcheck_timeout_seconds }}"
+    status_code: [200, 301, 302, 403]
+    follow_redirects: none
+    return_content: false
+  environment:
+    https_proxy: "http://{{ sing_box_proxy_inbound_listen }}:{{ sing_box_proxy_inbound_port }}"
+    http_proxy: "http://{{ sing_box_proxy_inbound_listen }}:{{ sing_box_proxy_inbound_port }}"
+  register: sing_box_proxy_healthcheck
+  changed_when: false
+  retries: 4
+  delay: 3
+  until: sing_box_proxy_healthcheck.status in [200, 301, 302, 403]
+  when: sing_box_proxy_healthcheck_url | length > 0
+  tags: [sing_box, proxy]

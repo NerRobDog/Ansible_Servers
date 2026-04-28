@@ -202,6 +202,63 @@ OpenWrt workflows:
 - `deploy-openwrt` (режимы `bootstrap|deploy|lockdown`)
 - `monitor-openwrt-fleet` (smoke + Telegram уведомления)
 
+## 10.1) Sing-box proxy для воркеров (опционально)
+
+Если у вас есть хост в стране, где нужный провайдер заблокирован (например,
+RU → SoundCloud), включите на этом хосте локальный mixed-proxy через
+`sing-box`, который туннелирует трафик в один из ваших VLESS-узлов.
+
+Активация — через два поля в fleet:
+
+```yaml
+hosts:
+  spb_node:
+    ansible_host: 80.90.184.251
+    features:
+      feature_sing_box_proxy: true
+    sing_box_proxy:
+      route_final: nl-exit         # tag of the default outbound
+      log_level: info
+      outbounds:
+        - type: vless
+          tag: nl-exit
+          server: nl.example.com
+          server_port: 443
+          uuid: <UUID>
+          flow: xtls-rprx-vision
+          tls:
+            enabled: true
+            server_name: nl.example.com
+            utls: { enabled: true, fingerprint: firefox }
+            reality:
+              enabled: true
+              public_key: "<reality-public-key>"
+              short_id: "<short-id>"
+```
+
+Роль `sing_box_proxy` (tags=`[sing_box, proxy]`) сама поставит binary
+(sha-pinned, см. `roles/sing_box_proxy/defaults/main.yml`), отрендерит
+`/etc/sing-box/config.json` и выставит mixed inbound на `127.0.0.1:1080`.
+
+Worker (`workers.<alias>`) на этом же хосте указывает на этот proxy через
+`proxy.http_proxy: "http://127.0.0.1:1080"` — и его исходящий трафик к
+провайдеру пойдёт через выбранный VLESS outbound.
+
+Apply поэтапно (никак не трогая remnawave/caddy на хосте):
+
+```bash
+gh workflow run deploy-remnawave-node \
+  --ref master \
+  -f environment=production \
+  -f target=remnawave \
+  -f mode=deploy \
+  -f tags=sing_box \
+  -f limit=spb_node
+```
+
+После того как sing-box healthcheck зелёный — деплой воркера через
+`target=yusic_worker -f worker_mode=deploy -f limit=worker_spb`.
+
 ## 11) Проверка и безопасность
 
 1. Не храните реальные IP/пароли/ключи в git.
