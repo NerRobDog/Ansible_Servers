@@ -1,0 +1,35 @@
+name: Update Clash MI version
+
+on:
+  schedule:
+    # 13:00 UTC ежедневно — релизы выходят 02:00–10:00 UTC (китайское утро)
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    environment: Testing
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update Clash MI version via Remnawave API
+        id: update
+        env:
+          RW_PANEL_API_BASE_URL: ${{ vars.RW_PANEL_API_BASE_URL }}
+          RW_PANEL_API_TOKEN: ${{ secrets.RW_PANEL_API_TOKEN }}
+        run: python3 .github/scripts/update_clashmi.py
+
+      - name: Restart subscription-page container
+        if: steps.update.outputs.updated == 'true'
+        env:
+          SSH_KEY: ${{ secrets.SUBPAGE_SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ vars.SUBPAGE_SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh -o StrictHostKeyChecking=no root@$SSH_HOST \
+            "docker restart remnawave-subscription-page"
