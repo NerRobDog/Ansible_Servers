@@ -92,6 +92,15 @@
                 (yusic_worker_relay_root_dir | default('/opt/yusic-worker-relay')) ~ '/stage'
               )
           }}
+      changed_when: false
+      tags: [always]
+
+    - name: Derive known_hosts path under staging dir
+      ansible.builtin.set_fact:
+        # Split off into its own task because Ansible's set_fact does not
+        # guarantee resolution order between sibling vars in one block —
+        # using `yusic_worker_relay_stage_dir_effective` inside the same
+        # set_fact that defines it produces "undefined" at resolution time.
         yusic_worker_known_hosts_path: "{{ yusic_worker_relay_stage_dir_effective ~ '/known_hosts' }}"
       changed_when: false
       tags: [always]
