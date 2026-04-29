@@ -181,23 +181,23 @@
             - name: Deploy worker payload
               ansible.builtin.include_role:
                 name: yusic_worker_deploy
-              vars:
-                yusic_selected_workers: "{{ yusic_selected_workers }}"
-                worker_image_tag: "{{ worker_image_tag }}"
+              # Note: yusic_selected_workers and worker_image_tag are already
+              # in the play-level scope (set as set_facts above / passed via
+              # extra-vars). Re-declaring them as `var: "{{ var }}"` trips
+              # Ansible 2.20+ recursive-template detection. Inherit instead.
 
             - name: Run smoke checks after deploy/update
               ansible.builtin.include_role:
                 name: yusic_worker_smoke
-              vars:
-                yusic_selected_workers: "{{ yusic_selected_workers }}"
               when: worker_run_smoke_effective
           rescue:
             - name: Rollback workers to previous image on failed deploy/update
               ansible.builtin.include_role:
                 name: yusic_worker_rollback
-              vars:
-                yusic_selected_workers: "{{ yusic_selected_workers }}"
-                yusic_worker_backup_images: "{{ yusic_worker_backup_images | default({}) }}"
+              # yusic_worker_backup_images is set by yusic_worker_deploy in the
+              # parent play scope; inherited here. Re-declaring as
+              # `yusic_worker_backup_images: "{{ yusic_worker_backup_images | default({}) }}"`
+              # trips Ansible 2.20+ recursive-template detection.
 
             - name: Fail deploy after rollback
               ansible.builtin.fail:
@@ -206,8 +206,6 @@
         - name: Run smoke-only mode
           ansible.builtin.include_role:
             name: yusic_worker_smoke
-          vars:
-            yusic_selected_workers: "{{ yusic_selected_workers }}"
           when: worker_mode_effective == 'smoke'
 
         - name: Run bootstrap connectivity checks for selected workers
