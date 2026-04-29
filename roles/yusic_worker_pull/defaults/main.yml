@@ -1,0 +1,37 @@
+---
+# Pull-based yusic worker deploy. Worker hosts pull the docker image directly
+# from ghcr.io with provided creds. No relay, no skopeo, no scp, no tar.
+#
+# Per-worker config is supplied via host_vars (rendered by
+# render-fleet-runtime.py from the fleet's `workers:` block).
+
+yusic_worker_pull_workdir: /home/deploy/yusic-worker
+yusic_worker_pull_compose_filename: docker-compose.yml
+yusic_worker_pull_env_filename: yusic-worker.env
+
+# These come from playbook-yusic-worker-pull.yml as host_vars (set from the
+# rendered yusic_worker_runtime map). Defaults here are empty so the role
+# fails fast with a clear assert if they're not wired.
+yusic_worker_pull_alias: ""
+yusic_worker_pull_image_repo: ""
+yusic_worker_pull_image_tag: ""
+yusic_worker_pull_tags: []
+yusic_worker_pull_max_concurrent_jobs: 1
+yusic_worker_pull_network_mode: "host"
+yusic_worker_pull_dns: []
+yusic_worker_pull_redis_url: ""
+yusic_worker_pull_cache_bot_token: ""
+yusic_worker_pull_inline_cache_chat_id: ""
+yusic_worker_pull_container_name: "yusic_download_worker"
+yusic_worker_pull_proxy_http: ""
+yusic_worker_pull_proxy_https: ""
+yusic_worker_pull_proxy_no: "localhost,127.0.0.1,::1"
+
+# GHCR credentials (private package). Required for `docker login ghcr.io`.
+# Passed from workflow via --extra-vars.
+yusic_worker_pull_ghcr_username: ""
+yusic_worker_pull_ghcr_token: ""
+
+# Pre-deploy hygiene: minimum free disk required (in MB) before pull. Image
+# is ~2 GB; leaving 1.5 GB headroom for overlayfs extract.
+yusic_worker_pull_min_free_disk_mb: 3500

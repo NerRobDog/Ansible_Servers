@@ -1,0 +1,59 @@
+---
+# Pull-based yusic worker deploy. Runs directly on each worker host (group
+# [yusic_workers] in the rendered inventory) — no relay, no skopeo, no scp.
+# Each worker `docker login + pull + up` from ghcr.io independently.
+#
+# Inputs (extra-vars from workflow):
+#   worker_image_tag           — sha-<commit> tag to pull
+#   yusic_worker_pull_ghcr_username
+#   yusic_worker_pull_ghcr_token
+#
+# Per-worker config is read from yusic_worker_runtime.workers.<alias> in
+# the runtime_vars.json passed via @.ansible/runtime/runtime_vars.json.
+
+- name: Deploy yusic workers via direct ghcr pull
+  hosts: yusic_workers
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Resolve per-worker config from yusic_worker_runtime
+      ansible.builtin.set_fact:
+        yusic_worker_pull_alias: "{{ inventory_hostname }}"
+        yusic_worker_pull_self: "{{ yusic_worker_runtime.workers[inventory_hostname] }}"
+      changed_when: false
+      tags: [always]
+
+    - name: Validate worker is enabled in runtime
+      ansible.builtin.assert:
+        that:
+          - yusic_worker_pull_self is mapping
+          - yusic_worker_pull_self.enabled | bool
+        fail_msg: "Worker {{ inventory_hostname }} is not enabled in yusic_worker_runtime."
+      tags: [always]
+
+    - name: Map runtime config into role-prefixed vars
+      ansible.builtin.set_fact:
+        yusic_worker_pull_image_repo: "{{ yusic_worker_pull_self.image_repo }}"
+        yusic_worker_pull_image_tag: "{{ worker_image_tag | default('') }}"
+        yusic_worker_pull_tags: "{{ yusic_worker_pull_self.tags | default([]) }}"
+        yusic_worker_pull_max_concurrent_jobs: "{{ yusic_worker_pull_self.max_concurrent_jobs | default(1) }}"
+        yusic_worker_pull_network_mode: "{{ yusic_worker_pull_self.network_mode | default('host') }}"
+        yusic_worker_pull_dns: "{{ yusic_worker_pull_self.dns | default([]) }}"
+        yusic_worker_pull_redis_url: "{{ yusic_worker_pull_self.redis_url | default('') }}"
+        yusic_worker_pull_cache_bot_token: "{{ yusic_worker_pull_self.cache_bot_token | default('') }}"
+        yusic_worker_pull_inline_cache_chat_id: "{{ yusic_worker_pull_self.inline_cache_chat_id | default('') }}"
+        yusic_worker_pull_workdir: "{{ yusic_worker_pull_self.workdir | default('/home/deploy/yusic-worker') }}"
+        yusic_worker_pull_container_name: "{{ yusic_worker_pull_self.container_name | default('yusic_download_worker') }}"
+      changed_when: false
+      tags: [always]
+
+    - name: Map proxy config (if defined for this worker)
+      ansible.builtin.set_fact:
+        yusic_worker_pull_proxy_http: "{{ yusic_worker_pull_self.proxy.http_proxy | default('') }}"
+        yusic_worker_pull_proxy_https: "{{ yusic_worker_pull_self.proxy.https_proxy | default('') }}"
+        yusic_worker_pull_proxy_no: "{{ yusic_worker_pull_self.proxy.no_proxy | default('localhost,127.0.0.1,::1') }}"
+      changed_when: false
+      tags: [always]
+
+  roles:
+    - role: yusic_worker_pull
