@@ -532,7 +532,7 @@ def normalize_workers(workers_raw: dict, defaults: dict, host_aliases: set[str],
     }
 
 
-def build_inventory(hosts: dict, mode: str, yusic_runtime: dict | None = None) -> str:
+def build_inventory(hosts: dict, mode: str, yusic_runtime: dict | None = None, target: str = "remnawave") -> str:
     lines = ["[all]"]
     for alias, cfg in hosts.items():
         ansible_user = cfg["bootstrap"]["username"] if mode == "bootstrap" else cfg["deploy_user"]
@@ -544,12 +544,12 @@ def build_inventory(hosts: dict, mode: str, yusic_runtime: dict | None = None) -
             "ansible_ssh_private_key_file=~/.ssh/id_ed25519"
         )
 
-    # Add enabled yusic workers as their own ansible hosts in a [yusic_workers]
-    # group. This lets the new pull-based playbook (playbook-yusic-worker-pull.yml)
-    # run directly on each worker host instead of orchestrating through a relay
-    # via shell + ssh + scp + skopeo. The legacy `target=yusic_worker` path
-    # (relay-based) does NOT use this group and remains unchanged.
-    if yusic_runtime and yusic_runtime.get("enabled_workers"):
+    # Emit yusic workers ONLY when the explicit pull-based target is selected.
+    # Adding worker hosts unconditionally would put them in the implicit `all`
+    # group, and `playbook.yml` (target=remnawave) uses `hosts: all` — which
+    # would silently apply remnawave roles to worker boxes on a normal deploy.
+    # Gating by target keeps the inventory minimal for every other code path.
+    if target == "yusic_worker_pull" and yusic_runtime and yusic_runtime.get("enabled_workers"):
         worker_lines = []
         for worker_alias in yusic_runtime["enabled_workers"]:
             worker = yusic_runtime["workers"].get(worker_alias)
@@ -560,8 +560,6 @@ def build_inventory(hosts: dict, mode: str, yusic_runtime: dict | None = None) -
             ssh_user = worker.get("ssh", {}).get("user", "deploy").strip()
             if not ssh_host:
                 continue
-            # Bootstrap mode is not meaningful for workers (they're managed via
-            # deploy user from the start), but we still respect ssh.user.
             worker_lines.append(
                 f"{worker_alias} "
                 f"ansible_host={ssh_host} "
@@ -639,7 +637,9 @@ def main() -> None:
         for alias, cfg in normalized_hosts.items()
     }
 
-    Path(args.inventory_out).write_text(build_inventory(normalized_hosts, args.mode, yusic_runtime), encoding="utf-8")
+    Path(args.inventory_out).write_text(
+        build_inventory(normalized_hosts, args.mode, yusic_runtime, args.target), encoding="utf-8"
+    )
     Path(args.vars_out).write_text(json.dumps(runtime_vars, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
     Path(args.bootstrap_out).write_text(json.dumps(bootstrap_map, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 

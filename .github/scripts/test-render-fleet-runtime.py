@@ -507,6 +507,39 @@ def test_yusic_worker_pull_emits_inventory_group() -> None:
     assert_true("worker_b ansible_host=100.64.0.11" in inv_text, "worker_b host line missing")
 
 
+def test_yusic_worker_pull_inventory_isolated_from_remnawave() -> None:
+    """Workers must NOT appear in inventory for target=remnawave (codex P1).
+
+    `playbook.yml` (target=remnawave) uses `hosts: all`. If [yusic_workers]
+    were emitted unconditionally, those worker hosts would join the implicit
+    `all` group and a normal `mode=deploy --limit all` would apply remnawave
+    roles to worker boxes.
+    """
+    yaml_text = (
+        "---\n"
+        "defaults:\n"
+        "  deploy_user: deploy\n"
+        "  yusic_worker:\n"
+        "    image_repo: ghcr.io/example/download-worker\n"
+        "    redis_url: redis://127.0.0.1:6379/0\n"
+        "    cache_bot_token: token\n"
+        "    inline_cache_chat_id: -1001\n"
+        "hosts:\n"
+        "  some_node:\n"
+        "    ansible_host: 203.0.113.10\n"
+        "workers:\n"
+        "  worker_a:\n"
+        "    ssh:\n"
+        "      host: 100.64.0.10\n"
+        "      user: deploy\n"
+    )
+    proc, inv_path, _, _ = run_renderer(yaml_text, "deploy", target="remnawave")
+    assert_true(proc.returncode == 0, f"remnawave render failed: {proc.stderr or proc.stdout}")
+    inv_text = inv_path.read_text(encoding="utf-8")
+    assert_true("[yusic_workers]" not in inv_text, "workers must not leak into remnawave inventory")
+    assert_true("worker_a" not in inv_text, "worker_a must not leak into remnawave inventory")
+
+
 def test_yusic_worker_pull_no_relay_required() -> None:
     """yusic_worker_pull should accept fleets that don't define relay_host_alias."""
     yaml_text = (
@@ -553,6 +586,7 @@ def main() -> int:
         test_sing_box_proxy_route_final_must_match_outbound,
         test_sing_box_proxy_normalizes_outbound_whitespace,
         test_yusic_worker_pull_emits_inventory_group,
+        test_yusic_worker_pull_inventory_isolated_from_remnawave,
         test_yusic_worker_pull_no_relay_required,
     ]
 

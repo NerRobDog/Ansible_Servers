@@ -51,7 +51,10 @@
 
 - name: Login to ghcr.io
   ansible.builtin.shell:
-    cmd: "echo '{{ yusic_worker_pull_ghcr_token }}' | docker login ghcr.io -u '{{ yusic_worker_pull_ghcr_username }}' --password-stdin"
+    cmd: |
+      set -o pipefail
+      echo '{{ yusic_worker_pull_ghcr_token }}' | docker login ghcr.io -u '{{ yusic_worker_pull_ghcr_username }}' --password-stdin
+    executable: /bin/bash
   register: yusic_worker_pull_login
   changed_when: "'Login Succeeded' in yusic_worker_pull_login.stdout"
   failed_when:
@@ -104,7 +107,7 @@
   become: true
   tags: [yusic_worker_pull]
 
-- name: docker compose pull (idempotent — pulls only missing/new layers)
+- name: Run docker compose pull (idempotent — pulls only missing/new layers)
   ansible.builtin.command: >-
     docker compose
     --env-file {{ yusic_worker_pull_env_filename }}
@@ -117,7 +120,7 @@
   become: true
   tags: [yusic_worker_pull]
 
-- name: docker compose up -d (recreate if image / env changed)
+- name: Run docker compose up -d (recreate if image / env changed)
   ansible.builtin.command: >-
     docker compose
     --env-file {{ yusic_worker_pull_env_filename }}
@@ -126,8 +129,10 @@
   args:
     chdir: "{{ yusic_worker_pull_workdir }}"
   register: yusic_worker_pull_compose_up
-  changed_when:
-    - "'Started' in yusic_worker_pull_compose_up.stderr or 'Created' in yusic_worker_pull_compose_up.stderr or 'Recreated' in yusic_worker_pull_compose_up.stderr"
+  changed_when: >-
+    'Started' in yusic_worker_pull_compose_up.stderr
+    or 'Created' in yusic_worker_pull_compose_up.stderr
+    or 'Recreated' in yusic_worker_pull_compose_up.stderr
   become: true
   tags: [yusic_worker_pull]
 
