@@ -3,7 +3,18 @@ yusic_worker_relay_root_dir: /opt/yusic-worker-relay
 yusic_worker_relay_archive_dir: "{{ yusic_worker_relay_root_dir }}/archives"
 yusic_worker_relay_stage_dir: "{{ yusic_worker_relay_root_dir }}/stage"
 yusic_worker_ssh_connect_timeout_seconds: 15
-yusic_worker_ssh_strict_host_key_checking: "yes"
+# `accept-new` follows TOFU: first connection imports the host key into
+# known_hosts, subsequent connections verify it. Better fit for the worker
+# fleet than `yes` because:
+#   1. Hosts are managed via ansible and host keys change legitimately on
+#      apt-upgrade/openssh-server reinstalls. With strict `yes` the role's
+#      `Refresh worker host keys` task races the actual host-key state and
+#      breaks the next ssh hop with "Host key verification failed".
+#   2. Relay-host known_hosts is rooted at /opt/yusic-worker-relay and is
+#      the only consumer; the threat surface is just first-scan MITM, same
+#      as strict-yes after first apply.
+# Override per host_vars to "yes" for tighter posture on a specific worker.
+yusic_worker_ssh_strict_host_key_checking: "accept-new"
 yusic_worker_archive_retain: 5
 yusic_worker_skopeo_authfile: ""
 yusic_worker_skopeo_src_creds: ""
