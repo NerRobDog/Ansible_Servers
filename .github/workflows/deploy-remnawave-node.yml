@@ -387,6 +387,8 @@ jobs:
           RUN_SMOKE: ${{ inputs.run_smoke }}
           RW_PANEL_API_TOKEN: ${{ secrets.RW_PANEL_API_TOKEN }}
           REMNAWAVE_API_ENDPOINT_TEMPLATE: ${{ vars.REMNAWAVE_API_ENDPOINT_TEMPLATE }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
           if [[ "${TARGET}" == "remnawave" ]]; then
             cmd=(ansible-playbook -i .ansible/runtime/hosts.ini playbook.yml --limit "${LIMIT}" --extra-vars @.ansible/runtime/runtime_vars.json)
@@ -418,6 +420,13 @@ jobs:
             cmd+=(--extra-vars "worker_run_smoke=${RUN_SMOKE}")
             if [[ "${WORKER_MODE}" == "deploy" || "${WORKER_MODE}" == "update" ]]; then
               cmd+=(--extra-vars "worker_image_tag=${WORKER_IMAGE_TAG}")
+              # Wire GHCR pull credentials so skopeo on the relay host can
+              # mirror the worker image from a private ghcr package.
+              # Both must be set; if missing, the role falls back to anonymous
+              # pull (which only works when the package is public).
+              if [[ -n "${GHCR_USERNAME}" && -n "${GHCR_TOKEN}" ]]; then
+                cmd+=(--extra-vars "yusic_worker_skopeo_src_creds=${GHCR_USERNAME}:${GHCR_TOKEN}")
+              fi
             fi
             if [[ -n "${TAGS}" ]]; then
               cmd+=(--tags "${TAGS}")
