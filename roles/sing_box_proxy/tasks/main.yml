@@ -60,7 +60,7 @@
     checksum: "sha256:{{ sing_box_proxy_release_sha256 }}"
     mode: "0644"
     timeout: 60
-  when: sing_box_proxy_install_needed
+  when: sing_box_proxy_install_needed | bool
   tags: [sing_box, proxy]
 
 - name: Extract sing-box binary
@@ -68,7 +68,7 @@
     src: "/tmp/sing-box-{{ sing_box_proxy_version }}-linux-{{ sing_box_proxy_arch }}.tar.gz"
     dest: "/tmp/"
     remote_src: true
-  when: sing_box_proxy_install_needed
+  when: sing_box_proxy_install_needed | bool
   tags: [sing_box, proxy]
 
 - name: Install sing-box binary to {{ sing_box_proxy_install_path }}
@@ -79,7 +79,7 @@
     owner: root
     group: root
     remote_src: true
-  when: sing_box_proxy_install_needed
+  when: sing_box_proxy_install_needed | bool
   notify: restart_sing_box
   tags: [sing_box, proxy]
 
@@ -90,7 +90,7 @@
   loop:
     - "/tmp/sing-box-{{ sing_box_proxy_version }}-linux-{{ sing_box_proxy_arch }}.tar.gz"
     - "/tmp/sing-box-{{ sing_box_proxy_version }}-linux-{{ sing_box_proxy_arch }}"
-  when: sing_box_proxy_install_needed
+  when: sing_box_proxy_install_needed | bool
   tags: [sing_box, proxy]
 
 - name: Ensure sing-box config directory exists
