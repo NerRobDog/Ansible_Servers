@@ -1,0 +1,159 @@
+---
+- name: Validate required pull-deploy inputs
+  ansible.builtin.assert:
+    that:
+      - yusic_worker_pull_alias | length > 0
+      - yusic_worker_pull_image_repo | length > 0
+      - yusic_worker_pull_image_tag | length > 0
+      - yusic_worker_pull_image_tag is regex('^sha-[0-9a-f]{7,64}$')
+      - yusic_worker_pull_redis_url | length > 0
+      - yusic_worker_pull_ghcr_username | length > 0
+      - yusic_worker_pull_ghcr_token | length > 0
+    fail_msg: >-
+      yusic_worker_pull role requires alias, image_repo, image_tag (sha-*),
+      redis_url, ghcr_username, ghcr_token to be set. Check render-fleet-runtime
+      output and workflow extra-vars.
+  tags: [yusic_worker_pull]
+
+- name: Read free disk space on /
+  ansible.builtin.command: df -BM --output=avail /
+  register: yusic_worker_pull_disk_check
+  changed_when: false
+  tags: [yusic_worker_pull]
+
+- name: Assert sufficient free disk for image pull
+  ansible.builtin.assert:
+    that:
+      - (yusic_worker_pull_disk_check.stdout_lines[1] | regex_replace('[^0-9]', '') | int) >= yusic_worker_pull_min_free_disk_mb
+    fail_msg: >-
+      Less than {{ yusic_worker_pull_min_free_disk_mb }} MB free on /.
+      docker pull would crash mid-extract with 'no space left on device'.
+      Resize the VPS or run docker prune first.
+  tags: [yusic_worker_pull]
+
+- name: Ensure docker is installed and running
+  ansible.builtin.command: docker version --format '{{ "{{" }}.Server.Version{{ "}}" }}'
+  register: yusic_worker_pull_docker_version
+  changed_when: false
+  failed_when: yusic_worker_pull_docker_version.rc != 0
+  become: true
+  tags: [yusic_worker_pull]
+
+- name: Ensure worker workdir exists
+  ansible.builtin.file:
+    path: "{{ yusic_worker_pull_workdir }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0750"
+  become: true
+  tags: [yusic_worker_pull]
+
+- name: Login to ghcr.io
+  ansible.builtin.shell:
+    cmd: "echo '{{ yusic_worker_pull_ghcr_token }}' | docker login ghcr.io -u '{{ yusic_worker_pull_ghcr_username }}' --password-stdin"
+  register: yusic_worker_pull_login
+  changed_when: "'Login Succeeded' in yusic_worker_pull_login.stdout"
+  failed_when:
+    - yusic_worker_pull_login.rc != 0
+    - "'Login Succeeded' not in yusic_worker_pull_login.stdout"
+  no_log: true
+  become: true
+  tags: [yusic_worker_pull]
+
+- name: Render docker-compose.yml on worker
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/docker-compose.yusic-worker.yml.j2"
+    dest: "{{ yusic_worker_pull_workdir }}/{{ yusic_worker_pull_compose_filename }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0640"
+  vars:
+    # The shared compose template expects these names; map our prefixed vars
+    # so we don't have to fork the template.
+    yusic_worker_image_ref: "{{ yusic_worker_pull_image_repo }}:{{ yusic_worker_pull_image_tag }}"
+    yusic_worker:
+      alias: "{{ yusic_worker_pull_alias }}"
+      container_name: "{{ yusic_worker_pull_container_name }}"
+      network_mode: "{{ yusic_worker_pull_network_mode }}"
+      dns: "{{ yusic_worker_pull_dns }}"
+  become: true
+  tags: [yusic_worker_pull]
+
+- name: Render yusic-worker.env on worker
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/yusic-worker.env.j2"
+    dest: "{{ yusic_worker_pull_workdir }}/{{ yusic_worker_pull_env_filename }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+  vars:
+    yusic_worker_image_ref: "{{ yusic_worker_pull_image_repo }}:{{ yusic_worker_pull_image_tag }}"
+    yusic_worker:
+      alias: "{{ yusic_worker_pull_alias }}"
+      tags: "{{ yusic_worker_pull_tags }}"
+      max_concurrent_jobs: "{{ yusic_worker_pull_max_concurrent_jobs }}"
+      redis_url: "{{ yusic_worker_pull_redis_url }}"
+      cache_bot_token: "{{ yusic_worker_pull_cache_bot_token }}"
+      inline_cache_chat_id: "{{ yusic_worker_pull_inline_cache_chat_id }}"
+      proxy:
+        http_proxy: "{{ yusic_worker_pull_proxy_http }}"
+        https_proxy: "{{ yusic_worker_pull_proxy_https }}"
+        no_proxy: "{{ yusic_worker_pull_proxy_no }}"
+  no_log: true
+  become: true
+  tags: [yusic_worker_pull]
+
+- name: docker compose pull (idempotent — pulls only missing/new layers)
+  ansible.builtin.command: >-
+    docker compose
+    --env-file {{ yusic_worker_pull_env_filename }}
+    -f {{ yusic_worker_pull_compose_filename }}
+    pull
+  args:
+    chdir: "{{ yusic_worker_pull_workdir }}"
+  register: yusic_worker_pull_compose_pull
+  changed_when: "'Pulled' in yusic_worker_pull_compose_pull.stdout or 'pulled' in yusic_worker_pull_compose_pull.stdout"
+  become: true
+  tags: [yusic_worker_pull]
+
+- name: docker compose up -d (recreate if image / env changed)
+  ansible.builtin.command: >-
+    docker compose
+    --env-file {{ yusic_worker_pull_env_filename }}
+    -f {{ yusic_worker_pull_compose_filename }}
+    up -d
+  args:
+    chdir: "{{ yusic_worker_pull_workdir }}"
+  register: yusic_worker_pull_compose_up
+  changed_when:
+    - "'Started' in yusic_worker_pull_compose_up.stderr or 'Created' in yusic_worker_pull_compose_up.stderr or 'Recreated' in yusic_worker_pull_compose_up.stderr"
+  become: true
+  tags: [yusic_worker_pull]
+
+- name: Cleanup leftover skopeo/scp tar archives from old pipeline
+  ansible.builtin.shell:
+    cmd: "find {{ yusic_worker_pull_workdir }} -maxdepth 1 -name '*.tar' -delete -print"
+  register: yusic_worker_pull_tar_cleanup
+  changed_when: yusic_worker_pull_tar_cleanup.stdout | length > 0
+  become: true
+  tags: [yusic_worker_pull]
+
+- name: Prune dangling docker images
+  ansible.builtin.command: docker image prune -f
+  register: yusic_worker_pull_prune
+  changed_when: "'reclaimed' in yusic_worker_pull_prune.stdout.lower() and not yusic_worker_pull_prune.stdout.endswith('0B')"
+  failed_when: false
+  become: true
+  tags: [yusic_worker_pull]
+
+- name: Verify worker container is running
+  ansible.builtin.command: >-
+    docker inspect -f '{{ "{{" }}.State.Status{{ "}}" }}' {{ yusic_worker_pull_container_name }}
+  register: yusic_worker_pull_status
+  changed_when: false
+  retries: 5
+  delay: 3
+  until: yusic_worker_pull_status.stdout | trim == "running"
+  become: true
+  tags: [yusic_worker_pull]

@@ -16,6 +16,7 @@ on:
         options:
           - remnawave
           - yusic_worker
+          - yusic_worker_pull
       mode:
         description: Deployment mode
         required: true
@@ -397,6 +398,38 @@ jobs:
             fi
             if [[ "${CHECK_MODE}" == "true" ]]; then
               cmd+=(--check --diff)
+            fi
+          elif [[ "${TARGET}" == "yusic_worker_pull" ]]; then
+            # Pull-based deploy: each worker host pulls the image directly from
+            # ghcr.io. No relay, no skopeo, no scp, no tar. The render script
+            # adds an [yusic_workers] inventory group; we --limit to that
+            # (or to a comma-list of worker aliases passed via inputs.limit).
+            if [[ "${CHECK_MODE}" == "true" ]]; then
+              echo "ERROR: CHECK_MODE is not supported for yusic_worker_pull (docker pull/up not safe in check mode)." >&2
+              exit 1
+            fi
+            limit_arg="${LIMIT}"
+            if [[ -z "${limit_arg}" || "${limit_arg}" == "all" ]]; then
+              limit_arg="yusic_workers"
+            fi
+            cmd=(
+              ansible-playbook
+              -i .ansible/runtime/hosts.ini
+              playbook-yusic-worker-pull.yml
+              --limit "${limit_arg}"
+              --extra-vars @.ansible/runtime/runtime_vars.json
+            )
+            if [[ -n "${WORKER_IMAGE_TAG}" ]]; then
+              cmd+=(--extra-vars "worker_image_tag=${WORKER_IMAGE_TAG}")
+            fi
+            if [[ -n "${GHCR_USERNAME}" ]]; then
+              cmd+=(--extra-vars "yusic_worker_pull_ghcr_username=${GHCR_USERNAME}")
+            fi
+            if [[ -n "${GHCR_TOKEN}" ]]; then
+              cmd+=(--extra-vars "yusic_worker_pull_ghcr_token=${GHCR_TOKEN}")
+            fi
+            if [[ -n "${TAGS}" ]]; then
+              cmd+=(--tags "${TAGS}")
             fi
           else
             relay_alias="$(jq -r '.yusic_worker_runtime.relay_host_alias // empty' .ansible/runtime/runtime_vars.json)"

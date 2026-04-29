@@ -188,7 +188,7 @@ def load_fleet_config(path: Path, target: str):
     if workers_raw is None:
         workers_raw = {}
     if not isinstance(workers_raw, dict):
-        if target == "yusic_worker":
+        if target in ("yusic_worker", "yusic_worker_pull"):
             fail("Field 'workers' must be an object.")
         workers_raw = {}
 
@@ -396,7 +396,7 @@ def normalize_yusic_defaults(defaults: dict) -> dict:
     return merged
 
 
-def normalize_worker(alias: str, worker_cfg: dict, worker_defaults: dict, host_aliases: set[str], strict_required: bool) -> dict:
+def normalize_worker(alias: str, worker_cfg: dict, worker_defaults: dict, host_aliases: set[str], strict_required: bool, target: str = "yusic_worker") -> dict:
     if not isinstance(worker_cfg, dict):
         fail(f"Worker '{alias}' config must be an object.")
     if not WORKER_ALIAS_RE.match(alias) or ".." in alias:
@@ -449,10 +449,13 @@ def normalize_worker(alias: str, worker_cfg: dict, worker_defaults: dict, host_a
         )
 
     if merged["enabled"] and strict_required:
-        if not merged["relay_host_alias"]:
-            fail(f"Worker '{alias}' must define relay_host_alias (or defaults.yusic_worker.relay_host_alias).")
-        if merged["relay_host_alias"] not in host_aliases:
-            fail(f"Worker '{alias}' relay_host_alias '{merged['relay_host_alias']}' is not present in fleet hosts.")
+        # relay_host_alias is required only for the legacy relay-based path.
+        # The pull-based path runs ansible directly on each worker host.
+        if target == "yusic_worker":
+            if not merged["relay_host_alias"]:
+                fail(f"Worker '{alias}' must define relay_host_alias (or defaults.yusic_worker.relay_host_alias).")
+            if merged["relay_host_alias"] not in host_aliases:
+                fail(f"Worker '{alias}' relay_host_alias '{merged['relay_host_alias']}' is not present in fleet hosts.")
         if not merged["image_repo"]:
             fail(f"Worker '{alias}' must define image_repo.")
         if not merged["ssh"]["host"]:
@@ -469,7 +472,7 @@ def normalize_worker(alias: str, worker_cfg: dict, worker_defaults: dict, host_a
 
 
 def normalize_workers(workers_raw: dict, defaults: dict, host_aliases: set[str], target: str):
-    if target != "yusic_worker":
+    if target not in ("yusic_worker", "yusic_worker_pull"):
         defaults_raw = defaults.get("yusic_worker", {})
         worker_defaults = deep_merge(YUSIC_WORKER_DEFAULTS, defaults_raw if isinstance(defaults_raw, dict) else {})
         relay_host_alias = str(worker_defaults.get("relay_host_alias", "") or "").strip()
@@ -493,18 +496,23 @@ def normalize_workers(workers_raw: dict, defaults: dict, host_aliases: set[str],
             "relay_host_alias": relay_host_alias,
         }
 
-    strict_required = target == "yusic_worker"
+    # Both yusic_worker and yusic_worker_pull validate workers strictly.
+    # yusic_worker_pull does not need a relay_host_alias (workers manage
+    # themselves), but the rest of the contract is identical.
+    strict_required = target in ("yusic_worker", "yusic_worker_pull")
     worker_defaults = normalize_yusic_defaults(defaults)
     normalized = {
-        alias: normalize_worker(alias, cfg, worker_defaults, host_aliases, strict_required)
+        alias: normalize_worker(alias, cfg, worker_defaults, host_aliases, strict_required, target)
         for alias, cfg in workers_raw.items()
     }
     enabled_aliases = sorted(alias for alias, cfg in normalized.items() if cfg.get("enabled", False))
     if strict_required and not enabled_aliases:
-        fail("target=yusic_worker requires at least one enabled worker in 'workers'.")
+        fail(f"target={target} requires at least one enabled worker in 'workers'.")
 
     relay_host_alias = worker_defaults.get("relay_host_alias", "")
-    if strict_required and enabled_aliases:
+    # relay_host_alias is only required for the legacy relay-based path.
+    # The pull-based path runs ansible directly on each worker.
+    if strict_required and enabled_aliases and target == "yusic_worker":
         if not relay_host_alias:
             relay_host_alias = normalized[enabled_aliases[0]]["relay_host_alias"]
         if relay_host_alias not in host_aliases:
@@ -524,7 +532,7 @@ def normalize_workers(workers_raw: dict, defaults: dict, host_aliases: set[str],
     }
 
 
-def build_inventory(hosts: dict, mode: str) -> str:
+def build_inventory(hosts: dict, mode: str, yusic_runtime: dict | None = None) -> str:
     lines = ["[all]"]
     for alias, cfg in hosts.items():
         ansible_user = cfg["bootstrap"]["username"] if mode == "bootstrap" else cfg["deploy_user"]
@@ -535,6 +543,37 @@ def build_inventory(hosts: dict, mode: str) -> str:
             f"ansible_user={ansible_user} "
             "ansible_ssh_private_key_file=~/.ssh/id_ed25519"
         )
+
+    # Add enabled yusic workers as their own ansible hosts in a [yusic_workers]
+    # group. This lets the new pull-based playbook (playbook-yusic-worker-pull.yml)
+    # run directly on each worker host instead of orchestrating through a relay
+    # via shell + ssh + scp + skopeo. The legacy `target=yusic_worker` path
+    # (relay-based) does NOT use this group and remains unchanged.
+    if yusic_runtime and yusic_runtime.get("enabled_workers"):
+        worker_lines = []
+        for worker_alias in yusic_runtime["enabled_workers"]:
+            worker = yusic_runtime["workers"].get(worker_alias)
+            if not worker:
+                continue
+            ssh_host = worker.get("ssh", {}).get("host", "").strip()
+            ssh_port = worker.get("ssh", {}).get("port", 22)
+            ssh_user = worker.get("ssh", {}).get("user", "deploy").strip()
+            if not ssh_host:
+                continue
+            # Bootstrap mode is not meaningful for workers (they're managed via
+            # deploy user from the start), but we still respect ssh.user.
+            worker_lines.append(
+                f"{worker_alias} "
+                f"ansible_host={ssh_host} "
+                f"ansible_port={ssh_port} "
+                f"ansible_user={ssh_user} "
+                "ansible_ssh_private_key_file=~/.ssh/id_ed25519"
+            )
+        if worker_lines:
+            lines.append("")
+            lines.append("[yusic_workers]")
+            lines.extend(worker_lines)
+
     lines.append("")
     return "\n".join(lines)
 
@@ -543,7 +582,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Render runtime inventory and vars from fleet config.")
     parser.add_argument("--fleet-config", required=True, help="Path to decoded fleet config (JSON or YAML).")
     parser.add_argument("--mode", required=True, choices=["bootstrap", "deploy", "lockdown"])
-    parser.add_argument("--target", required=False, default="remnawave", choices=["remnawave", "yusic_worker"])
+    parser.add_argument(
+        "--target",
+        required=False,
+        default="remnawave",
+        choices=["remnawave", "yusic_worker", "yusic_worker_pull"],
+    )
     parser.add_argument("--inventory-out", required=True)
     parser.add_argument("--vars-out", required=True)
     parser.add_argument("--bootstrap-out", required=True)
@@ -595,7 +639,7 @@ def main() -> None:
         for alias, cfg in normalized_hosts.items()
     }
 
-    Path(args.inventory_out).write_text(build_inventory(normalized_hosts, args.mode), encoding="utf-8")
+    Path(args.inventory_out).write_text(build_inventory(normalized_hosts, args.mode, yusic_runtime), encoding="utf-8")
     Path(args.vars_out).write_text(json.dumps(runtime_vars, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
     Path(args.bootstrap_out).write_text(json.dumps(bootstrap_map, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
