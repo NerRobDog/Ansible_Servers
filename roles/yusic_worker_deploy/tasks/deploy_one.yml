@@ -22,8 +22,10 @@
     owner: root
     group: root
     mode: "0640"
-  vars:
-    yusic_worker_image_ref: "{{ yusic_worker_image_ref }}"
+  # yusic_worker_image_ref is already in scope (set as a `set_fact` at the top
+  # of this file). Re-declaring it via `vars: { yusic_worker_image_ref: "{{
+  # yusic_worker_image_ref }}" }` trips Ansible 2.20+ recursive-template
+  # detection — same pattern as fix #20.
 
 - name: Render yusic worker env file on relay
   ansible.builtin.template:
@@ -33,8 +35,7 @@
     group: root
     mode: "0600"
   no_log: true
-  vars:
-    yusic_worker_image_ref: "{{ yusic_worker_image_ref }}"
+  # see comment above; yusic_worker_image_ref inherited from outer scope.
 
 - name: Read previous worker image from worker env file (for rollback)
   ansible.builtin.shell: |
