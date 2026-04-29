@@ -167,7 +167,7 @@ jobs:
           fi
 
           {
-            echo "message<<'EOF'"
+            echo "message<<EOF"
             echo "OpenWrt monitor: ${job_status}"
             echo "Environment: ${TARGET_ENVIRONMENT}"
             echo "Limit: ${LIMIT}"
