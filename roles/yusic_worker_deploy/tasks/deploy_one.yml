@@ -78,16 +78,22 @@
   changed_when: false
 
 - name: Mirror worker image to relay archive (immutable tag)
-  ansible.builtin.command: >-
-    skopeo copy
-    --override-arch {{ yusic_worker.arch }}
-    {% if yusic_worker_skopeo_authfile | default('') | length > 0 %}
-    --src-authfile {{ yusic_worker_skopeo_authfile }}
-    {% elif yusic_worker_skopeo_src_creds | default('') | length > 0 %}
-    --src-creds {{ yusic_worker_skopeo_src_creds }}
-    {% endif %}
-    docker://{{ yusic_worker_image_ref }}
-    docker-archive:{{ yusic_worker_archive_path }}:{{ yusic_worker_image_ref }}
+  ansible.builtin.command:
+    cmd: >-
+      skopeo copy
+      --override-arch {{ yusic_worker.arch }}
+      {% if yusic_worker_skopeo_authfile | default('') | length > 0 %}
+      --src-authfile {{ yusic_worker_skopeo_authfile }}
+      {% elif yusic_worker_skopeo_src_creds | default('') | length > 0 %}
+      --src-creds {{ yusic_worker_skopeo_src_creds }}
+      {% endif %}
+      docker://{{ yusic_worker_image_ref }}
+      docker-archive:{{ yusic_worker_archive_path }}:{{ yusic_worker_image_ref }}
+    # `docker-archive:` destination doesn't support overwrite — `skopeo copy`
+    # to an existing tar fails with "doesn't support modifying existing
+    # images". Make this task idempotent: skip when the archive already
+    # exists (immutable sha-tag means the bytes can't have changed).
+    creates: "{{ yusic_worker_archive_path }}"
   changed_when: true
   no_log: "{{ (yusic_worker_skopeo_authfile | default('') | length > 0) or (yusic_worker_skopeo_src_creds | default('') | length > 0) }}"
 
