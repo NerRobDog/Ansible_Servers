@@ -140,7 +140,10 @@
     url: "{{ sing_box_proxy_healthcheck_url }}"
     method: HEAD
     timeout: "{{ sing_box_proxy_healthcheck_timeout_seconds }}"
-    status_code: [200, 301, 302, 403]
+    # Any of these means the connection successfully traversed the proxy and
+    # reached the upstream — including 404 (CDN root path with no resource)
+    # which SoundCloud's i1.sndcdn.com edge returns for `GET /`.
+    status_code: [200, 301, 302, 403, 404]
     follow_redirects: none
     return_content: false
   environment:
@@ -150,6 +153,6 @@
   changed_when: false
   retries: 4
   delay: 3
-  until: sing_box_proxy_healthcheck.status in [200, 301, 302, 403]
+  until: sing_box_proxy_healthcheck.status in [200, 301, 302, 403, 404]
   when: sing_box_proxy_healthcheck_url | length > 0
   tags: [sing_box, proxy]
