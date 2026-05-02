@@ -1,3 +1,4 @@
+---
 # Remnawave Mihomo template (Davoyan-based, customized split by RU bypass and foreign pools)
 # Version: v2.1 (2026-05-02)
 # Changes over v2.0:
@@ -151,8 +152,10 @@ dns:
     rule-set:instagram-inline:
       - https://1.1.1.1/dns-query#📷 Instagram
       - https://8.8.8.8/dns-query#📷 Instagram
-    # IP-checker DNS follows the 📍 IP Check selector — DIRECT resolves via system
-    # (real client IP path), WARP resolves via Cloudflare (CF-perspective path).
+    # IP-checker DNS: resolver is always Cloudflare DoH (1.1.1.1 / 8.8.8.8), but the
+    # DoH transport follows the 📍 IP Check selector — DIRECT means the DNS query
+    # leaves from your real client IP, WARP means it leaves from a Cloudflare IP.
+    # Matches the transport path of the actual checker request.
     rule-set:ip-check-inline:
       - https://1.1.1.1/dns-query#📍 IP Check
       - https://8.8.8.8/dns-query#📍 IP Check
