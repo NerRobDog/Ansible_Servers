@@ -143,9 +143,19 @@ dns:
     rule-set:ru-inline,ru-apps,geosite-ru:
       - 77.88.8.8#DIRECT
       - https://77.88.8.8/dns-query#DIRECT
-    rule-set:ru-inside,refilter-domains,youtube,discord-domains,instagram-inline,x-inline:
+    rule-set:ru-inside,refilter-domains,youtube,discord-domains,x-inline:
       - https://1.1.1.1/dns-query#🚫 Недоступные из РФ
       - https://8.8.8.8/dns-query#🚫 Недоступные из РФ
+    # Instagram DNS follows the 📷 Instagram selector — switching exit also switches
+    # resolver, so CDN/geo-localization tracks the chosen path (Codex P2 fix).
+    rule-set:instagram-inline:
+      - https://1.1.1.1/dns-query#📷 Instagram
+      - https://8.8.8.8/dns-query#📷 Instagram
+    # IP-checker DNS follows the 📍 IP Check selector — DIRECT resolves via system
+    # (real client IP path), WARP resolves via Cloudflare (CF-perspective path).
+    rule-set:ip-check-inline:
+      - https://1.1.1.1/dns-query#📍 IP Check
+      - https://8.8.8.8/dns-query#📍 IP Check
     rule-set:google-warp-inline:
       - https://1.1.1.1/dns-query#🏴‍☠️ Cloudflare WARP
       - https://8.8.8.8/dns-query#🏴‍☠️ Cloudflare WARP
