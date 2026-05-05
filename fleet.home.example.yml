@@ -42,13 +42,13 @@ defaults:
     - from: "192.168.5.0/24"
       # 8096/8920 jellyfin, 3334/3335 obico, 47984-48010 sunshine,
       # 8089 rclone, 8008/8009 tubecast Cast V1 control
-      # 5901 = tigervnc display :1 (parallel KDE/GNOME/Xfce session for VNC)
-      tcp: [8096, 8920, 3334, 3335, 47984, 47989, 47990, 48010, 8089, 8008, 8009, 5901]
-      # 5353 mDNS, 1900 SSDP/DIAL, 47998-48010 sunshine RTP
-      udp: [5353, 1900, "47998:48010"]
+      # 5901 tigervnc :1, 8080 Kodi web JSON-RPC (Kore / browser)
+      tcp: [8096, 8920, 3334, 3335, 47984, 47989, 47990, 48010, 8089, 8008, 8009, 5901, 8080]
+      # 5353 mDNS, 1900 SSDP/DIAL, 9777 Kodi EventServer, 47998-48010 sunshine RTP
+      udp: [5353, 1900, 9777, "47998:48010"]
     - from: "10.147.20.0/24"
-      tcp: [8096, 8920, 3334, 3335, 47984, 47989, 47990, 48010, 8089, 8008, 8009, 5901]
-      udp: [5353, 1900, "47998:48010"]
+      tcp: [8096, 8920, 3334, 3335, 47984, 47989, 47990, 48010, 8089, 8008, 8009, 5901, 8080]
+      udp: [5353, 1900, 9777, "47998:48010"]
 
   zerotier:
     # 16-hex-char Central network ID. Get it from my.zerotier.com.
