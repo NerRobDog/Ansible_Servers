@@ -1,0 +1,14 @@
+[Unit]
+Description=Sunshine self-hosted game stream host
+StartLimitIntervalSec=500
+StartLimitBurst=5
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/sunshine
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=graphical-session.target

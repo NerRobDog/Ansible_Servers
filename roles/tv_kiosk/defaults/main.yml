@@ -1,0 +1,38 @@
+---
+tv_kiosk_enabled: true
+
+# User that owns the graphical session. Same user that Sunshine runs under;
+# Kodi inherits the desktop session, so capture works without extra setup.
+tv_kiosk_user: deploy
+tv_kiosk_group: deploy
+
+# Packages: Kodi from the team-xbmc PPA (newer than 24.04's repo Kodi),
+# plus cage (Wayland kiosk) and CEC.
+tv_kiosk_apt_ppa: "ppa:team-xbmc/ppa"
+tv_kiosk_packages:
+  - kodi
+  - kodi-peripheral-joystick
+  - kodi-pvr-iptvsimple
+  - cec-utils
+  - libcec6
+  - cage
+  - seatd
+  - greetd
+
+# Greetd config — autologin into a cage session that exec's Kodi.
+tv_kiosk_greetd_config: /etc/greetd/config.toml
+
+# Kodi addons to preinstall via zip. Each: {id, url, sha256}.
+tv_kiosk_addons:
+  - id: plugin.video.youtube
+    # Official YouTube plugin (anxdpanic fork — actively maintained).
+    url: "https://github.com/anxdpanic/plugin.video.youtube/releases/download/v7.1.0.4/plugin.video.youtube-7.1.0.4.zip"
+    sha256: ""
+  - id: plugin.video.elementum
+    # Sequential-download torrent streamer.
+    url: "https://github.com/elgatito/plugin.video.elementum/releases/download/v0.1.107/plugin.video.elementum-0.1.107.zip"
+    sha256: ""
+
+tv_kiosk_kodi_home: "/home/{{ tv_kiosk_user }}/.kodi"
+tv_kiosk_userdata_dir: "{{ tv_kiosk_kodi_home }}/userdata"
+tv_kiosk_addons_dir: "{{ tv_kiosk_kodi_home }}/addons"

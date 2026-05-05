@@ -1,0 +1,135 @@
+---
+- name: Validate tv_kiosk settings
+  ansible.builtin.assert:
+    that:
+      - tv_kiosk_user | length > 0
+      - tv_kiosk_addons is iterable
+      - tv_kiosk_addons is not string
+    fail_msg: "Invalid tv_kiosk role settings."
+  when: tv_kiosk_enabled | bool
+  tags: [tv_kiosk]
+
+- name: Validate supported OS for tv_kiosk role
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+      - ansible_distribution == "Ubuntu"
+      - ansible_distribution_major_version | int >= 24
+    fail_msg: "tv_kiosk role currently supports Ubuntu 24.04+."
+  when: tv_kiosk_enabled | bool
+  tags: [tv_kiosk]
+
+- name: Add team-xbmc PPA (newer Kodi than the distro repo)
+  ansible.builtin.apt_repository:
+    repo: "{{ tv_kiosk_apt_ppa }}"
+    state: present
+    update_cache: true
+  when: tv_kiosk_enabled | bool
+  tags: [tv_kiosk]
+
+- name: Install kiosk packages
+  ansible.builtin.apt:
+    name: "{{ tv_kiosk_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: tv_kiosk_enabled | bool
+  tags: [tv_kiosk]
+
+- name: Add kiosk user to seat + video + input groups
+  ansible.builtin.user:
+    name: "{{ tv_kiosk_user }}"
+    groups:
+      - video
+      - input
+      - render
+      - seatd
+    append: true
+  failed_when: false  # render/seatd may not exist on all installs
+  when: tv_kiosk_enabled | bool
+  tags: [tv_kiosk]
+
+- name: Ensure greetd config dir exists
+  ansible.builtin.file:
+    path: /etc/greetd
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: tv_kiosk_enabled | bool
+  tags: [tv_kiosk]
+
+- name: Render greetd autologin config
+  ansible.builtin.template:
+    src: greetd.toml.j2
+    dest: "{{ tv_kiosk_greetd_config }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: tv_kiosk_restart_greetd
+  when: tv_kiosk_enabled | bool
+  tags: [tv_kiosk]
+
+- name: Disable any other display managers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: false
+    state: stopped
+  loop:
+    - gdm3
+    - lightdm
+    - sddm
+  failed_when: false
+  when: tv_kiosk_enabled | bool
+  tags: [tv_kiosk]
+
+- name: Enable greetd at boot
+  ansible.builtin.systemd:
+    name: greetd
+    enabled: true
+  when: tv_kiosk_enabled | bool
+  tags: [tv_kiosk]
+
+- name: Set graphical.target as default
+  ansible.builtin.command: systemctl set-default graphical.target
+  changed_when: false
+  when: tv_kiosk_enabled | bool
+  tags: [tv_kiosk]
+
+- name: Ensure Kodi userdata + addons directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ tv_kiosk_user }}"
+    group: "{{ tv_kiosk_group }}"
+    mode: "0755"
+  loop:
+    - "{{ tv_kiosk_kodi_home }}"
+    - "{{ tv_kiosk_userdata_dir }}"
+    - "{{ tv_kiosk_addons_dir }}"
+  when: tv_kiosk_enabled | bool
+  tags: [tv_kiosk]
+
+- name: Render Kodi advancedsettings.xml
+  ansible.builtin.template:
+    src: advancedsettings.xml.j2
+    dest: "{{ tv_kiosk_userdata_dir }}/advancedsettings.xml"
+    owner: "{{ tv_kiosk_user }}"
+    group: "{{ tv_kiosk_group }}"
+    mode: "0644"
+  when: tv_kiosk_enabled | bool
+  tags: [tv_kiosk]
+
+- name: Download + extract Kodi addons
+  ansible.builtin.unarchive:
+    src: "{{ item.url }}"
+    dest: "{{ tv_kiosk_addons_dir }}"
+    remote_src: true
+    creates: "{{ tv_kiosk_addons_dir }}/{{ item.id }}"
+    owner: "{{ tv_kiosk_user }}"
+    group: "{{ tv_kiosk_group }}"
+  loop: "{{ tv_kiosk_addons }}"
+  loop_control:
+    label: "{{ item.id }}"
+  when: tv_kiosk_enabled | bool
+  tags: [tv_kiosk]

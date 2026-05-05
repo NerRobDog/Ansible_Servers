@@ -1,0 +1,43 @@
+---
+usb_automount_enabled: true
+
+# Where mountpoints are created. Each disk lands at
+# {{ usb_automount_root }}/<LABEL or UUID-fallback>.
+usb_automount_root: /media
+
+# Owner for the mountpoint and the mounted filesystem (where supported by FS).
+# rclone runs as this user — it must be able to read/write the disks.
+usb_automount_owner: deploy
+usb_automount_group: deploy
+
+# Per-filesystem mount options. ntfs uses ntfs3 (in-kernel since 5.15).
+# vfat/exfat are typical for Windows-formatted external drives.
+usb_automount_options:
+  vfat: "uid={uid},gid={gid},umask=0022,utf8,flush"
+  exfat: "uid={uid},gid={gid},umask=0022"
+  ntfs: "uid={uid},gid={gid},umask=0022,windows_names"
+  ext4: "defaults"
+  ext3: "defaults"
+  ext2: "defaults"
+  btrfs: "defaults,compress=zstd"
+  xfs: "defaults"
+  f2fs: "defaults"
+
+# Filesystems that are explicitly NOT auto-mounted (system partitions, swap).
+usb_automount_skip_fs:
+  - swap
+  - linux_raid_member
+  - LVM2_member
+  - crypto_LUKS
+
+# Required packages on the host.
+usb_automount_packages:
+  - udev
+  - util-linux
+  - ntfs-3g  # ships ntfs3 mount helpers + recovery tools, harmless under ntfs3 driver
+  - exfatprogs
+  - dosfstools
+
+usb_automount_script_path: /usr/local/sbin/usb-automount
+usb_automount_udev_rule_path: /etc/udev/rules.d/99-usb-automount.rules
+usb_automount_systemd_unit_path: /etc/systemd/system/usb-automount@.service

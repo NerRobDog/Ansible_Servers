@@ -1,0 +1,110 @@
+---
+- name: Validate sunshine settings
+  ansible.builtin.assert:
+    that:
+      - sunshine_version | length > 0
+      - sunshine_user | length > 0
+    fail_msg: "Invalid sunshine role settings."
+  when: sunshine_enabled | bool
+  tags: [sunshine]
+
+- name: Validate supported OS for sunshine role
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+      - ansible_distribution == "Ubuntu"
+      - ansible_distribution_major_version | int >= 24
+    fail_msg: "sunshine role currently supports Ubuntu 24.04+."
+  when: sunshine_enabled | bool
+  tags: [sunshine]
+
+- name: Resolve sunshine arch
+  ansible.builtin.set_fact:
+    sunshine_arch: "{{ sunshine_arch_map[ansible_architecture] }}"
+  when: sunshine_enabled | bool
+  tags: [sunshine]
+
+- name: Read installed sunshine version
+  ansible.builtin.command: dpkg-query -W -f='${Version}' sunshine
+  register: sunshine_installed_cmd
+  changed_when: false
+  failed_when: false
+  when: sunshine_enabled | bool
+  tags: [sunshine]
+
+- name: Decide whether sunshine deb needs install
+  ansible.builtin.set_fact:
+    sunshine_install_required: >-
+      {{
+        (sunshine_installed_cmd.rc | default(1)) != 0
+        or sunshine_version not in (sunshine_installed_cmd.stdout | default(''))
+      }}
+  changed_when: false
+  when: sunshine_enabled | bool
+  tags: [sunshine]
+
+- name: Download sunshine deb
+  ansible.builtin.get_url:
+    url: "{{ sunshine_deb_url }}"
+    dest: "/tmp/{{ sunshine_deb_filename }}"
+    checksum: "{{ ('sha256:' ~ sunshine_deb_sha256) if (sunshine_deb_sha256 | length > 0) else omit }}"
+    mode: "0644"
+    force: true
+  when:
+    - sunshine_enabled | bool
+    - sunshine_install_required | bool
+  tags: [sunshine]
+
+- name: Install sunshine deb (apt resolves dependencies)
+  ansible.builtin.apt:
+    deb: "/tmp/{{ sunshine_deb_filename }}"
+    state: present
+  when:
+    - sunshine_enabled | bool
+    - sunshine_install_required | bool
+  tags: [sunshine]
+
+- name: Clean up sunshine deb
+  ansible.builtin.file:
+    path: "/tmp/{{ sunshine_deb_filename }}"
+    state: absent
+  when:
+    - sunshine_enabled | bool
+    - sunshine_install_required | bool
+  tags: [sunshine]
+
+- name: Add sunshine user to input + video groups (for capture + uinput)
+  ansible.builtin.user:
+    name: "{{ sunshine_user }}"
+    groups:
+      - input
+      - video
+    append: true
+  when: sunshine_enabled | bool
+  tags: [sunshine]
+
+- name: Ensure user systemd directory exists
+  ansible.builtin.file:
+    path: "/home/{{ sunshine_user }}/.config/systemd/user"
+    state: directory
+    owner: "{{ sunshine_user }}"
+    group: "{{ sunshine_group }}"
+    mode: "0755"
+  when: sunshine_enabled | bool
+  tags: [sunshine]
+
+- name: Install sunshine user systemd unit
+  ansible.builtin.template:
+    src: sunshine.service.j2
+    dest: "{{ sunshine_systemd_user_unit_path }}"
+    owner: "{{ sunshine_user }}"
+    group: "{{ sunshine_group }}"
+    mode: "0644"
+  when: sunshine_enabled | bool
+  tags: [sunshine]
+
+- name: Enable sunshine user unit (linger required for autostart sans login)
+  ansible.builtin.command: "loginctl enable-linger {{ sunshine_user }}"
+  changed_when: false
+  when: sunshine_enabled | bool
+  tags: [sunshine]

@@ -1,0 +1,20 @@
+[Unit]
+Description=Auto-mount USB block device %I
+Requires=systemd-udev-settle.service
+After=systemd-udev-settle.service
+StopWhenUnneeded=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart={{ usb_automount_script_path }} mount %I
+ExecStop={{ usb_automount_script_path }} unmount %I
+TimeoutStartSec=30s
+
+# Cap blast radius — script only writes under {{ usb_automount_root }} and to
+# udev-driven mountpoints; the rest of the FS is read-only.
+ProtectSystem=strict
+ReadWritePaths={{ usb_automount_root }} /run /var/log
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes

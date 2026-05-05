@@ -1,0 +1,106 @@
+---
+- name: Validate obico settings
+  ansible.builtin.assert:
+    that:
+      - obico_repo_url | length > 0
+      - obico_install_dir.startswith('/')
+      - obico_user | length > 0
+    fail_msg: "Invalid obico role settings."
+  when: obico_enabled | bool
+  tags: [obico]
+
+- name: Validate supported OS for obico role
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+    fail_msg: "obico role currently supports Debian/Ubuntu hosts only."
+  when: obico_enabled | bool
+  tags: [obico]
+
+- name: Install git for obico clone
+  ansible.builtin.apt:
+    name: git
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: obico_enabled | bool
+  tags: [obico]
+
+- name: Ensure obico install dir exists
+  ansible.builtin.file:
+    path: "{{ obico_install_dir }}"
+    state: directory
+    owner: "{{ obico_user }}"
+    group: "{{ obico_group }}"
+    mode: "0755"
+  when: obico_enabled | bool
+  tags: [obico]
+
+- name: Clone obico-server repo
+  ansible.builtin.git:
+    repo: "{{ obico_repo_url }}"
+    dest: "{{ obico_install_dir }}"
+    version: "{{ obico_repo_ref }}"
+    update: true
+    force: false
+  become: true
+  become_user: "{{ obico_user }}"
+  notify: obico_recreate
+  when: obico_enabled | bool
+  tags: [obico]
+
+- name: Render obico .env (server config)
+  ansible.builtin.template:
+    src: dotenv.j2
+    dest: "{{ obico_install_dir }}/.env"
+    owner: "{{ obico_user }}"
+    group: "{{ obico_group }}"
+    mode: "0640"
+  notify: obico_recreate
+  no_log: true
+  when: obico_enabled | bool
+  tags: [obico]
+
+# When obico_self_host_ml is False, drop the ml_api service from the compose
+# project via an override file. When True, keep upstream defaults (which
+# include ml_api on CPU torch).
+- name: Render docker-compose.override.yml
+  ansible.builtin.copy:
+    dest: "{{ obico_install_dir }}/docker-compose.override.yml"
+    owner: "{{ obico_user }}"
+    group: "{{ obico_group }}"
+    mode: "0644"
+    content: |
+      # Managed by Ansible role obico. Do not edit.
+      services:
+      {% if not obico_self_host_ml %}
+        ml_api:
+          # Self-host disabled — server will fall back to Obico's hosted ML.
+          deploy:
+            replicas: 0
+          profiles:
+            - disabled
+      {% else %}
+        ml_api:
+          restart: unless-stopped
+      {% endif %}
+        web:
+          ports:
+            - "{{ obico_web_port }}:3334"
+        tasks: {}
+        redis: {}
+  notify: obico_recreate
+  when: obico_enabled | bool
+  tags: [obico]
+
+- name: Bring up obico compose stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ obico_install_dir }}"
+    files:
+      - docker-compose.yml
+      - docker-compose.override.yml
+    state: present
+  become: true
+  become_user: "{{ obico_user }}"
+  when: obico_enabled | bool
+  tags: [obico]

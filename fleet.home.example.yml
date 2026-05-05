@@ -1,0 +1,90 @@
+---
+# Fleet config template for a single home Linux box (Intel N100, Ubuntu 24.04).
+# Use case: proxy generation, media library on TV (HDMI, Kodi kiosk),
+# remote screen streaming (Sunshine), 3D-print AI supervision (Obico),
+# rclone shares for USB drives + future NAS, ZeroTier remote access.
+#
+# Base64-encode this YAML and put into RW_FLEET_CONFIG_B64 environment secret,
+# or pass directly via --extra-vars "fleet_hosts=$(yq -o=json fleet.home.example.yml)".
+
+defaults:
+  ansible_port: 22
+  deploy_user: deploy
+  bootstrap:
+    username: root
+    password: "CHANGE_ME"
+  features:
+    feature_base: true
+    feature_firewall: true
+    feature_docker: true
+    feature_node_tuning: true
+    feature_user_shell: true
+    feature_monitoring_agent: true
+    # remnawave/caddy disabled — N100 is a client of the proxy fleet, not a node.
+    feature_remnawave_node: false
+    feature_caddy_node: false
+    feature_monitoring_stack: false
+    feature_tailscale: false
+    # Home-server roles
+    feature_zerotier: true
+    feature_usb_automount: true
+    feature_rclone_serve: true
+    feature_jellyfin: true
+    feature_sunshine: true
+    feature_obico: true
+    feature_tv_kiosk: true
+    # Sing-box: gives this host a local mixed proxy backed by your remnawave fleet.
+    feature_sing_box_proxy: true
+
+  zerotier:
+    # 16-hex-char Central network ID. Get it from my.zerotier.com.
+    networks:
+      - "REPLACE_ME_NETWORK_ID"
+    member_name: "n100-home"
+    network_flags:
+      "REPLACE_ME_NETWORK_ID":
+        allowDefault: 0
+        allowGlobal: 0
+        allowManaged: 1
+        allowDNS: 0
+
+  rclone_serve:
+    bind_address: "0.0.0.0"
+    config: |
+      # Real config copied from the previous machine — fill in via ansible-vault.
+      # Example placeholder:
+      #
+      # [gdrive]
+      # type = drive
+      # token = {"access_token":"..."}
+    instances: []
+    # Example shape (uncomment + fill once config is in place):
+    #
+    # instances:
+    #   - name: media-webdav
+    #     protocol: webdav
+    #     remote: /media
+    #     port: 8089
+    #     user: deploy
+    #     pass: "{{ vault_rclone_webdav_password }}"
+    #   - name: gdrive-sftp
+    #     protocol: sftp
+    #     remote: "gdrive:"
+    #     port: 2022
+    #     user: deploy
+    #     pass: "{{ vault_rclone_sftp_password }}"
+
+  obico:
+    self_host_ml: false  # use Obico's hosted ML detector, save N100 CPU
+    site_url: "http://n100.local"
+
+  sing_box_proxy:
+    # Tunnels download/sing-box traffic through your remnawave VLESS REALITY.
+    # Wire up outbounds + route_final from runtime vars.
+    outbounds: []
+    route_final: ""
+
+hosts:
+  n100:
+    ansible_host: 192.168.1.50  # LAN IP, replace
+    # Per-host overrides go here. Empty = inherit defaults.

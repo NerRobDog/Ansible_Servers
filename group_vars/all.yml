@@ -108,6 +108,15 @@ feature_node_tuning: false
 feature_monitoring_agent: false
 feature_monitoring_stack: false
 feature_user_shell: false
+# Home-server (N100) feature flags. Default off — only flipped on for the
+# home host via fleet config.
+feature_zerotier: false
+feature_usb_automount: false
+feature_rclone_serve: false
+feature_jellyfin: false
+feature_sunshine: false
+feature_obico: false
+feature_tv_kiosk: false
 custom_roles: []
 ssh_lockdown_enabled: false
 fleet_mode: deploy

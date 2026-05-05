@@ -1,0 +1,137 @@
+#!/bin/bash
+# Managed by Ansible role usb_automount. Do not edit.
+# Triggered by udev for /dev/<DEVNAME>; called from usb-automount@.service.
+# Mode is "mount" or "unmount", taken from the unit invocation.
+set -euo pipefail
+
+MODE="${1:-}"
+DEVNAME="${2:-}"
+
+if [[ -z "$MODE" || -z "$DEVNAME" ]]; then
+    echo "usage: $0 <mount|unmount> <devname>" >&2
+    exit 2
+fi
+
+DEV="/dev/${DEVNAME}"
+MOUNT_ROOT="{{ usb_automount_root }}"
+OWNER="{{ usb_automount_owner }}"
+GROUP="{{ usb_automount_group }}"
+
+declare -A FS_OPTS=(
+{% for fs, opts in usb_automount_options.items() %}
+    [{{ fs }}]="{{ opts }}"
+{% endfor %}
+)
+
+SKIP_FS=({{ usb_automount_skip_fs | map('quote') | join(' ') }})
+
+log() { logger -t usb-automount "$*"; }
+
+resolve_mountpoint() {
+    local label="$1" uuid="$2" devname="$3"
+    local base
+    if [[ -n "$label" ]]; then
+        base=$(echo "$label" | tr -c 'A-Za-z0-9._-' '_' )
+    elif [[ -n "$uuid" ]]; then
+        base="disk-${uuid}"
+    else
+        base="disk-${devname}"
+    fi
+    # Disambiguate collision with already-mounted, different device.
+    local candidate="${MOUNT_ROOT}/${base}"
+    local i=1
+    while findmnt -rn "$candidate" >/dev/null 2>&1; do
+        local existing
+        existing=$(findmnt -rn -o SOURCE "$candidate")
+        if [[ "$existing" == "$DEV" ]]; then
+            echo "$candidate"
+            return 0
+        fi
+        candidate="${MOUNT_ROOT}/${base}-${i}"
+        i=$((i + 1))
+    done
+    echo "$candidate"
+}
+
+case "$MODE" in
+    mount)
+        if [[ ! -b "$DEV" ]]; then
+            log "skip $DEV: not a block device"; exit 0
+        fi
+        # Re-read FS metadata each invocation; udev passes only DEVNAME.
+        eval "$(blkid -o export "$DEV" 2>/dev/null || true)"
+        FS_TYPE="${TYPE:-}"
+        FS_LABEL="${LABEL:-}"
+        FS_UUID="${UUID:-}"
+
+        if [[ -z "$FS_TYPE" ]]; then
+            log "skip $DEV: no filesystem signature"; exit 0
+        fi
+        for skip in "${SKIP_FS[@]}"; do
+            if [[ "$FS_TYPE" == "$skip" ]]; then
+                log "skip $DEV: filesystem $FS_TYPE is on skip list"; exit 0
+            fi
+        done
+
+        OPTS_TEMPLATE="${FS_OPTS[$FS_TYPE]:-defaults}"
+        UID_NUM=$(id -u "$OWNER")
+        GID_NUM=$(getent group "$GROUP" | cut -d: -f3)
+        OPTS="${OPTS_TEMPLATE//\{uid\}/$UID_NUM}"
+        OPTS="${OPTS//\{gid\}/$GID_NUM}"
+
+        MP=$(resolve_mountpoint "$FS_LABEL" "$FS_UUID" "$DEVNAME")
+
+        # Already mounted at the canonical path? Idempotent exit.
+        if findmnt -rn -S "$DEV" >/dev/null 2>&1; then
+            log "$DEV already mounted at $(findmnt -rn -S "$DEV" -o TARGET)"
+            exit 0
+        fi
+
+        mkdir -p "$MP"
+        chown "$OWNER:$GROUP" "$MP"
+
+        # ntfs: prefer in-kernel ntfs3 driver (Linux >= 5.15). Fall back to ntfs-3g.
+        MOUNT_TYPE="$FS_TYPE"
+        if [[ "$FS_TYPE" == "ntfs" ]]; then
+            if grep -q '\bntfs3\b' /proc/filesystems 2>/dev/null; then
+                MOUNT_TYPE="ntfs3"
+            else
+                MOUNT_TYPE="ntfs-3g"
+            fi
+        fi
+
+        if mount -t "$MOUNT_TYPE" -o "$OPTS" "$DEV" "$MP"; then
+            log "mounted $DEV at $MP (fs=$MOUNT_TYPE label=$FS_LABEL uuid=$FS_UUID)"
+            # Filesystems that don't honor uid/gid (ext*, xfs, btrfs): chown root dir.
+            case "$FS_TYPE" in
+                ext2|ext3|ext4|xfs|btrfs|f2fs)
+                    chown "$OWNER:$GROUP" "$MP" || true
+                    ;;
+            esac
+        else
+            log "mount $DEV at $MP FAILED"
+            rmdir "$MP" 2>/dev/null || true
+            exit 1
+        fi
+        ;;
+    unmount)
+        # Find the current mountpoint (if any) for this device, then drop the dir.
+        MP=$(findmnt -rn -S "$DEV" -o TARGET || true)
+        if [[ -n "$MP" ]]; then
+            if umount "$MP"; then
+                log "unmounted $DEV from $MP"
+            else
+                # Lazy unmount on busy disk pull; rmdir will be skipped.
+                log "umount $DEV busy — using lazy unmount"
+                umount -l "$MP" || true
+            fi
+            # Only remove dirs we own under MOUNT_ROOT, never system dirs.
+            if [[ "$MP" == "$MOUNT_ROOT"/* ]]; then
+                rmdir "$MP" 2>/dev/null || true
+            fi
+        fi
+        ;;
+    *)
+        echo "unknown mode: $MODE" >&2; exit 2
+        ;;
+esac

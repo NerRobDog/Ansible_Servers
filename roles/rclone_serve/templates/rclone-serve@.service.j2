@@ -1,0 +1,26 @@
+[Unit]
+Description=rclone serve %i
+After=network-online.target zerotier-one.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{ rclone_serve_user }}
+Group={{ rclone_serve_group }}
+EnvironmentFile={{ rclone_serve_env_dir }}/%i.env
+ExecStart=/bin/sh -c '{{ rclone_serve_install_path }} serve "$RCLONE_PROTOCOL" "$RCLONE_REMOTE" --config {{ rclone_serve_config_path }} --addr "$RCLONE_ADDR" --log-file {{ rclone_serve_log_dir }}/%i.log --log-level INFO $RCLONE_AUTH_ARGS $RCLONE_EXTRA_ARGS'
+Restart=on-failure
+RestartSec=5
+
+# rclone serve binds to a privileged port if you misconfigure it. The deploy
+# user can't, so this caps the blast radius implicitly.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths={{ rclone_serve_log_dir }} /media /mnt
+# rclone needs read access to the config + token cache.
+ReadOnlyPaths={{ rclone_serve_config_dir }}
+
+[Install]
+WantedBy=multi-user.target

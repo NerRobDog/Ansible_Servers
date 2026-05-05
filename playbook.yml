@@ -40,6 +40,40 @@
           }}
         effective_sing_box_proxy_config: >-
           {{ fleet_host_cfg.get('sing_box_proxy', sing_box_proxy_config | default({})) }}
+        effective_feature_zerotier: >-
+          {{
+            fleet_host_cfg.get('features', {}).get('feature_zerotier', feature_zerotier | default(false)) | bool
+          }}
+        effective_zerotier_config: >-
+          {{ fleet_host_cfg.get('zerotier', zerotier_config | default({})) }}
+        effective_feature_usb_automount: >-
+          {{
+            fleet_host_cfg.get('features', {}).get('feature_usb_automount', feature_usb_automount | default(false)) | bool
+          }}
+        effective_feature_rclone_serve: >-
+          {{
+            fleet_host_cfg.get('features', {}).get('feature_rclone_serve', feature_rclone_serve | default(false)) | bool
+          }}
+        effective_rclone_serve_config: >-
+          {{ fleet_host_cfg.get('rclone_serve', rclone_serve_config_block | default({})) }}
+        effective_feature_jellyfin: >-
+          {{
+            fleet_host_cfg.get('features', {}).get('feature_jellyfin', feature_jellyfin | default(false)) | bool
+          }}
+        effective_feature_sunshine: >-
+          {{
+            fleet_host_cfg.get('features', {}).get('feature_sunshine', feature_sunshine | default(false)) | bool
+          }}
+        effective_feature_obico: >-
+          {{
+            fleet_host_cfg.get('features', {}).get('feature_obico', feature_obico | default(false)) | bool
+          }}
+        effective_obico_config: >-
+          {{ fleet_host_cfg.get('obico', obico_config | default({})) }}
+        effective_feature_tv_kiosk: >-
+          {{
+            fleet_host_cfg.get('features', {}).get('feature_tv_kiosk', feature_tv_kiosk | default(false)) | bool
+          }}
         effective_feature_user_shell: >-
           {{
             (fleet_mode_effective == 'bootstrap')
@@ -153,6 +187,45 @@
       vars:
         sing_box_proxy_config: "{{ effective_sing_box_proxy_config }}"
       tags: [sing_box, proxy]
+
+    - role: zerotier
+      when: effective_run_main_stack | bool and (effective_feature_zerotier | bool)
+      vars:
+        zerotier_networks: "{{ effective_zerotier_config.get('networks', []) }}"
+        zerotier_member_name: "{{ effective_zerotier_config.get('member_name', inventory_hostname) }}"
+        zerotier_network_flags: "{{ effective_zerotier_config.get('network_flags', {}) }}"
+      tags: [zerotier]
+
+    - role: usb_automount
+      when: effective_run_main_stack | bool and (effective_feature_usb_automount | bool)
+      tags: [usb_automount, storage]
+
+    - role: rclone_serve
+      when: effective_run_main_stack | bool and (effective_feature_rclone_serve | bool)
+      vars:
+        rclone_serve_config: "{{ effective_rclone_serve_config.get('config', '') }}"
+        rclone_serve_instances: "{{ effective_rclone_serve_config.get('instances', []) }}"
+        rclone_serve_bind_address: "{{ effective_rclone_serve_config.get('bind_address', '0.0.0.0') }}"
+      tags: [rclone, storage]
+
+    - role: jellyfin
+      when: effective_run_main_stack | bool and (effective_feature_jellyfin | bool)
+      tags: [jellyfin, media]
+
+    - role: sunshine
+      when: effective_run_main_stack | bool and (effective_feature_sunshine | bool)
+      tags: [sunshine, media]
+
+    - role: obico
+      when: effective_run_main_stack | bool and (effective_feature_obico | bool)
+      vars:
+        obico_self_host_ml: "{{ effective_obico_config.get('self_host_ml', false) }}"
+        obico_site_url: "{{ effective_obico_config.get('site_url', 'http://' ~ ansible_hostname ~ '.local') }}"
+      tags: [obico, print3d]
+
+    - role: tv_kiosk
+      when: effective_run_main_stack | bool and (effective_feature_tv_kiosk | bool)
+      tags: [tv_kiosk, kiosk]
 
   tasks:
     - name: Validate custom role paths exist locally

@@ -1,0 +1,11 @@
+# Managed by Ansible role tv_kiosk. Do not edit.
+# Autologin a single user into a cage Wayland session that runs Kodi as the
+# only client — no compositor chrome, no desktop. Exit Kodi -> session ends
+# -> greetd respawns -> Kodi starts again.
+
+[terminal]
+vt = 1
+
+[default_session]
+command = "cage -s -- kodi --standalone"
+user = "{{ tv_kiosk_user }}"

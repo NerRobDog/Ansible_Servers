@@ -1,0 +1,35 @@
+---
+zerotier_enabled: true
+zerotier_state: present
+
+# Network IDs to join. List, because a host may belong to several ZT networks
+# (e.g. a "home" net + a "remote-admin" net). Each entry is a 16-hex-char id.
+zerotier_networks: []
+
+# Optional Central API token for self-authorization of newly-joined networks.
+# When set, the role calls Central API to flip authorized=true on this node
+# in each listed network. Without it, networks that require manual approval
+# stay in REQUESTING_CONFIGURATION until you click "Authorize" in Central UI.
+# Read from environment so it never lands on disk.
+zerotier_api_token_env: ZEROTIER_API_TOKEN
+
+# Optional friendly name to set on the node in Central (per-network).
+# Defaults to inventory_hostname.
+zerotier_member_name: "{{ inventory_hostname }}"
+
+# Whether to allow ZT to be reachable via the local LAN, default route, etc.
+# Equivalent flags to `zerotier-cli set <nwid> <flag>=1`. Empty = leave default.
+zerotier_network_flags: {}
+# Example:
+#   zerotier_network_flags:
+#     "abcdef0123456789":
+#       allowDefault: 0
+#       allowGlobal: 0
+#       allowManaged: 1
+#       allowDNS: 0
+
+zerotier_package: zerotier-one
+zerotier_service_name: zerotier-one
+zerotier_apt_keyring_path: /usr/share/keyrings/zerotier-archive-keyring.gpg
+zerotier_apt_key_url: https://raw.githubusercontent.com/zerotier/ZeroTierOne/master/doc/contact%40zerotier.com.gpg
+zerotier_apt_repo_url: https://download.zerotier.com/debian/{{ ansible_distribution_release }}

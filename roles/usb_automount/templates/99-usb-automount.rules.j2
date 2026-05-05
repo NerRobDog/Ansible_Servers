@@ -1,0 +1,9 @@
+# Managed by Ansible role usb_automount. Do not edit.
+# Trigger usb-automount@<DEVNAME>.service on add/remove of any block device
+# that belongs to a USB or removable bus and carries a real filesystem.
+
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_BUS}=="usb", TAG+="systemd", ENV{SYSTEMD_WANTS}+="usb-automount@%k.service"
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ATTR{removable}=="1", TAG+="systemd", ENV{SYSTEMD_WANTS}+="usb-automount@%k.service"
+
+ACTION=="remove", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", RUN+="/bin/systemctl --no-block stop usb-automount@%k.service"
+ACTION=="remove", SUBSYSTEM=="block", ATTR{removable}=="1", RUN+="/bin/systemctl --no-block stop usb-automount@%k.service"
