@@ -108,3 +108,44 @@
   changed_when: false
   when: sunshine_enabled | bool
   tags: [sunshine]
+
+# Resolve numeric uid for the systemd --user dbus socket. The user systemd
+# instance lives at /run/user/<uid>/bus and must be addressed explicitly when
+# we manage it from a non-graphical SSH session.
+- name: Resolve sunshine user uid
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ sunshine_user }}"
+  when: sunshine_enabled | bool
+  tags: [sunshine]
+
+- name: Resolve sunshine uid fact
+  ansible.builtin.set_fact:
+    sunshine_uid: "{{ getent_passwd[sunshine_user][1] }}"
+  when: sunshine_enabled | bool
+  tags: [sunshine]
+
+- name: Enable sunshine user service (idempotent)
+  ansible.builtin.command:
+    cmd: systemctl --user enable sunshine.service
+  become: true
+  become_user: "{{ sunshine_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ sunshine_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ sunshine_uid }}/bus"
+  changed_when: true
+  when: sunshine_enabled | bool
+  tags: [sunshine]
+
+- name: Start sunshine user service if graphical session is active
+  ansible.builtin.command:
+    cmd: systemctl --user start sunshine.service
+  become: true
+  become_user: "{{ sunshine_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ sunshine_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ sunshine_uid }}/bus"
+  changed_when: true
+  failed_when: false  # graphical-session.target may not be reachable from non-graphical SSH
+  when: sunshine_enabled | bool
+  tags: [sunshine]

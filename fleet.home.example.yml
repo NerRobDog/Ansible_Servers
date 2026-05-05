@@ -36,6 +36,16 @@ defaults:
     # Sing-box: gives this host a local mixed proxy backed by your remnawave fleet.
     feature_sing_box_proxy: true
 
+  # Source-scoped firewall rules — open service ports only to LAN + ZeroTier
+  # subnets, never publicly. Adjust CIDRs to your network.
+  firewall_scoped_rules:
+    - from: "192.168.5.0/24"
+      tcp: [8096, 8920, 3334, 3335, 47984, 47989, 47990, 48010, 8089]
+      udp: [5353, "47998:48010"]
+    - from: "10.147.20.0/24"
+      tcp: [8096, 8920, 3334, 3335, 47984, 47989, 47990, 48010, 8089]
+      udp: [5353, "47998:48010"]
+
   zerotier:
     # 16-hex-char Central network ID. Get it from my.zerotier.com.
     networks:

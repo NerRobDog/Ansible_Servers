@@ -2,8 +2,14 @@
 Description=Sunshine self-hosted game stream host
 StartLimitIntervalSec=500
 StartLimitBurst=5
-After=graphical-session.target
-PartOf=graphical-session.target
+# Sunshine needs an active display to capture; on a kiosk box that's the
+# `cage` Wayland session run by greetd. We can't bind PartOf=graphical-session
+# from a user unit reliably (greetd runs the session as `deploy`, but that
+# session's targets aren't always reachable from another user-systemd path).
+# Instead we attach to default.target — combined with `loginctl enable-linger`
+# the user-systemd starts at boot, sunshine waits for the display in its own
+# code.
+After=network-online.target
 
 [Service]
 ExecStart=/usr/bin/sunshine
@@ -11,4 +17,4 @@ Restart=on-failure
 RestartSec=5s
 
 [Install]
-WantedBy=graphical-session.target
+WantedBy=default.target

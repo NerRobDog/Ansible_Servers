@@ -144,6 +144,8 @@
 
     - role: firewall
       when: effective_run_main_stack | bool and (effective_feature_firewall | bool) and (firewall_enabled | bool)
+      vars:
+        firewall_scoped_rules: "{{ fleet_host_cfg.firewall_scoped_rules | default(firewall_scoped_rules | default([])) }}"
       tags: [firewall]
 
     - role: docker
