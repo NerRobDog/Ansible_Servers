@@ -40,11 +40,14 @@ defaults:
   # subnets, never publicly. Adjust CIDRs to your network.
   firewall_scoped_rules:
     - from: "192.168.5.0/24"
-      tcp: [8096, 8920, 3334, 3335, 47984, 47989, 47990, 48010, 8089]
-      udp: [5353, "47998:48010"]
+      # 8096/8920 jellyfin, 3334/3335 obico, 47984-48010 sunshine,
+      # 8089 rclone, 8008/8009 tubecast Cast V1 control
+      tcp: [8096, 8920, 3334, 3335, 47984, 47989, 47990, 48010, 8089, 8008, 8009]
+      # 5353 mDNS, 1900 SSDP/DIAL, 47998-48010 sunshine RTP
+      udp: [5353, 1900, "47998:48010"]
     - from: "10.147.20.0/24"
-      tcp: [8096, 8920, 3334, 3335, 47984, 47989, 47990, 48010, 8089]
-      udp: [5353, "47998:48010"]
+      tcp: [8096, 8920, 3334, 3335, 47984, 47989, 47990, 48010, 8089, 8008, 8009]
+      udp: [5353, 1900, "47998:48010"]
 
   zerotier:
     # 16-hex-char Central network ID. Get it from my.zerotier.com.

@@ -26,8 +26,17 @@ tv_kiosk_greetd_config: /etc/greetd/config.toml
 # Kodi addons to preinstall via zip. Each: {id, url, sha256}.
 tv_kiosk_addons:
   - id: plugin.video.youtube
-    # Official YouTube plugin (anxdpanic fork — actively maintained).
+    # YouTube playback engine. The phone-cast feature does NOT live here —
+    # the YouTube addon does not advertise itself via DIAL/SSDP. It plays
+    # the URL once tubecast routes a Cast V1 session into it.
     url: "https://github.com/anxdpanic/plugin.video.youtube/releases/download/v7.4.3/plugin.video.youtube-7.4.3.zip"
+    sha256: ""
+  - id: script.tubecast
+    # Reverse-engineered Chromecast V1 emulator. Listens on SSDP, accepts
+    # the Cast V1 session from the YouTube mobile app, and proxies the
+    # play/pause/queue commands into plugin.video.youtube. Without this
+    # addon there is no cast icon for Kodi in the YouTube app.
+    url: "https://github.com/enen92/script.tubecast/releases/download/1.5.0%2Bmatrix.1/script.tubecast-1.5.0%2Bmatrix.1.zip"
     sha256: ""
   - id: plugin.video.elementum
     # Sequential-download torrent streamer (linux_x64 binary build).
