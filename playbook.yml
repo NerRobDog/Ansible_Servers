@@ -238,6 +238,8 @@
     - role: vnc_desktop
       when: effective_run_main_stack | bool and (effective_feature_vnc_desktop | bool)
       vars:
+        vnc_desktop_user: "{{ effective_vnc_desktop_config.get('user', 'deploy') }}"
+        vnc_desktop_group: "{{ effective_vnc_desktop_config.get('group', effective_vnc_desktop_config.get('user', 'deploy')) }}"
         vnc_desktop_environment: "{{ effective_vnc_desktop_config.get('environment', 'kde') }}"
         vnc_desktop_display: "{{ effective_vnc_desktop_config.get('display', 1) }}"
         vnc_desktop_geometry: "{{ effective_vnc_desktop_config.get('geometry', '1920x1080') }}"

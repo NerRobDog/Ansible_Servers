@@ -92,6 +92,17 @@ defaults:
     self_host_ml: false  # use Obico's hosted ML detector, save N100 CPU
     site_url: "http://n100.local"
 
+  vnc_desktop:
+    # The user that owns the VNC graphical session. NOT the deploy
+    # service user — deploy is key-only / NOPASSWD / no-Linux-password,
+    # so KDE's lock screen has nothing to validate against. Use a real
+    # interactive user with a Linux password.
+    user: ernestsh
+    group: ernestsh
+    environment: kde   # kde | gnome | xfce
+    display: 1
+    geometry: "1920x1080"
+
   sing_box_proxy:
     # Tunnels download/sing-box traffic through your remnawave VLESS REALITY.
     # Wire up outbounds + route_final from runtime vars.
