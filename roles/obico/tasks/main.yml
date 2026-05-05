@@ -109,3 +109,44 @@
     state: present
   when: obico_enabled | bool
   tags: [obico]
+
+# Obico relies on django.contrib.sites: the request's Host header must match a
+# Site row, or the auth views (e.g. /accounts/login/) raise Site.DoesNotExist
+# and return 500. The migrations seed `example.com` only in some upstream
+# revisions, and Obico's own bootstrap doesn't currently sync it to
+# obico_site_url — so we do it ourselves, idempotently, after compose is up.
+- name: Wait for obico web container to accept python -c manage.py
+  ansible.builtin.command:
+    cmd: docker exec obico-server-web-1 python manage.py check
+  register: obico_django_check
+  retries: 12
+  delay: 5
+  until: obico_django_check.rc == 0
+  changed_when: false
+  when: obico_enabled | bool
+  tags: [obico]
+
+- name: Resolve obico site domain (host portion of obico_site_url)
+  ansible.builtin.set_fact:
+    obico_site_domain: >-
+      {{
+        obico_site_url
+          | regex_replace('^https?://', '')
+          | regex_replace('/.*$', '')
+          | regex_replace(':\\d+$', '')
+      }}
+  when: obico_enabled | bool
+  tags: [obico]
+
+- name: Sync django.contrib.sites Site row to obico_site_url
+  ansible.builtin.command:
+    cmd: >-
+      docker exec obico-server-web-1 python manage.py shell -c
+      "from django.contrib.sites.models import Site;
+      Site.objects.update_or_create(
+        id=1,
+        defaults={'domain': '{{ obico_site_domain }}', 'name': 'Obico'}
+      )"
+  changed_when: true
+  when: obico_enabled | bool
+  tags: [obico]
