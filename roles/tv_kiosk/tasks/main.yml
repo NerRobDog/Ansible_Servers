@@ -133,5 +133,34 @@
   loop: "{{ tv_kiosk_addons }}"
   loop_control:
     label: "{{ item.id }}"
+  register: tv_kiosk_addons_extract
+  when: tv_kiosk_enabled | bool
+  tags: [tv_kiosk]
+
+# Dropping a zip into ~/.kodi/addons/ leaves the addon disabled in Kodi's
+# Addons database — `import` from another addon then fails with
+# ModuleNotFoundError. Enabling via JSON-RPC requires Kodi to be running;
+# we ignore failure (first-deploy case where greetd hasn't started yet).
+- name: Enable extracted Kodi addons via JSON-RPC
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:8080/jsonrpc"
+    method: POST
+    headers:
+      Content-Type: application/json
+    body_format: json
+    body:
+      jsonrpc: "2.0"
+      id: 1
+      method: "Addons.SetAddonEnabled"
+      params:
+        addonid: "{{ item.id }}"
+        enabled: true
+    status_code: [200]
+    timeout: 5
+  loop: "{{ tv_kiosk_addons }}"
+  loop_control:
+    label: "{{ item.id }}"
+  failed_when: false
+  changed_when: false
   when: tv_kiosk_enabled | bool
   tags: [tv_kiosk]
