@@ -30,7 +30,11 @@ usb_automount_skip_fs:
   - LVM2_member
   - crypto_LUKS
 
-# Required packages on the host.
+# Required packages on the host. Note: udisks2 is intentionally NOT here
+# even though it gets pulled in transitively by KDE Plasma. The role
+# disables udisks2.service to prevent its desktop-side polkit-driven
+# auto-mount from racing our udev rule (it would mount disks under
+# /media/<user>/<label> with the user's uid, bypassing our owner config).
 usb_automount_packages:
   - udev
   - util-linux

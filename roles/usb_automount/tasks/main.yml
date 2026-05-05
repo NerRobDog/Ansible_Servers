@@ -76,6 +76,21 @@
   when: usb_automount_enabled | bool
   tags: [usb_automount]
 
+# udisks2 is pulled in by KDE / Plasma and provides its own desktop-side
+# auto-mount via polkit. We don't want it competing with our udev rule for
+# the same /dev/sd* events — when both fire, udisks2 mounts under
+# /media/<user>/<label> with the *active session's* uid, ignoring our
+# usb_automount_owner setting. Mask it so it stays off across reboots.
+- name: Mask udisks2 (conflicts with udev-driven automount)
+  ansible.builtin.systemd:
+    name: udisks2.service
+    enabled: false
+    masked: true
+    state: stopped
+  failed_when: false
+  when: usb_automount_enabled | bool
+  tags: [usb_automount]
+
 - name: Install usb-automount udev rule
   ansible.builtin.template:
     src: 99-usb-automount.rules.j2
