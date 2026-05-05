@@ -9,12 +9,12 @@ jellyfin_compose_dir: /opt/jellyfin
 jellyfin_user: deploy
 jellyfin_group: deploy
 
-# QuickSync acceleration. N100 → /dev/dri/renderD128 + /dev/dri/card0.
-# Set jellyfin_enable_qsv: false to skip mounting /dev/dri (e.g. ARM hosts).
+# QuickSync acceleration. For transcode-only Jellyfin needs just the render
+# node — `card0/card1` are the display node, irrelevant in a headless server
+# container. Set jellyfin_enable_qsv: false to skip mounting /dev/dri entirely.
 jellyfin_enable_qsv: true
 jellyfin_dri_devices:
   - /dev/dri/renderD128
-  - /dev/dri/card0
 
 # Bind to all interfaces by default — gated by the host firewall + LAN/ZT.
 jellyfin_http_port: 8096

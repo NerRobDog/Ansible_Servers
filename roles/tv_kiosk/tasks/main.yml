@@ -19,12 +19,14 @@
   when: tv_kiosk_enabled | bool
   tags: [tv_kiosk]
 
-- name: Add team-xbmc PPA (newer Kodi than the distro repo)
+- name: Add Kodi PPA when configured
   ansible.builtin.apt_repository:
     repo: "{{ tv_kiosk_apt_ppa }}"
     state: present
     update_cache: true
-  when: tv_kiosk_enabled | bool
+  when:
+    - tv_kiosk_enabled | bool
+    - tv_kiosk_apt_ppa | length > 0
   tags: [tv_kiosk]
 
 - name: Install kiosk packages

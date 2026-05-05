@@ -6,9 +6,10 @@ tv_kiosk_enabled: true
 tv_kiosk_user: deploy
 tv_kiosk_group: deploy
 
-# Packages: Kodi from the team-xbmc PPA (newer than 24.04's repo Kodi),
-# plus cage (Wayland kiosk) and CEC.
-tv_kiosk_apt_ppa: "ppa:team-xbmc/ppa"
+# Packages: Kodi from the distro repo (Ubuntu 24.04 carries Kodi 20.x). The
+# team-xbmc PPA does not currently publish a Release file for `noble`, so we
+# stay on universe; flip tv_kiosk_apt_ppa to a working PPA when one exists.
+tv_kiosk_apt_ppa: ""
 tv_kiosk_packages:
   - kodi
   - kodi-peripheral-joystick
@@ -26,11 +27,11 @@ tv_kiosk_greetd_config: /etc/greetd/config.toml
 tv_kiosk_addons:
   - id: plugin.video.youtube
     # Official YouTube plugin (anxdpanic fork — actively maintained).
-    url: "https://github.com/anxdpanic/plugin.video.youtube/releases/download/v7.1.0.4/plugin.video.youtube-7.1.0.4.zip"
+    url: "https://github.com/anxdpanic/plugin.video.youtube/releases/download/v7.4.3/plugin.video.youtube-7.4.3.zip"
     sha256: ""
   - id: plugin.video.elementum
-    # Sequential-download torrent streamer.
-    url: "https://github.com/elgatito/plugin.video.elementum/releases/download/v0.1.107/plugin.video.elementum-0.1.107.zip"
+    # Sequential-download torrent streamer (linux_x64 binary build).
+    url: "https://github.com/elgatito/plugin.video.elementum/releases/download/v0.1.113/plugin.video.elementum-0.1.113.linux_x64.zip"
     sha256: ""
 
 tv_kiosk_kodi_home: "/home/{{ tv_kiosk_user }}/.kodi"

@@ -74,14 +74,14 @@
 
 - name: Install zerotier package
   ansible.builtin.apt:
-    name: "{{ zerotier_package }}"
+    name: "{{ zerotier_apt_package }}"
     state: present
   when: zerotier_enabled | bool
   tags: [zerotier]
 
 - name: Enable and start zerotier service
   ansible.builtin.systemd:
-    name: "{{ zerotier_service_name }}"
+    name: "{{ zerotier_systemd_service }}"
     state: started
     enabled: true
   when: zerotier_enabled | bool
@@ -115,14 +115,32 @@
   changed_when: zerotier_join_cmd.rc == 0
   tags: [zerotier]
 
-- name: Apply per-network flags
-  ansible.builtin.command: "zerotier-cli set {{ item.0.key }} {{ item.1.key }}={{ item.1.value }}"
-  loop: "{{ zerotier_network_flags | default({}) | dict2items | subelements('value', skip_missing=True) }}"
+- name: Flatten per-network flags into [nwid, flag, value] triples
+  ansible.builtin.set_fact:
+    zerotier_flag_triples: >-
+      {{
+        zerotier_flag_triples | default([])
+        + (item.value | default({}) | dict2items
+            | map('combine', {'nwid': item.key})
+            | list)
+      }}
+  loop: "{{ zerotier_network_flags | default({}) | dict2items }}"
   loop_control:
-    label: "{{ item.0.key }}:{{ item.1.key }}={{ item.1.value }}"
+    label: "{{ item.key }}"
   when:
     - zerotier_enabled | bool
     - zerotier_network_flags | default({}) | length > 0
+  changed_when: false
+  tags: [zerotier]
+
+- name: Apply per-network flags
+  ansible.builtin.command: "zerotier-cli set {{ item.nwid }} {{ item.key }}={{ item.value }}"
+  loop: "{{ zerotier_flag_triples | default([]) }}"
+  loop_control:
+    label: "{{ item.nwid }}:{{ item.key }}={{ item.value }}"
+  when:
+    - zerotier_enabled | bool
+    - zerotier_flag_triples | default([]) | length > 0
   changed_when: false  # zerotier-cli set is idempotent at runtime
   tags: [zerotier]
 
@@ -168,23 +186,23 @@
     - zerotier_api_token_value | length > 0
   tags: [zerotier]
 
-- name: Read zerotier networks status after join + authorize
+# Daemon resyncs config from Central after authorize; status flips
+# REQUESTING_CONFIGURATION -> OK within a few seconds. Poll until all
+# requested networks are OK or the budget runs out.
+- name: Wait for all zerotier networks to reach OK status
   ansible.builtin.command: zerotier-cli -j listnetworks
   register: zerotier_listnetworks_after_cmd
   changed_when: false
-  when: zerotier_enabled | bool
-  tags: [zerotier]
-
-- name: Assert all requested networks are OK
-  ansible.builtin.assert:
-    that:
-      - >-
-        (zerotier_listnetworks_after_cmd.stdout | from_json
-          | selectattr('nwid', 'equalto', item)
-          | map(attribute='status') | list | first | default('UNKNOWN')) == 'OK'
-    fail_msg: >-
-      ZeroTier network {{ item }} on host {{ inventory_hostname }} is not OK.
-      Check Central authorization for node {{ zerotier_node_address | default('?') }}.
-  loop: "{{ zerotier_networks }}"
+  retries: 12
+  delay: 5
+  until: >-
+    (zerotier_listnetworks_after_cmd.stdout | default('[]') | from_json
+      | selectattr('nwid', 'in', zerotier_networks)
+      | rejectattr('status', 'equalto', 'OK')
+      | list | length == 0)
+    and
+    ((zerotier_listnetworks_after_cmd.stdout | default('[]') | from_json
+      | selectattr('nwid', 'in', zerotier_networks)
+      | list | length) == (zerotier_networks | length))
   when: zerotier_enabled | bool
   tags: [zerotier]

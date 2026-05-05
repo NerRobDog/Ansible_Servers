@@ -43,9 +43,16 @@
     version: "{{ obico_repo_ref }}"
     update: true
     force: false
-  become: true
-  become_user: "{{ obico_user }}"
   notify: obico_recreate
+  when: obico_enabled | bool
+  tags: [obico]
+
+- name: Reown cloned obico repo to obico_user
+  ansible.builtin.file:
+    path: "{{ obico_install_dir }}"
+    owner: "{{ obico_user }}"
+    group: "{{ obico_group }}"
+    recurse: true
   when: obico_enabled | bool
   tags: [obico]
 
@@ -100,7 +107,5 @@
       - docker-compose.yml
       - docker-compose.override.yml
     state: present
-  become: true
-  become_user: "{{ obico_user }}"
   when: obico_enabled | bool
   tags: [obico]

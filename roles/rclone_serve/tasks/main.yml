@@ -32,6 +32,11 @@
 - name: Resolve rclone arch
   ansible.builtin.set_fact:
     rclone_serve_arch: "{{ rclone_serve_arch_map[ansible_architecture] }}"
+  when: rclone_serve_enabled | bool
+  tags: [rclone_serve]
+
+- name: Resolve rclone release URL
+  ansible.builtin.set_fact:
     rclone_serve_release_url: "{{ rclone_serve_release_url_template }}"
   when: rclone_serve_enabled | bool
   tags: [rclone_serve]
