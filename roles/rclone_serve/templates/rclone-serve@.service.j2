@@ -8,7 +8,22 @@ Type=simple
 User={{ rclone_serve_user }}
 Group={{ rclone_serve_group }}
 EnvironmentFile={{ rclone_serve_env_dir }}/%i.env
-ExecStart=/bin/sh -c '{{ rclone_serve_install_path }} serve "$RCLONE_PROTOCOL" "$RCLONE_REMOTE" --config {{ rclone_serve_config_path }} --addr "$RCLONE_ADDR" --log-file {{ rclone_serve_log_dir }}/%i.log --log-level INFO $RCLONE_AUTH_ARGS $RCLONE_EXTRA_ARGS'
+# Branch on RCLONE_PROTOCOL: rcd is its own subcommand (no remote arg, uses
+# --rc-addr instead of --addr); everything else is `rclone serve <proto>`.
+ExecStart=/bin/sh -c '\
+  if [ "$RCLONE_PROTOCOL" = "rcd" ]; then \
+    exec {{ rclone_serve_install_path }} rcd \
+      --config {{ rclone_serve_config_path }} \
+      --rc-addr "$RCLONE_ADDR" \
+      --log-file {{ rclone_serve_log_dir }}/%i.log --log-level INFO \
+      $RCLONE_AUTH_ARGS $RCLONE_EXTRA_ARGS; \
+  else \
+    exec {{ rclone_serve_install_path }} serve "$RCLONE_PROTOCOL" "$RCLONE_REMOTE" \
+      --config {{ rclone_serve_config_path }} \
+      --addr "$RCLONE_ADDR" \
+      --log-file {{ rclone_serve_log_dir }}/%i.log --log-level INFO \
+      $RCLONE_AUTH_ARGS $RCLONE_EXTRA_ARGS; \
+  fi'
 Restart=on-failure
 RestartSec=5
 
@@ -18,7 +33,9 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths={{ rclone_serve_log_dir }} /media /mnt
+# rcd downloads/caches the Web GUI under ~/.cache/rclone — needs HOME write.
+# /media + /mnt for cross-disk operations the user issues via the API.
+ReadWritePaths={{ rclone_serve_log_dir }} /media /mnt /home/{{ rclone_serve_user }}
 # rclone needs read access to the config + token cache.
 ReadOnlyPaths={{ rclone_serve_config_dir }}
 

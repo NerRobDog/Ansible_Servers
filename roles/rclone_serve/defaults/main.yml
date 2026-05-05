@@ -46,12 +46,16 @@ rclone_serve_bind_address: "0.0.0.0"
 
 # Each entry produces an rclone-serve@<name>.service systemd instance.
 #   name:     unit instance name (-> rclone-serve@<name>.service)
-#   protocol: webdav | sftp | http | restic | s3 | nfs | docker | dlna | ftp
-#   remote:   rclone remote path, e.g. "gdrive:" or "/media"
-#   port:     listen port
-#   user:     basic-auth user (optional, omitted -> no auth — never expose without ZT)
-#   pass:     basic-auth password (omitted -> no auth)
+#   protocol: rcd | webdav | sftp | http | restic | s3 | nfs | docker | dlna | ftp
+#   remote:   rclone remote path, e.g. "gdrive:" or "/media".
+#             Ignored when protocol == "rcd" (rcd controls all remotes from rclone.conf).
+#   port:     listen port (rcd default = 5572)
+#   user:     basic-auth user (optional). For rcd this becomes --rc-user.
+#   pass:     basic-auth password (optional, but always set for rcd unless you
+#             really know what you're doing — rcd exposes the full rclone API).
 #   extra_args: list of extra CLI flags
+#                 (rcd: typically --rc-web-gui --rc-allow-origin '*'
+#                       --rc-web-gui-no-open-browser)
 rclone_serve_instances: []
 # Example:
 #   rclone_serve_instances:
