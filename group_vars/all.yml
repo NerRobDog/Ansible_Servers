@@ -117,6 +117,7 @@ feature_jellyfin: false
 feature_sunshine: false
 feature_obico: false
 feature_tv_kiosk: false
+feature_vnc_desktop: false
 custom_roles: []
 ssh_lockdown_enabled: false
 fleet_mode: deploy

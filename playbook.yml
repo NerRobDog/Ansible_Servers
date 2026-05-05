@@ -74,6 +74,12 @@
           {{
             fleet_host_cfg.get('features', {}).get('feature_tv_kiosk', feature_tv_kiosk | default(false)) | bool
           }}
+        effective_feature_vnc_desktop: >-
+          {{
+            fleet_host_cfg.get('features', {}).get('feature_vnc_desktop', feature_vnc_desktop | default(false)) | bool
+          }}
+        effective_vnc_desktop_config: >-
+          {{ fleet_host_cfg.get('vnc_desktop', vnc_desktop_config | default({})) }}
         effective_feature_user_shell: >-
           {{
             (fleet_mode_effective == 'bootstrap')
@@ -228,6 +234,14 @@
     - role: tv_kiosk
       when: effective_run_main_stack | bool and (effective_feature_tv_kiosk | bool)
       tags: [tv_kiosk, kiosk]
+
+    - role: vnc_desktop
+      when: effective_run_main_stack | bool and (effective_feature_vnc_desktop | bool)
+      vars:
+        vnc_desktop_environment: "{{ effective_vnc_desktop_config.get('environment', 'kde') }}"
+        vnc_desktop_display: "{{ effective_vnc_desktop_config.get('display', 1) }}"
+        vnc_desktop_geometry: "{{ effective_vnc_desktop_config.get('geometry', '1920x1080') }}"
+      tags: [vnc_desktop, vnc, desktop]
 
   tasks:
     - name: Validate custom role paths exist locally
