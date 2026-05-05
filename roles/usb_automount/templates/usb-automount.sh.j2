@@ -31,7 +31,9 @@ resolve_mountpoint() {
     local label="$1" uuid="$2" devname="$3"
     local base
     if [[ -n "$label" ]]; then
-        base=$(echo "$label" | tr -c 'A-Za-z0-9._-' '_' )
+        # printf %s avoids the trailing newline that `echo` would emit, which
+        # `tr -c` then replaces with `_` and produces names like "EFI_".
+        base=$(printf '%s' "$label" | tr -c 'A-Za-z0-9._-' '_' )
     elif [[ -n "$uuid" ]]; then
         base="disk-${uuid}"
     else
