@@ -189,13 +189,13 @@
 - name: Render per-instance EnvironmentFiles
   ansible.builtin.template:
     src: instance.env.j2
-    dest: "{{ rclone_serve_env_dir }}/{{ item.name }}.env"
+    dest: "{{ rclone_serve_env_dir }}/{{ instance.name }}.env"
     owner: root
     group: "{{ rclone_serve_group }}"
     mode: "0640"
   loop: "{{ rclone_serve_instances }}"
   loop_control:
-    label: "{{ item.name }}"
+    label: "{{ instance.name }}"
     loop_var: instance
   notify: rclone_serve_restart_instances
   no_log: true
