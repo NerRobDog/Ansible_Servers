@@ -136,7 +136,7 @@
       "id": 5,
       "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "none"}},
       "targets": [
-        {"editorMode": "code", "expr": "(1 - (node_memory_MemAvailable_bytes{job=\"monitoring-openwrt-node-exporter\"} / node_memory_MemTotal_bytes{job=\"monitoring-openwrt-node-exporter\"})) * 100", "legendFormat": "{{instance}}", "refId": "A"}
+        {"editorMode": "code", "expr": "(1 - (node_memory_MemAvailable_bytes{job=\"monitoring-openwrt-node-exporter\"} / node_memory_MemTotal_bytes{job=\"monitoring-openwrt-node-exporter\"})) * 100", "legendFormat": "{% raw %}{{instance}}{% endraw %}", "refId": "A"}
       ],
       "title": "Memory Usage %",
       "type": "timeseries"
@@ -151,7 +151,7 @@
       "id": 6,
       "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "none"}},
       "targets": [
-        {"editorMode": "code", "expr": "node_load1{job=\"monitoring-openwrt-node-exporter\"}", "legendFormat": "{{instance}}", "refId": "A"}
+        {"editorMode": "code", "expr": "node_load1{job=\"monitoring-openwrt-node-exporter\"}", "legendFormat": "{% raw %}{{instance}}{% endraw %}", "refId": "A"}
       ],
       "title": "Load Average (1m)",
       "type": "timeseries"
@@ -166,7 +166,7 @@
       "id": 7,
       "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "none"}},
       "targets": [
-        {"editorMode": "code", "expr": "max by (instance) (node_thermal_zone_temp{job=\"monitoring-openwrt-node-exporter\"})", "legendFormat": "{{instance}}", "refId": "A"}
+        {"editorMode": "code", "expr": "max by (instance) (node_thermal_zone_temp{job=\"monitoring-openwrt-node-exporter\"})", "legendFormat": "{% raw %}{{instance}}{% endraw %}", "refId": "A"}
       ],
       "title": "Max Thermal Zone Temperature",
       "type": "timeseries"
