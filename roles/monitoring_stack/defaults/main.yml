@@ -14,6 +14,14 @@ monitoring_stack_alertmanager_port: 9093
 monitoring_stack_grafana_port: 3000
 monitoring_stack_loki_port: 3100
 
+# Address the dashboard endpoints (Grafana, Prometheus UI, Alertmanager UI,
+# Loki) bind to. Defaults to this host's tailnet IPv4 when the tailscale
+# role has populated `tailscale_self_ipv4`, otherwise loopback. Override
+# in group_vars / host_vars / fleet config (`monitoring.stack_bind_address`)
+# to expose publicly — only if you know what you are doing: the Grafana
+# admin password is rendered into the runtime compose file in plaintext.
+monitoring_stack_bind_address: "{{ (tailscale_self_ipv4 | default('') | trim) or '127.0.0.1' }}"
+
 monitoring_stack_grafana_admin_user: admin
 monitoring_stack_grafana_admin_password: ""
 monitoring_stack_scrape_fleet_agents: true

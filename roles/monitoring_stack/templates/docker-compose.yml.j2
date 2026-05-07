@@ -12,7 +12,7 @@ services:
       - ./prometheus/openwrt-alerts.yml:/etc/prometheus/openwrt-alerts.yml:ro
       - prometheus_data:/prometheus
     ports:
-      - "{{ monitoring_stack_prometheus_port }}:9090"
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_prometheus_port }}:9090"
     restart: unless-stopped
 
   alertmanager:
@@ -25,7 +25,7 @@ services:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager_data:/alertmanager
     ports:
-      - "{{ monitoring_stack_alertmanager_port }}:9093"
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_alertmanager_port }}:9093"
     restart: unless-stopped
 
   grafana:
@@ -40,7 +40,7 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
-      - "{{ monitoring_stack_grafana_port }}:3000"
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_grafana_port }}:3000"
     restart: unless-stopped
 
   loki:
@@ -51,7 +51,7 @@ services:
       - ./loki/config.yml:/etc/loki/config.yml:ro
       - loki_data:/loki
     ports:
-      - "{{ monitoring_stack_loki_port }}:3100"
+      - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_loki_port }}:3100"
     restart: unless-stopped
 
   promtail:
