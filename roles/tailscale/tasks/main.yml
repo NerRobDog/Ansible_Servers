@@ -303,17 +303,36 @@
 # `''` raises and aborts the retry loop in Ansible 2.20). The task is
 # allowed to fail loudly so a missed Running transition surfaces here, not
 # downstream as an opaque NoState assert.
+# `tailscale up` returns when the login API call is accepted, NOT when the
+# local daemon's BackendState transitions to Running. The daemon transition
+# NoState → NeedsLogin → Starting → Running can take several seconds on a
+# fresh host (session bootstrap, DERP map fetch, peer key exchange).
+# Reading status immediately after `tailscale up` produced spurious
+# NoState results and a hard-fail at the final assert (yusic-5a3, ae-us-1,
+# 2026-05-07). The dedicated wait tasks below poll until BackendState is
+# Running with a 15 × 2s budget. Each branch (server / OpenWrt) MUST use
+# its own register name: when a sibling task is skipped via `when:`,
+# Ansible writes a skip marker (`{changed: false, skipped: true}`) to its
+# register that has no `.stdout` attribute. A shared register name means
+# the OpenWrt skip stomps the server-host result the moment the OpenWrt
+# task is evaluated, and the next consumer of the register sees an empty
+# `stdout`, which the regex_search/from_json/default chain collapses to
+# `BackendState=NoState` — exactly the symptom that took down PRs #35
+# and #36 against ae-us-1. The `set_fact` capture below selects the
+# correct register per host without giving Ansible a chance to overwrite
+# either source register, because `set_fact` (unlike `register`) does not
+# write when its `when:` condition is false.
 - name: Wait for tailscale daemon to reach BackendState=Running on server hosts
   ansible.builtin.command: tailscale status --json
-  register: tailscale_wait_running_cmd
+  register: tailscale_wait_running_server_cmd
   changed_when: false
   retries: 15
   delay: 2
   until: >-
     (
       (
-        (tailscale_wait_running_cmd.stdout | default('') | trim | regex_search('^\{'))
-        | ternary((tailscale_wait_running_cmd.stdout | from_json), {})
+        (tailscale_wait_running_server_cmd.stdout | default('') | trim | regex_search('^\{'))
+        | ternary((tailscale_wait_running_server_cmd.stdout | from_json), {})
       ).BackendState | default('NoState')
     ) == 'Running'
   when:
@@ -323,15 +342,15 @@
 
 - name: Wait for tailscale daemon to reach BackendState=Running on OpenWrt
   ansible.builtin.raw: "tailscale status --json 2>/dev/null || true"
-  register: tailscale_wait_running_cmd
+  register: tailscale_wait_running_openwrt_cmd
   changed_when: false
   retries: 15
   delay: 2
   until: >-
     (
       (
-        (tailscale_wait_running_cmd.stdout | default('') | trim | regex_search('^\{'))
-        | ternary((tailscale_wait_running_cmd.stdout | from_json), {})
+        (tailscale_wait_running_openwrt_cmd.stdout | default('') | trim | regex_search('^\{'))
+        | ternary((tailscale_wait_running_openwrt_cmd.stdout | from_json), {})
       ).BackendState | default('NoState')
     ) == 'Running'
   when:
@@ -339,21 +358,22 @@
     - tailscale_is_openwrt | bool
   tags: [tailscale]
 
-- name: Read tailscale backend state after join on server hosts
-  ansible.builtin.command: tailscale status --json
-  register: tailscale_backend_state_after_cmd
-  changed_when: false
-  failed_when: false
+# Capture the last successful Wait stdout into a per-host fact via
+# `set_fact` (no skip-overwrite), so the Resolve task below sees a
+# stable, non-empty source regardless of which branch ran.
+- name: Capture tailscale post-join status stdout (server hosts)
+  ansible.builtin.set_fact:
+    tailscale_post_join_status_stdout: "{{ tailscale_wait_running_server_cmd.stdout | default('') }}"
+    tailscale_post_join_status_stderr: "{{ tailscale_wait_running_server_cmd.stderr | default('') }}"
   when:
     - tailscale_enabled | bool
     - not (tailscale_is_openwrt | bool)
   tags: [tailscale]
 
-- name: Read tailscale backend state after join on OpenWrt
-  ansible.builtin.raw: "tailscale status --json 2>/dev/null || true"
-  register: tailscale_backend_state_after_cmd
-  changed_when: false
-  failed_when: false
+- name: Capture tailscale post-join status stdout (OpenWrt)
+  ansible.builtin.set_fact:
+    tailscale_post_join_status_stdout: "{{ tailscale_wait_running_openwrt_cmd.stdout | default('') }}"
+    tailscale_post_join_status_stderr: "{{ tailscale_wait_running_openwrt_cmd.stderr | default('') }}"
   when:
     - tailscale_enabled | bool
     - tailscale_is_openwrt | bool
@@ -364,8 +384,8 @@
     tailscale_status_after_json: >-
       {{
         (
-          tailscale_backend_state_after_cmd.stdout | default('') | trim | regex_search('^\{')
-        ) | ternary((tailscale_backend_state_after_cmd.stdout | from_json), {})
+          tailscale_post_join_status_stdout | default('') | trim | regex_search('^\{')
+        ) | ternary((tailscale_post_join_status_stdout | from_json), {})
       }}
     # Inline BackendState extraction — same self-contained pattern as the
     # pre-join "Resolve tailscale status JSON + backend state" task. Ansible
@@ -376,8 +396,8 @@
       {{
         (
           (
-            tailscale_backend_state_after_cmd.stdout | default('') | trim | regex_search('^\{')
-          ) | ternary((tailscale_backend_state_after_cmd.stdout | from_json), {})
+            tailscale_post_join_status_stdout | default('') | trim | regex_search('^\{')
+          ) | ternary((tailscale_post_join_status_stdout | from_json), {})
         ).BackendState | default('NoState')
       }}
   changed_when: false
@@ -391,7 +411,7 @@
     fail_msg: >-
       Tailscale backend state is {{ tailscale_backend_state_after | default('unknown') }}
       on host {{ inventory_hostname }} after the post-join retry budget elapsed.
-      Last status stdout (truncated): {{ (tailscale_backend_state_after_cmd.stdout | default(''))[:500] }}
-      Last status stderr (truncated): {{ (tailscale_backend_state_after_cmd.stderr | default(''))[:500] }}
+      Last status stdout (truncated): {{ (tailscale_post_join_status_stdout | default(''))[:500] }}
+      Last status stderr (truncated): {{ (tailscale_post_join_status_stderr | default(''))[:500] }}
   when: tailscale_enabled | bool
   tags: [tailscale]
