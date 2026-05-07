@@ -290,11 +290,23 @@
     - not (tailscale_is_authenticated | bool)
   tags: [tailscale]
 
+# `tailscale up` returns when the login API call is accepted, NOT when the
+# daemon's BackendState transitions to Running. Daemon transitions
+# NoState → NeedsLogin → Starting → Running can take several seconds on a
+# fresh host (session bootstrap, DERP map fetch, peer key exchange). Reading
+# status immediately after `tailscale up` produced spurious NoState/Starting
+# results and a hard-fail at the final assert (yusic-5a3, ae-us-1, 2026-05-07).
+# Retry the status read until BackendState is Running, with 15 × 2s budget.
 - name: Read tailscale backend state after join on server hosts
   ansible.builtin.command: tailscale status --json
   register: tailscale_backend_state_after_cmd
   changed_when: false
   failed_when: false
+  retries: 15
+  delay: 2
+  until: >-
+    (tailscale_backend_state_after_cmd.stdout | default('') | trim | regex_search('^\{'))
+    and ((tailscale_backend_state_after_cmd.stdout | from_json).BackendState | default('NoState')) == 'Running'
   when:
     - tailscale_enabled | bool
     - not (tailscale_is_openwrt | bool)
@@ -305,6 +317,11 @@
   register: tailscale_backend_state_after_cmd
   changed_when: false
   failed_when: false
+  retries: 15
+  delay: 2
+  until: >-
+    (tailscale_backend_state_after_cmd.stdout | default('') | trim | regex_search('^\{'))
+    and ((tailscale_backend_state_after_cmd.stdout | from_json).BackendState | default('NoState')) == 'Running'
   when:
     - tailscale_enabled | bool
     - tailscale_is_openwrt | bool
@@ -341,6 +358,8 @@
       - tailscale_backend_state_after not in ['NoState', 'NeedsLogin', 'NeedsMachineAuth', 'Stopped', '']
     fail_msg: >-
       Tailscale backend state is {{ tailscale_backend_state_after | default('unknown') }}
-      on host {{ inventory_hostname }}.
+      on host {{ inventory_hostname }} after the post-join retry budget elapsed.
+      Last status stdout (truncated): {{ (tailscale_backend_state_after_cmd.stdout | default(''))[:500] }}
+      Last status stderr (truncated): {{ (tailscale_backend_state_after_cmd.stderr | default(''))[:500] }}
   when: tailscale_enabled | bool
   tags: [tailscale]
