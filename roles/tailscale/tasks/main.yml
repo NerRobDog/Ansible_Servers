@@ -415,3 +415,24 @@
       Last status stderr (truncated): {{ (tailscale_post_join_status_stderr | default(''))[:500] }}
   when: tailscale_enabled | bool
   tags: [tailscale]
+
+# Expose this host's tailnet IPv4 as a fact so downstream roles
+# (monitoring_stack, monitoring_agent, etc.) can bind their service
+# ports to the tailnet interface instead of 0.0.0.0. The IPv4 is
+# pulled from the post-join status JSON; if no IPv4 is found (IPv6-only
+# tailnet, exotic config) `tailscale_self_ipv4` stays empty and the
+# downstream defaults fall back to 127.0.0.1 rather than expose
+# anything publicly.
+- name: Expose tailscale IPv4 of this host as a fact
+  ansible.builtin.set_fact:
+    tailscale_self_ipv4: >-
+      {{
+        tailscale_status_after_json.TailscaleIPs
+        | default([])
+        | select('match', '^\d+\.\d+\.\d+\.\d+$')
+        | first
+        | default('')
+      }}
+  changed_when: false
+  when: tailscale_enabled | bool
+  tags: [tailscale]
