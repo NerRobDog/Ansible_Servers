@@ -1,0 +1,28 @@
+---
+- name: Assert no dead 100.105.91.72 relay sneaks back in
+  ansible.builtin.assert:
+    that:
+      - "'100.105.91.72' not in (yusic_stack_telegram_relay_urls | join(','))"
+    fail_msg: >-
+      yusic_stack_telegram_relay_urls still references the dead tailscale peer
+      100.105.91.72 (offline since 2026-04). Remove it before applying — see
+      yusic-pdh in beads.
+    success_msg: TELEGRAM_RELAY_URLS clear of dead host.
+
+- name: Ensure /opt/yusic exists
+  ansible.builtin.file:
+    path: "{{ yusic_stack_root }}"
+    state: directory
+    owner: "{{ yusic_stack_env_owner }}"
+    group: "{{ yusic_stack_env_group }}"
+    mode: '0755'
+
+- name: Render /opt/yusic/.env from template
+  ansible.builtin.template:
+    src: yusic.env.j2
+    dest: "{{ yusic_stack_env_path }}"
+    owner: "{{ yusic_stack_env_owner }}"
+    group: "{{ yusic_stack_env_group }}"
+    mode: "{{ yusic_stack_env_mode }}"
+    backup: "{{ yusic_stack_keep_backup }}"
+  notify: yusic_stack restart compose

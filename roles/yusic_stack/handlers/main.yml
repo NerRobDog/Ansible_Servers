@@ -1,0 +1,6 @@
+---
+- name: yusic_stack restart compose
+  ansible.builtin.command:
+    cmd: docker compose -f {{ yusic_stack_root }}/docker-compose.release.yml --env-file {{ yusic_stack_env_path }} up -d --no-deps miniapp-api telegram-cdn-relay
+    chdir: "{{ yusic_stack_root }}"
+  changed_when: true

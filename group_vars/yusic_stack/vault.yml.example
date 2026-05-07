@@ -1,0 +1,22 @@
+---
+# Operator workflow:
+#   1. cp group_vars/yusic_stack/vault.yml.example group_vars/yusic_stack/vault.yml
+#   2. Replace every empty string below with the live value from
+#      /opt/yusic/.env on polite (89.23.98.20).
+#   3. Encrypt the file in place — only the encrypted form is safe near git:
+#
+#        ansible-vault encrypt --vault-password-file ~/.ansible-vault-pass \
+#            group_vars/yusic_stack/vault.yml
+#
+# `vault.yml` is .gitignored; this `.example` template (with empty values)
+# is the only thing that lands in the repo.
+
+vault_yusic_stack_bot_token: ""
+vault_yusic_stack_api_id: ""
+vault_yusic_stack_api_hash: ""
+vault_yusic_stack_yandex_token: ""
+vault_yusic_stack_provider_token: ""
+vault_yusic_stack_soundcloud_provider_token: ""
+vault_yusic_stack_miniapp_secret_key: ""
+vault_yusic_stack_redis_password: ""
+vault_yusic_stack_cache_bot_token: ""

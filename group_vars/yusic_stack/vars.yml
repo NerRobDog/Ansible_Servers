@@ -1,0 +1,34 @@
+---
+# Public (non-secret) overrides for the yusic_stack role.
+# Secrets live in vault.yml (encrypted with ansible-vault).
+#
+# Fill these from the live /opt/yusic/.env on polite (89.23.98.20) before
+# applying. Do NOT paste secret values here — those go in vault.yml.
+
+yusic_stack_inline_cache_chat_id: ""        # e.g. -1003805167241
+yusic_stack_enabled_providers: yandex,spotify,soundcloud
+yusic_stack_miniapp_url: ""                  # https://...
+yusic_stack_miniapp_enabled_providers: soundcloud,yandex
+yusic_stack_soundcloud_service_url_primary: ""
+yusic_stack_soundcloud_service_url_fallback: ""
+yusic_stack_soundcloud_fallback_policy: region_lock_only
+yusic_stack_soundcloud_fallback_timeout_seconds: 120
+yusic_stack_redis_bind_ip: 127.0.0.1
+yusic_stack_redis_port: 6379
+yusic_stack_distributed_processing_enabled: 1
+yusic_stack_coordinator_url: http://download-coordinator:8080
+yusic_stack_coordinator_timeout_seconds: 180
+yusic_stack_worker_id: ""
+yusic_stack_worker_tags: ""
+yusic_stack_worker_max_concurrent_jobs: 2
+yusic_stack_telegram_proxy_url: ""
+yusic_stack_soundcloud_proxy_url: ""
+
+# === The yusic-pdh fix ===
+yusic_stack_telegram_relay_urls:
+  - http://5.42.127.98:8091
+yusic_stack_telegram_relay_mode: relay_first
+yusic_stack_telegram_relay_total_budget_ms: 12000
+yusic_stack_telegram_relay_per_attempt_timeout_ms: 12000
+yusic_stack_telegram_relay_dead_ttl_seconds: 30
+yusic_stack_telegram_relay_sticky_ttl_seconds: 300

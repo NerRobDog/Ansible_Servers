@@ -15,3 +15,7 @@ openwrt-fleet.yml
 openwrt-fleet.yaml
 VLESS_TCP.txt
 VLESS_with_nginx.txt
+
+# Operator-filled vault (encrypted with ansible-vault). Only the .example
+# template is committed.
+group_vars/yusic_stack/vault.yml
