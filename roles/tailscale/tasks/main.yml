@@ -291,22 +291,59 @@
   tags: [tailscale]
 
 # `tailscale up` returns when the login API call is accepted, NOT when the
-# daemon's BackendState transitions to Running. Daemon transitions
+# local daemon's BackendState transitions to Running. The daemon transition
 # NoState → NeedsLogin → Starting → Running can take several seconds on a
-# fresh host (session bootstrap, DERP map fetch, peer key exchange). Reading
-# status immediately after `tailscale up` produced spurious NoState/Starting
-# results and a hard-fail at the final assert (yusic-5a3, ae-us-1, 2026-05-07).
-# Retry the status read until BackendState is Running, with 15 × 2s budget.
+# fresh host (session bootstrap, DERP map fetch, peer key exchange).
+# Reading status immediately after `tailscale up` produced spurious
+# NoState results and a hard-fail at the final assert (yusic-5a3, ae-us-1,
+# 2026-05-07). The dedicated wait task below polls until BackendState is
+# Running with a 15 × 2s budget. It uses a private register and the same
+# regex_search/from_json ternary pattern as the Resolve tasks below to keep
+# the until expression safe against an empty stdout (a bare `from_json` on
+# `''` raises and aborts the retry loop in Ansible 2.20). The task is
+# allowed to fail loudly so a missed Running transition surfaces here, not
+# downstream as an opaque NoState assert.
+- name: Wait for tailscale daemon to reach BackendState=Running on server hosts
+  ansible.builtin.command: tailscale status --json
+  register: tailscale_wait_running_cmd
+  changed_when: false
+  retries: 15
+  delay: 2
+  until: >-
+    (
+      (
+        (tailscale_wait_running_cmd.stdout | default('') | trim | regex_search('^\{'))
+        | ternary((tailscale_wait_running_cmd.stdout | from_json), {})
+      ).BackendState | default('NoState')
+    ) == 'Running'
+  when:
+    - tailscale_enabled | bool
+    - not (tailscale_is_openwrt | bool)
+  tags: [tailscale]
+
+- name: Wait for tailscale daemon to reach BackendState=Running on OpenWrt
+  ansible.builtin.raw: "tailscale status --json 2>/dev/null || true"
+  register: tailscale_wait_running_cmd
+  changed_when: false
+  retries: 15
+  delay: 2
+  until: >-
+    (
+      (
+        (tailscale_wait_running_cmd.stdout | default('') | trim | regex_search('^\{'))
+        | ternary((tailscale_wait_running_cmd.stdout | from_json), {})
+      ).BackendState | default('NoState')
+    ) == 'Running'
+  when:
+    - tailscale_enabled | bool
+    - tailscale_is_openwrt | bool
+  tags: [tailscale]
+
 - name: Read tailscale backend state after join on server hosts
   ansible.builtin.command: tailscale status --json
   register: tailscale_backend_state_after_cmd
   changed_when: false
   failed_when: false
-  retries: 15
-  delay: 2
-  until: >-
-    (tailscale_backend_state_after_cmd.stdout | default('') | trim | regex_search('^\{'))
-    and ((tailscale_backend_state_after_cmd.stdout | from_json).BackendState | default('NoState')) == 'Running'
   when:
     - tailscale_enabled | bool
     - not (tailscale_is_openwrt | bool)
@@ -317,11 +354,6 @@
   register: tailscale_backend_state_after_cmd
   changed_when: false
   failed_when: false
-  retries: 15
-  delay: 2
-  until: >-
-    (tailscale_backend_state_after_cmd.stdout | default('') | trim | regex_search('^\{'))
-    and ((tailscale_backend_state_after_cmd.stdout | from_json).BackendState | default('NoState')) == 'Running'
   when:
     - tailscale_enabled | bool
     - tailscale_is_openwrt | bool
