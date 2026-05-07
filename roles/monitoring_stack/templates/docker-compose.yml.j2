@@ -13,6 +13,9 @@ services:
       - prometheus_data:/prometheus
     ports:
       - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_prometheus_port }}:9090"
+{% if monitoring_stack_bind_address != '127.0.0.1' %}
+      - "127.0.0.1:{{ monitoring_stack_prometheus_port }}:9090"
+{% endif %}
     restart: unless-stopped
 
   alertmanager:
@@ -26,6 +29,9 @@ services:
       - alertmanager_data:/alertmanager
     ports:
       - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_alertmanager_port }}:9093"
+{% if monitoring_stack_bind_address != '127.0.0.1' %}
+      - "127.0.0.1:{{ monitoring_stack_alertmanager_port }}:9093"
+{% endif %}
     restart: unless-stopped
 
   grafana:
@@ -41,6 +47,9 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
       - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_grafana_port }}:3000"
+{% if monitoring_stack_bind_address != '127.0.0.1' %}
+      - "127.0.0.1:{{ monitoring_stack_grafana_port }}:3000"
+{% endif %}
     restart: unless-stopped
 
   loki:
@@ -52,6 +61,9 @@ services:
       - loki_data:/loki
     ports:
       - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_loki_port }}:3100"
+{% if monitoring_stack_bind_address != '127.0.0.1' %}
+      - "127.0.0.1:{{ monitoring_stack_loki_port }}:3100"
+{% endif %}
     restart: unless-stopped
 
   promtail:
