@@ -32,6 +32,10 @@ yusic_worker_pull_proxy_no: "localhost,127.0.0.1,::1"
 yusic_worker_pull_ghcr_username: ""
 yusic_worker_pull_ghcr_token: ""
 
-# Pre-deploy hygiene: minimum free disk required (in MB) before pull. Image
-# is ~2 GB; leaving 1.5 GB headroom for overlayfs extract.
-yusic_worker_pull_min_free_disk_mb: 3500
+# Pre-deploy hygiene: minimum free disk required (in MB) before pull.
+# Slim worker image (post PR yusic#162/#167) is ~466 MB compressed, ~700 MB
+# extracted. 1500 MB threshold = ~700 MB for image + ~800 MB safety for
+# overlayfs intermediate layers and pip-cache during selfcheck.
+# Was 3500 MB when image was 3.96 GB pre-slim; chronic 10 GB VPS hosts
+# (dh-neth-2, dh-germ-1) blocked on the old threshold even after cleanup.
+yusic_worker_pull_min_free_disk_mb: 1500
