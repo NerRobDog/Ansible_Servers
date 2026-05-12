@@ -1,0 +1,21 @@
+---
+# Renders /opt/yusic/.env on the polite host and bounces the docker-compose
+# stack. See roles/yusic_stack/README.md for migration phases and prerequisites.
+#
+# Dry run:
+#     ansible-playbook -i inventory/yusic-stack.ini playbook-yusic-stack.yml \
+#         --check --diff
+#
+# Apply (after Phase 2 in Yusic_bot deploy.yml has merged):
+#     ansible-playbook -i inventory/yusic-stack.ini playbook-yusic-stack.yml
+
+- name: Render /opt/yusic/.env from inventory
+  hosts: yusic_stack
+  become: true
+  gather_facts: false
+  vars_files:
+    - group_vars/yusic_stack/vars.yml
+    # vault.yml is operator-filled and .gitignored — see vault.yml.example.
+    - group_vars/yusic_stack/vault.yml
+  roles:
+    - role: yusic_stack

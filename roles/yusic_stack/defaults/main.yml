@@ -1,0 +1,72 @@
+---
+# yusic_stack — main yusic application stack (miniapp-api consumer of TELEGRAM_RELAY_URLS).
+# Renders /opt/yusic/.env from inventory, replacing the GitHub-Secret-driven scp in
+# Yusic_bot/.github/workflows/deploy.yml.
+#
+# Owner switch: the legacy host has /opt/yusic/.env owned by `ernestsh:ernestsh 0600`.
+# This role normalises ownership to the service user (`deploy:deploy 0640`) — confirm the
+# docker-compose stack runs as `deploy` BEFORE first apply (see README.md).
+
+yusic_stack_root: /opt/yusic
+yusic_stack_env_path: "{{ yusic_stack_root }}/.env"
+yusic_stack_env_owner: deploy
+yusic_stack_env_group: deploy
+yusic_stack_env_mode: '0640'
+
+# --- TELEGRAM RELAY (the bug yusic-pdh fix) -----------------------------------
+# Live local relay only. Adding a peer here requires confirming it is online via
+# `tailscale status` AND reachable from polite (89.23.98.20).
+yusic_stack_telegram_relay_urls:
+  - http://5.42.127.98:8091
+yusic_stack_telegram_relay_mode: relay_first
+yusic_stack_telegram_relay_total_budget_ms: 12000
+yusic_stack_telegram_relay_per_attempt_timeout_ms: 12000
+yusic_stack_telegram_relay_dead_ttl_seconds: 30
+yusic_stack_telegram_relay_sticky_ttl_seconds: 300
+
+# --- TELEGRAM core ------------------------------------------------------------
+yusic_stack_bot_token: "{{ vault_yusic_stack_bot_token }}"
+yusic_stack_api_id: "{{ vault_yusic_stack_api_id }}"
+yusic_stack_api_hash: "{{ vault_yusic_stack_api_hash }}"
+yusic_stack_inline_cache_chat_id: ""
+yusic_stack_enabled_providers: yandex,spotify,soundcloud
+
+# --- Mini App ------------------------------------------------------------------
+yusic_stack_miniapp_url: ""
+yusic_stack_miniapp_secret_key: "{{ vault_yusic_stack_miniapp_secret_key }}"
+yusic_stack_miniapp_enabled_providers: soundcloud,yandex
+
+# --- SoundCloud ----------------------------------------------------------------
+yusic_stack_soundcloud_service_url_primary: ""
+yusic_stack_soundcloud_service_url_fallback: ""
+yusic_stack_soundcloud_fallback_policy: region_lock_only
+yusic_stack_soundcloud_provider_token: "{{ vault_yusic_stack_soundcloud_provider_token }}"
+yusic_stack_soundcloud_fallback_timeout_seconds: 120
+
+# --- Provider auth -------------------------------------------------------------
+yusic_stack_provider_token: "{{ vault_yusic_stack_provider_token }}"
+yusic_stack_yandex_token: "{{ vault_yusic_stack_yandex_token }}"
+
+# --- Redis ---------------------------------------------------------------------
+yusic_stack_redis_bind_ip: 127.0.0.1
+yusic_stack_redis_port: 6379
+yusic_stack_redis_password: "{{ vault_yusic_stack_redis_password }}"
+# REDIS_URL embeds the password — render via template, do not set here.
+
+# --- Distributed processing ----------------------------------------------------
+yusic_stack_distributed_processing_enabled: 1
+yusic_stack_coordinator_url: http://download-coordinator:8080
+yusic_stack_coordinator_timeout_seconds: 180
+yusic_stack_worker_id: ""
+yusic_stack_worker_tags: ""
+yusic_stack_worker_max_concurrent_jobs: 2
+
+# --- Outbound proxies ----------------------------------------------------------
+yusic_stack_telegram_proxy_url: ""
+yusic_stack_soundcloud_proxy_url: ""
+
+# --- Cache bot -----------------------------------------------------------------
+yusic_stack_cache_bot_token: "{{ vault_yusic_stack_cache_bot_token }}"
+
+# Backup behaviour: keep ONE backup before write (Ansible's `backup: yes`).
+yusic_stack_keep_backup: true
