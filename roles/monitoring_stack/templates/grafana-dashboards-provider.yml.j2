@@ -8,4 +8,15 @@ providers:
     disableDeletion: false
     editable: true
     options:
-      path: /var/lib/grafana/dashboards
+      path: /var/lib/grafana/dashboards/openwrt
+
+  # YUSIC dashboards — provisioned from monitoring_stack/dashboards/build/*.json
+  # via Ansible copy (not template — Jinja-on-JSON collisions avoided).
+  - name: YUSIC
+    orgId: 1
+    folder: YUSIC
+    type: file
+    disableDeletion: false
+    editable: false
+    options:
+      path: /var/lib/grafana/dashboards/yusic
