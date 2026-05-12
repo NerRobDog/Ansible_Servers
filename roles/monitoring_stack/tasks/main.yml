@@ -35,6 +35,8 @@
     - "{{ monitoring_stack_install_path }}/grafana/provisioning/datasources"
     - "{{ monitoring_stack_install_path }}/grafana/provisioning/dashboards"
     - "{{ monitoring_stack_install_path }}/grafana/dashboards"
+    - "{{ monitoring_stack_install_path }}/grafana/dashboards/openwrt"
+    - "{{ monitoring_stack_install_path }}/grafana/dashboards/yusic"
   tags: [monitoring, metrics, grafana, prometheus, loki]
 
 - name: Build monitoring scrape host list from fleet config
@@ -107,13 +109,23 @@
       dest: "{{ monitoring_stack_install_path }}/grafana/provisioning/dashboards/dashboards.yml"
       mode: "0644"
     - src: grafana-dashboard-openwrt.json.j2
-      dest: "{{ monitoring_stack_install_path }}/grafana/dashboards/openwrt-fleet-overview.json"
+      dest: "{{ monitoring_stack_install_path }}/grafana/dashboards/openwrt/openwrt-fleet-overview.json"
       mode: "0644"
     - src: docker-compose.yml.j2
       dest: "{{ monitoring_stack_install_path }}/docker-compose.yml"
       mode: "0644"
   notify: Restart monitoring stack
   tags: [monitoring, metrics, grafana, prometheus, loki]
+
+- name: Copy YUSIC dashboard JSON files (built from jsonnet)
+  ansible.builtin.copy:
+    src: "{{ role_path }}/dashboards/build/"
+    dest: "{{ monitoring_stack_install_path }}/grafana/dashboards/yusic/"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart monitoring stack
+  tags: [monitoring, metrics, grafana, yusic]
 
 - name: Ensure monitoring stack is running
   community.docker.docker_compose_v2:
