@@ -1,0 +1,10 @@
+---
+- name: Restart obico compose stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ obico_install_dir }}"
+    files:
+      - docker-compose.yml
+      - docker-compose.override.yml
+    state: present
+    recreate: always
+  listen: obico_recreate

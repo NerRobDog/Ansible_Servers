@@ -1,0 +1,219 @@
+---
+- name: Validate rclone_serve settings
+  ansible.builtin.assert:
+    that:
+      - rclone_serve_version | length > 0
+      - rclone_serve_user | length > 0
+      - rclone_serve_group | length > 0
+      - rclone_serve_config is string
+      - rclone_serve_instances is iterable
+      - rclone_serve_instances is not string
+      - >-
+        rclone_serve_instances | rejectattr('name', 'defined') | list | length == 0
+      - >-
+        rclone_serve_instances | rejectattr('protocol', 'defined') | list | length == 0
+      - >-
+        rclone_serve_instances | rejectattr('remote', 'defined') | list | length == 0
+      - >-
+        rclone_serve_instances | rejectattr('port', 'defined') | list | length == 0
+    fail_msg: >-
+      rclone_serve_instances entries must each have name, protocol, remote, port.
+  when: rclone_serve_enabled | bool
+  tags: [rclone_serve]
+
+- name: Validate supported OS for rclone_serve role
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+    fail_msg: "rclone_serve role currently supports Debian/Ubuntu hosts only."
+  when: rclone_serve_enabled | bool
+  tags: [rclone_serve]
+
+- name: Resolve rclone arch
+  ansible.builtin.set_fact:
+    rclone_serve_arch: "{{ rclone_serve_arch_map[ansible_architecture] }}"
+  when: rclone_serve_enabled | bool
+  tags: [rclone_serve]
+
+- name: Resolve rclone release URL
+  ansible.builtin.set_fact:
+    rclone_serve_release_url: "{{ rclone_serve_release_url_template }}"
+  when: rclone_serve_enabled | bool
+  tags: [rclone_serve]
+
+- name: Resolve expected sha256 for current arch
+  ansible.builtin.set_fact:
+    rclone_serve_expected_sha256: >-
+      {{
+        rclone_serve_sha256_amd64 if rclone_serve_arch == 'amd64'
+        else rclone_serve_sha256_arm64
+      }}
+  when: rclone_serve_enabled | bool
+  tags: [rclone_serve]
+
+- name: Install rclone_serve apt prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - unzip
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: rclone_serve_enabled | bool
+  tags: [rclone_serve]
+
+- name: Read installed rclone version (if any)
+  ansible.builtin.command: "{{ rclone_serve_install_path }} version"
+  register: rclone_serve_version_cmd
+  changed_when: false
+  failed_when: false
+  when: rclone_serve_enabled | bool
+  tags: [rclone_serve]
+
+- name: Decide whether rclone needs (re)installation
+  ansible.builtin.set_fact:
+    rclone_serve_install_required: >-
+      {{
+        (rclone_serve_version_cmd.rc | default(1)) != 0
+        or ('rclone v' ~ rclone_serve_version) not in (rclone_serve_version_cmd.stdout | default(''))
+      }}
+  changed_when: false
+  when: rclone_serve_enabled | bool
+  tags: [rclone_serve]
+
+- name: Download rclone release archive
+  ansible.builtin.get_url:
+    url: "{{ rclone_serve_release_url }}"
+    dest: "/tmp/rclone-v{{ rclone_serve_version }}-linux-{{ rclone_serve_arch }}.zip"
+    checksum: "{{ ('sha256:' ~ rclone_serve_expected_sha256) if (rclone_serve_expected_sha256 | length > 0) else omit }}"
+    mode: "0644"
+    force: true
+  when:
+    - rclone_serve_enabled | bool
+    - rclone_serve_install_required | bool
+  tags: [rclone_serve]
+
+- name: Unpack rclone release archive
+  ansible.builtin.unarchive:
+    src: "/tmp/rclone-v{{ rclone_serve_version }}-linux-{{ rclone_serve_arch }}.zip"
+    dest: /tmp
+    remote_src: true
+    creates: "/tmp/rclone-v{{ rclone_serve_version }}-linux-{{ rclone_serve_arch }}/rclone"
+  when:
+    - rclone_serve_enabled | bool
+    - rclone_serve_install_required | bool
+  tags: [rclone_serve]
+
+- name: Install rclone binary
+  ansible.builtin.copy:
+    src: "/tmp/rclone-v{{ rclone_serve_version }}-linux-{{ rclone_serve_arch }}/rclone"
+    dest: "{{ rclone_serve_install_path }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  notify: rclone_serve_restart_instances
+  when:
+    - rclone_serve_enabled | bool
+    - rclone_serve_install_required | bool
+  tags: [rclone_serve]
+
+- name: Clean up rclone release artifacts
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/rclone-v{{ rclone_serve_version }}-linux-{{ rclone_serve_arch }}.zip"
+    - "/tmp/rclone-v{{ rclone_serve_version }}-linux-{{ rclone_serve_arch }}"
+  when:
+    - rclone_serve_enabled | bool
+    - rclone_serve_install_required | bool
+  tags: [rclone_serve]
+
+- name: Ensure rclone config directory exists
+  ansible.builtin.file:
+    path: "{{ rclone_serve_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ rclone_serve_group }}"
+    mode: "0750"
+  when: rclone_serve_enabled | bool
+  tags: [rclone_serve]
+
+- name: Ensure rclone instances env directory exists
+  ansible.builtin.file:
+    path: "{{ rclone_serve_env_dir }}"
+    state: directory
+    owner: root
+    group: "{{ rclone_serve_group }}"
+    mode: "0750"
+  when: rclone_serve_enabled | bool
+  tags: [rclone_serve]
+
+- name: Ensure rclone log directory exists
+  ansible.builtin.file:
+    path: "{{ rclone_serve_log_dir }}"
+    state: directory
+    owner: "{{ rclone_serve_user }}"
+    group: "{{ rclone_serve_group }}"
+    mode: "0750"
+  when: rclone_serve_enabled | bool
+  tags: [rclone_serve]
+
+- name: Render rclone.conf
+  ansible.builtin.copy:
+    content: "{{ rclone_serve_config }}"
+    dest: "{{ rclone_serve_config_path }}"
+    owner: root
+    group: "{{ rclone_serve_group }}"
+    mode: "0640"
+  when:
+    - rclone_serve_enabled | bool
+    - rclone_serve_config | length > 0
+  notify: rclone_serve_restart_instances
+  no_log: true
+  tags: [rclone_serve]
+
+- name: Install rclone-serve@.service template unit
+  ansible.builtin.template:
+    src: rclone-serve@.service.j2
+    dest: "{{ rclone_serve_systemd_template_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: rclone_serve_systemd_reload
+  when: rclone_serve_enabled | bool
+  tags: [rclone_serve]
+
+- name: Render per-instance EnvironmentFiles
+  ansible.builtin.template:
+    src: instance.env.j2
+    dest: "{{ rclone_serve_env_dir }}/{{ instance.name }}.env"
+    owner: root
+    group: "{{ rclone_serve_group }}"
+    mode: "0640"
+  loop: "{{ rclone_serve_instances }}"
+  loop_control:
+    label: "{{ instance.name }}"
+    loop_var: instance
+  notify: rclone_serve_restart_instances
+  no_log: true
+  when: rclone_serve_enabled | bool
+  tags: [rclone_serve]
+
+- name: Flush handlers before enabling instances
+  ansible.builtin.meta: flush_handlers
+  when: rclone_serve_enabled | bool
+  tags: [rclone_serve]
+
+- name: Enable + start rclone serve instances
+  ansible.builtin.systemd:
+    name: "rclone-serve@{{ item.name }}.service"
+    state: started
+    enabled: true
+  loop: "{{ rclone_serve_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: rclone_serve_enabled | bool
+  tags: [rclone_serve]

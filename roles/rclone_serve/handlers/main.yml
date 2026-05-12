@@ -1,0 +1,14 @@
+---
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen: rclone_serve_systemd_reload
+
+- name: Restart rclone serve instances
+  ansible.builtin.systemd:
+    name: "rclone-serve@{{ item.name }}.service"
+    state: restarted
+  loop: "{{ rclone_serve_instances }}"
+  loop_control:
+    label: "{{ item.name }}"
+  listen: rclone_serve_restart_instances

@@ -1,0 +1,208 @@
+---
+- name: Validate zerotier settings
+  ansible.builtin.assert:
+    that:
+      - zerotier_state == "present"
+      - zerotier_networks is iterable
+      - zerotier_networks is not string
+      - zerotier_networks | length > 0
+      - zerotier_networks | reject('match', '^[0-9a-fA-F]{16}$') | list | length == 0
+    fail_msg: >-
+      zerotier_networks must be a non-empty list of 16-hex-char network IDs.
+      Supported zerotier_state: present.
+  when: zerotier_enabled | bool
+  tags: [zerotier]
+
+- name: Validate supported OS for zerotier role
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+    fail_msg: "zerotier role currently supports Debian/Ubuntu hosts only."
+  when: zerotier_enabled | bool
+  tags: [zerotier]
+
+- name: Install zerotier prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: zerotier_enabled | bool
+  tags: [zerotier]
+
+- name: Ensure apt keyring directory exists
+  ansible.builtin.file:
+    path: /usr/share/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: zerotier_enabled | bool
+  tags: [zerotier]
+
+- name: Install zerotier apt keyring
+  ansible.builtin.get_url:
+    url: "{{ zerotier_apt_key_url }}"
+    dest: "{{ zerotier_apt_keyring_path }}.asc"
+    owner: root
+    group: root
+    mode: "0644"
+    force: true
+  when: zerotier_enabled | bool
+  tags: [zerotier]
+
+- name: Convert zerotier apt key to dearmored form
+  ansible.builtin.command:
+    cmd: gpg --batch --yes --dearmor -o {{ zerotier_apt_keyring_path }} {{ zerotier_apt_keyring_path }}.asc
+    creates: "{{ zerotier_apt_keyring_path }}"
+  when: zerotier_enabled | bool
+  tags: [zerotier]
+
+- name: Configure zerotier apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [signed-by={{ zerotier_apt_keyring_path }}]
+      {{ zerotier_apt_repo_url }} {{ ansible_distribution_release }} main
+    filename: zerotier
+    state: present
+    update_cache: true
+  when: zerotier_enabled | bool
+  tags: [zerotier]
+
+- name: Install zerotier package
+  ansible.builtin.apt:
+    name: "{{ zerotier_apt_package }}"
+    state: present
+  when: zerotier_enabled | bool
+  tags: [zerotier]
+
+- name: Enable and start zerotier service
+  ansible.builtin.systemd:
+    name: "{{ zerotier_systemd_service }}"
+    state: started
+    enabled: true
+  when: zerotier_enabled | bool
+  tags: [zerotier]
+
+- name: Read currently joined zerotier networks
+  ansible.builtin.command: zerotier-cli -j listnetworks
+  register: zerotier_listnetworks_cmd
+  changed_when: false
+  when: zerotier_enabled | bool
+  tags: [zerotier]
+
+- name: Resolve set of currently-joined network IDs
+  ansible.builtin.set_fact:
+    zerotier_joined_ids: >-
+      {{
+        (zerotier_listnetworks_cmd.stdout | from_json)
+          | map(attribute='nwid') | list
+      }}
+  changed_when: false
+  when: zerotier_enabled | bool
+  tags: [zerotier]
+
+- name: Join zerotier networks
+  ansible.builtin.command: "zerotier-cli join {{ item }}"
+  loop: "{{ zerotier_networks }}"
+  when:
+    - zerotier_enabled | bool
+    - item not in zerotier_joined_ids
+  register: zerotier_join_cmd
+  changed_when: zerotier_join_cmd.rc == 0
+  tags: [zerotier]
+
+- name: Flatten per-network flags into [nwid, flag, value] triples
+  ansible.builtin.set_fact:
+    zerotier_flag_triples: >-
+      {{
+        zerotier_flag_triples | default([])
+        + (item.value | default({}) | dict2items
+            | map('combine', {'nwid': item.key})
+            | list)
+      }}
+  loop: "{{ zerotier_network_flags | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when:
+    - zerotier_enabled | bool
+    - zerotier_network_flags | default({}) | length > 0
+  changed_when: false
+  tags: [zerotier]
+
+- name: Apply per-network flags
+  ansible.builtin.command: "zerotier-cli set {{ item.nwid }} {{ item.key }}={{ item.value }}"
+  loop: "{{ zerotier_flag_triples | default([]) }}"
+  loop_control:
+    label: "{{ item.nwid }}:{{ item.key }}={{ item.value }}"
+  when:
+    - zerotier_enabled | bool
+    - zerotier_flag_triples | default([]) | length > 0
+  changed_when: false  # zerotier-cli set is idempotent at runtime
+  tags: [zerotier]
+
+- name: Read zerotier node identity
+  ansible.builtin.command: zerotier-cli -j info
+  register: zerotier_info_cmd
+  changed_when: false
+  when: zerotier_enabled | bool
+  tags: [zerotier]
+
+- name: Resolve zerotier node address
+  ansible.builtin.set_fact:
+    zerotier_node_address: "{{ (zerotier_info_cmd.stdout | from_json).address }}"
+  changed_when: false
+  when: zerotier_enabled | bool
+  tags: [zerotier]
+
+- name: Read zerotier Central API token from environment
+  ansible.builtin.set_fact:
+    zerotier_api_token_value: "{{ lookup('env', zerotier_api_token_env) | default('', true) | trim }}"
+  no_log: true
+  changed_when: false
+  when: zerotier_enabled | bool
+  tags: [zerotier]
+
+- name: Authorize this node in Central for each joined network
+  ansible.builtin.uri:
+    url: "https://api.zerotier.com/api/v1/network/{{ item }}/member/{{ zerotier_node_address }}"
+    method: POST
+    headers:
+      Authorization: "token {{ zerotier_api_token_value }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      name: "{{ zerotier_member_name }}"
+      config:
+        authorized: true
+    status_code: [200]
+  loop: "{{ zerotier_networks }}"
+  no_log: true
+  when:
+    - zerotier_enabled | bool
+    - zerotier_api_token_value | length > 0
+  tags: [zerotier]
+
+# Daemon resyncs config from Central after authorize; status flips
+# REQUESTING_CONFIGURATION -> OK within a few seconds. Poll until all
+# requested networks are OK or the budget runs out.
+- name: Wait for all zerotier networks to reach OK status
+  ansible.builtin.command: zerotier-cli -j listnetworks
+  register: zerotier_listnetworks_after_cmd
+  changed_when: false
+  retries: 12
+  delay: 5
+  until: >-
+    (zerotier_listnetworks_after_cmd.stdout | default('[]') | from_json
+      | selectattr('nwid', 'in', zerotier_networks)
+      | rejectattr('status', 'equalto', 'OK')
+      | list | length == 0)
+    and
+    ((zerotier_listnetworks_after_cmd.stdout | default('[]') | from_json
+      | selectattr('nwid', 'in', zerotier_networks)
+      | list | length) == (zerotier_networks | length))
+  when: zerotier_enabled | bool
+  tags: [zerotier]

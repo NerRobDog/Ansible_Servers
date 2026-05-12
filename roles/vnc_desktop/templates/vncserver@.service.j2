@@ -1,0 +1,22 @@
+[Unit]
+Description=TigerVNC server (display %i, {{ vnc_desktop_user }} session)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# tigervncserver wraps Xvnc + xstartup + writes a PID file. We use it via
+# `-fg` so systemd owns the process directly.
+ExecStart=/usr/bin/tigervncserver -fg :{{ vnc_desktop_display }} \
+    -localhost no \
+    -geometry {{ vnc_desktop_geometry }} \
+    -depth {{ vnc_desktop_color_depth }} \
+    -SecurityTypes VncAuth \
+    -PasswordFile {{ vnc_desktop_passwd_file }} \
+    -xstartup {{ vnc_desktop_xstartup_file }}
+ExecStop=/usr/bin/tigervncserver -kill :{{ vnc_desktop_display }}
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

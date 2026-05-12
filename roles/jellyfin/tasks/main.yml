@@ -1,0 +1,138 @@
+---
+- name: Validate jellyfin settings
+  ansible.builtin.assert:
+    that:
+      - jellyfin_image | length > 0
+      - jellyfin_user | length > 0
+      - jellyfin_libraries is iterable
+      - jellyfin_libraries is not string
+    fail_msg: "Invalid jellyfin role settings."
+  when: jellyfin_enabled | bool
+  tags: [jellyfin]
+
+- name: Validate supported OS for jellyfin role
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+    fail_msg: "jellyfin role currently supports Debian/Ubuntu hosts only."
+  when: jellyfin_enabled | bool
+  tags: [jellyfin]
+
+- name: Resolve jellyfin uid/gid
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ jellyfin_user }}"
+  when: jellyfin_enabled | bool
+  tags: [jellyfin]
+
+- name: Resolve jellyfin uid + gid facts
+  ansible.builtin.set_fact:
+    jellyfin_uid: "{{ getent_passwd[jellyfin_user][1] }}"
+    jellyfin_gid: "{{ getent_passwd[jellyfin_user][2] }}"
+  when: jellyfin_enabled | bool
+  tags: [jellyfin]
+
+# QSV needs the in-container user to be in the host's render+video groups.
+# We discover their numeric GIDs and pass via group_add — names differ across
+# distros (render is sometimes absent, sometimes 109/110/989).
+- name: Resolve render group gid (for QuickSync passthrough)
+  ansible.builtin.getent:
+    database: group
+    key: render
+  register: jellyfin_render_grp
+  failed_when: false
+  when:
+    - jellyfin_enabled | bool
+    - jellyfin_enable_qsv | bool
+  tags: [jellyfin]
+
+- name: Resolve video group gid
+  ansible.builtin.getent:
+    database: group
+    key: video
+  register: jellyfin_video_grp
+  failed_when: false
+  when:
+    - jellyfin_enabled | bool
+    - jellyfin_enable_qsv | bool
+  tags: [jellyfin]
+
+- name: Resolve render + video GID facts
+  ansible.builtin.set_fact:
+    render_gid: "{{ getent_group['render'][1] | default('109') }}"
+    video_gid: "{{ getent_group['video'][1] | default('44') }}"
+  when:
+    - jellyfin_enabled | bool
+    - jellyfin_enable_qsv | bool
+  tags: [jellyfin]
+
+- name: Verify /dev/dri devices exist when QSV is enabled
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ jellyfin_dri_devices }}"
+  register: jellyfin_dri_stat
+  when:
+    - jellyfin_enabled | bool
+    - jellyfin_enable_qsv | bool
+  tags: [jellyfin]
+
+- name: Assert /dev/dri devices are present
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists | default(false)
+    fail_msg: >-
+      QSV enabled but {{ item.item }} is missing. Either disable jellyfin_enable_qsv
+      or check that the host has Intel iGPU drivers (i915, intel-media-va-driver).
+  loop: "{{ jellyfin_dri_stat.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - jellyfin_enabled | bool
+    - jellyfin_enable_qsv | bool
+  tags: [jellyfin]
+
+- name: Install Intel media drivers (for QSV transcode)
+  ansible.builtin.apt:
+    name:
+      - intel-media-va-driver-non-free
+      - vainfo
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when:
+    - jellyfin_enabled | bool
+    - jellyfin_enable_qsv | bool
+    - ansible_architecture == "x86_64"
+  tags: [jellyfin]
+
+- name: Ensure jellyfin directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ jellyfin_user }}"
+    group: "{{ jellyfin_group }}"
+    mode: "0755"
+  loop:
+    - "{{ jellyfin_compose_dir }}"
+    - "{{ jellyfin_data_dir }}"
+    - "{{ jellyfin_cache_dir }}"
+  when: jellyfin_enabled | bool
+  tags: [jellyfin]
+
+- name: Render jellyfin docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ jellyfin_compose_file }}"
+    owner: "{{ jellyfin_user }}"
+    group: "{{ jellyfin_group }}"
+    mode: "0640"
+  notify: jellyfin_recreate
+  when: jellyfin_enabled | bool
+  tags: [jellyfin]
+
+- name: Bring up jellyfin compose stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ jellyfin_compose_dir }}"
+    state: present
+  when: jellyfin_enabled | bool
+  tags: [jellyfin]

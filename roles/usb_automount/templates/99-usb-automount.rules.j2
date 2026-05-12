@@ -1,0 +1,15 @@
+# Managed by Ansible role usb_automount. Do not edit.
+# Trigger usb-automount@<DEVNAME>.service for any block device that
+# (a) carries a real filesystem and (b) sits on a USB bus somewhere up the
+# parent chain. SUBSYSTEMS=="usb" walks ancestors, so it catches USB-SATA
+# bridge enclosures that expose the drive's native ATA id (ID_BUS=ata).
+# We keep the explicit ID_BUS=usb / removable=1 matches as defense in depth
+# in case parent walking isn't enough on some chassis.
+
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", SUBSYSTEMS=="usb", TAG+="systemd", ENV{SYSTEMD_WANTS}+="usb-automount@%k.service"
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_BUS}=="usb", TAG+="systemd", ENV{SYSTEMD_WANTS}+="usb-automount@%k.service"
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ATTR{removable}=="1", TAG+="systemd", ENV{SYSTEMD_WANTS}+="usb-automount@%k.service"
+
+ACTION=="remove", SUBSYSTEM=="block", SUBSYSTEMS=="usb", RUN+="/bin/systemctl --no-block stop usb-automount@%k.service"
+ACTION=="remove", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", RUN+="/bin/systemctl --no-block stop usb-automount@%k.service"
+ACTION=="remove", SUBSYSTEM=="block", ATTR{removable}=="1", RUN+="/bin/systemctl --no-block stop usb-automount@%k.service"
