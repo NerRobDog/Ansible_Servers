@@ -742,6 +742,10 @@ rules:
   # Local and private ranges always direct
   - RULE-SET,geosite-private,DIRECT
 
+  # VPS UDP-smoke bypass — mihomo TPROXY drops arbitrary UDP to public VPS.
+  # de-matrix-1 (dhost.su): UDP STUN/DTLS/WG tests must leave Mac unmolested.
+  - IP-CIDR,193.233.75.48/32,DIRECT,no-resolve
+
   # Block MAX messenger/platform
   - RULE-SET,max-inline,REJECT
 

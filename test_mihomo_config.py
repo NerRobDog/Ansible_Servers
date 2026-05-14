@@ -414,6 +414,27 @@ def test_nudevista_routed_via_warp(cfg):
     else:
         fail(f"google-warp-inline [{w}] vs ru-inside [{r}] — order broken")
 
+def test_de_matrix_udp_bypass(cfg):
+    section("23. de-matrix-1 (193.233.75.48/32) DIRECT bypass for UDP smoke tests")
+    rules = rules_list(cfg)
+    target = "IP-CIDR,193.233.75.48/32,DIRECT"
+    idx = next((i for i, r in enumerate(rules) if target in r), None)
+    if idx is None:
+        fail(f"missing rule: {target}")
+        return
+    ok(f"rule present at [{idx}]: {rules[idx]}")
+    # Must precede MATCH/proxy-routing rules — placed near top after private bypass
+    priv = next((i for i, r in enumerate(rules) if "geosite-private" in r), None)
+    if priv is not None and idx > priv:
+        ok(f"de-matrix bypass [{idx}] > geosite-private [{priv}] (correct: after private)")
+    # Must come before any proxy-routing rule
+    first_proxy = next((i for i, r in enumerate(rules)
+                        if any(g in r for g in ("📺", "➤", "💬", "🤖", "🎮", "🔞", "🚫"))), None)
+    if first_proxy is not None and idx < first_proxy:
+        ok(f"de-matrix bypass [{idx}] < first proxy rule [{first_proxy}]")
+    else:
+        fail(f"de-matrix bypass not early enough — idx={idx}, first proxy rule={first_proxy}")
+
 def test_group_order_global_first(cfg):
     section("21. 🌍 Остальные сайты (Global) is first proxy-group")
     groups = cfg.get("proxy-groups", [])
@@ -648,6 +669,7 @@ def main():
     test_youtube_aliases(cfg)
     test_hidden_internals(cfg)
     test_nudevista_routed_via_warp(cfg)
+    test_de_matrix_udp_bypass(cfg)
     test_group_order_global_first(cfg)
 
     # Live tests
@@ -668,7 +690,7 @@ def main():
         print(f"{'═'*55}\n")
         sys.exit(1)
     else:
-        print(f"  ALL PASSED ({22 + (len(LIVE_TESTS) if args.live else 0)} checks)")
+        print(f"  ALL PASSED ({23 + (len(LIVE_TESTS) if args.live else 0)} checks)")
         if warnings:
             print(f"  WARNINGS: {len(warnings)}")
             for w in warnings:
