@@ -13,7 +13,7 @@ Usage:
   python3 test_mihomo_config.py --config path/to.yaml  # custom config file
 """
 
-import sys, os, re, yaml, argparse, urllib.request, subprocess, json, time
+import sys, re, yaml, argparse, urllib.request, urllib.parse, subprocess, json, time
 from pathlib import Path
 
 # ──────────────────────────────────────────────
@@ -122,7 +122,7 @@ def mihomo_api(path, method="GET", body=None):
         return None
 
 def set_proxy_group(group, proxy_name):
-    return mihomo_api(f"/proxies/{urllib.request.quote(group)}", "PUT", {"name": proxy_name})
+    return mihomo_api(f"/proxies/{urllib.parse.quote(group)}", "PUT", {"name": proxy_name})
 
 
 # ──────────────────────────────────────────────
@@ -214,6 +214,9 @@ def test_rule_order_openai_before_ru_inside(cfg):
     idx_ai     = rule_set_index(rules, "ai")
     idx_openai = rule_set_index(rules, "openai-inline")
     idx_inside = rule_set_index(rules, "ru-inside")
+    if -1 in (idx_ai, idx_openai, idx_inside):
+        fail(f"missing rule(s): ai={idx_ai}, openai-inline={idx_openai}, ru-inside={idx_inside}")
+        return
     if idx_ai < idx_inside:
         ok(f"ai [{idx_ai}] < ru-inside [{idx_inside}]")
     else:
@@ -405,11 +408,14 @@ def test_nudevista_routed_via_warp(cfg):
     w = rule_set_index(rules, "google-warp-inline")
     a = rule_set_index(rules, "adult")
     r = rule_set_index(rules, "ru-inside")
-    if w is not None and a is not None and w < a:
+    if -1 in (w, a, r):
+        fail(f"missing rule(s): google-warp-inline={w}, adult={a}, ru-inside={r}")
+        return
+    if w < a:
         ok(f"google-warp-inline [{w}] < adult [{a}]")
     else:
         fail(f"google-warp-inline [{w}] vs adult [{a}] — order broken")
-    if w is not None and r is not None and w < r:
+    if w < r:
         ok(f"google-warp-inline [{w}] < ru-inside [{r}]")
     else:
         fail(f"google-warp-inline [{w}] vs ru-inside [{r}] — order broken")
@@ -690,7 +696,8 @@ def main():
         print(f"{'═'*55}\n")
         sys.exit(1)
     else:
-        print(f"  ALL PASSED ({23 + (len(LIVE_TESTS) if args.live else 0)} checks)")
+        live_count = (len(LIVE_TESTS) + len(ROUTING_TESTS)) if args.live else 0
+        print(f"  ALL PASSED ({23 + live_count} checks)")
         if warnings:
             print(f"  WARNINGS: {len(warnings)}")
             for w in warnings:
