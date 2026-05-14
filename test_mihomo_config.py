@@ -9,11 +9,17 @@ Two test modes:
 Usage:
   python3 test_mihomo_config.py                        # static only
   python3 test_mihomo_config.py --live                 # static + live (needs mihomo running)
-  python3 test_mihomo_config.py --live --proxy 7897    # custom port (default 7897)
+  python3 test_mihomo_config.py --live --proxy 7890    # custom proxy port (else auto-detect from config mixed-port)
+  python3 test_mihomo_config.py --live --api-port 9090 # custom mihomo external-controller port
+  python3 test_mihomo_config.py --live --container my-mihomo  # custom container for log scraping
   python3 test_mihomo_config.py --config path/to.yaml  # custom config file
+
+Live mode requires mihomo with `external-controller: 0.0.0.0:<api-port>` and
+either (a) HTTP/SOCKS proxy listener (mixed-port) reachable, or (b) Docker
+container named via --container for log-based routing checks.
 """
 
-import sys, re, yaml, argparse, urllib.request, urllib.parse, subprocess, json, time
+import sys, re, yaml, argparse, urllib.parse, subprocess, json, time
 from pathlib import Path
 
 # ──────────────────────────────────────────────
@@ -58,29 +64,6 @@ def rule_providers_dict(cfg):
 def rules_list(cfg):
     return cfg.get('rules', [])
 
-def first_matching_rule(domain, rules_raw):
-    """Very simplified rule matching (domain-suffix / keyword / match only)."""
-    for rule in rules_raw:
-        parts = rule.split(',')
-        if len(parts) < 2:
-            continue
-        rtype = parts[0].strip()
-        if rtype == 'MATCH':
-            return rule, parts[-1].strip()
-        if rtype in ('RULE-SET',):
-            # Can't resolve rule-set contents here statically — skip
-            continue
-        if rtype == 'DOMAIN-SUFFIX':
-            if domain.endswith(parts[1].strip()) or domain == parts[1].strip():
-                return rule, parts[-1].strip()
-        if rtype == 'DOMAIN-KEYWORD':
-            if parts[1].strip().lower() in domain.lower():
-                return rule, parts[-1].strip()
-        if rtype == 'DOMAIN':
-            if domain == parts[1].strip():
-                return rule, parts[-1].strip()
-    return None, None
-
 def rule_set_index(rules_raw, rule_set_name):
     """Return the index of a RULE-SET rule in the rules list."""
     for i, r in enumerate(rules_raw):
@@ -119,10 +102,13 @@ def mihomo_api(path, method="GET", body=None):
         lines = result.stdout.strip().rsplit("\n", 1)
         body_text = lines[0] if len(lines) > 1 else ""
         code = int(lines[-1]) if lines[-1].isdigit() else 0
+        # Non-2xx is a failure — must NOT silently return {} (would mask 401/404).
+        if not (200 <= code < 300):
+            return None
         if code == 204 or not body_text:
             return {}
         return json.loads(body_text)
-    except Exception as e:
+    except Exception:
         return None
 
 def set_proxy_group(group, proxy_name):
@@ -527,8 +513,11 @@ ROUTING_TESTS = [
      "Adobe geo-bans RU IPs — must NOT hit RU-bypass"),
 ]
 
-def get_last_mihomo_log_line(domain, container="mihomo-test"):
+MIHOMO_CONTAINER = "mihomo-test"  # overridden by --container
+
+def get_last_mihomo_log_line(domain, container=None):
     """Grab the last mihomo log line mentioning this domain."""
+    container = container or MIHOMO_CONTAINER
     result = subprocess.run(
         ["docker", "logs", "--tail", "50", container],
         capture_output=True, text=True, timeout=5
@@ -637,11 +626,17 @@ def run_live_tests(proxy_port):
 # Main
 # ──────────────────────────────────────────────
 def main():
+    global API_PORT, MIHOMO_CONTAINER
     parser = argparse.ArgumentParser(description="Mihomo config anti-regression tests")
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="Path to config YAML")
-    parser.add_argument("--live",   action="store_true",         help="Run live HTTP tests")
-    parser.add_argument("--proxy",  type=int, default=PROXY_PORT,help=f"Proxy port (default {PROXY_PORT})")
+    parser.add_argument("--config",    default=str(DEFAULT_CONFIG), help="Path to config YAML")
+    parser.add_argument("--live",      action="store_true",          help="Run live HTTP tests")
+    parser.add_argument("--proxy",     type=int, default=None,       help="Proxy port (auto-detected from config mixed-port/port, else 7897)")
+    parser.add_argument("--api-port",  type=int, default=API_PORT,   help=f"Mihomo external-controller port (default {API_PORT})")
+    parser.add_argument("--container", default=MIHOMO_CONTAINER,     help=f"Docker container name for log scraping (default {MIHOMO_CONTAINER})")
     args = parser.parse_args()
+
+    API_PORT = args.api_port
+    MIHOMO_CONTAINER = args.container
 
     cfg_path = Path(args.config)
     if not cfg_path.exists():
@@ -654,6 +649,9 @@ def main():
     print(f"{'═'*55}")
 
     cfg = load_config(cfg_path)
+    # Auto-detect proxy port from config if not explicitly provided
+    if args.proxy is None:
+        args.proxy = cfg.get("mixed-port") or cfg.get("port") or PROXY_PORT
 
     # Static tests
     test_yaml_valid(cfg)
