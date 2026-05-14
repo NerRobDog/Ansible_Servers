@@ -29,13 +29,17 @@ SKIP = "⏭  SKIP"
 
 errors = []
 warnings = []
+sections_run = 0
 
 
 def ok(msg):   print(f"  {PASS}  {msg}")
 def fail(msg): print(f"  {FAIL}  {msg}"); errors.append(msg)
 def warn(msg): print(f"  ⚠️  WARN  {msg}"); warnings.append(msg)
 def skip(msg): print(f"  {SKIP}  {msg}")
-def section(title): print(f"\n{'─'*55}\n  {title}\n{'─'*55}")
+def section(title):
+    global sections_run
+    sections_run += 1
+    print(f"\n{'─'*55}\n  {title}\n{'─'*55}")
 
 
 # ──────────────────────────────────────────────
@@ -697,7 +701,7 @@ def main():
         sys.exit(1)
     else:
         live_count = (len(LIVE_TESTS) + len(ROUTING_TESTS)) if args.live else 0
-        print(f"  ALL PASSED ({23 + live_count} checks)")
+        print(f"  ALL PASSED ({sections_run + live_count} checks)")
         if warnings:
             print(f"  WARNINGS: {len(warnings)}")
             for w in warnings:
