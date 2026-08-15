@@ -10,7 +10,7 @@
 - name: Validate OpenWrt tailscale firewall inputs
   ansible.builtin.assert:
     that:
-      - openwrt_firewall_tailscale_src_cidr | trim | length > 0
+      - openwrt_firewall_tailscale_src_cidr | default('') | trim | length > 0
     fail_msg: "openwrt_firewall_tailscale_src_cidr must be a non-empty CIDR string."
   when: openwrt_firewall_allow_tailscale_ssh | bool
   tags: [openwrt, firewall]

@@ -398,7 +398,7 @@
       {{
         tailscale_post_join_status_stdout | default('') | string
         | regex_search('BackendState[^A-Za-z]{1,6}([A-Za-z]+)', '\1')
-        | first | default('NoState', true)
+        | default(['NoState'], true) | first
       }}
   changed_when: false
   when: tailscale_enabled | bool
