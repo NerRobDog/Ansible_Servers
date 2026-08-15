@@ -17,6 +17,17 @@
     fail_msg: "Invalid monitoring_stack settings. Check ports, retention and grafana credentials."
   tags: [monitoring, metrics, grafana, prometheus, loki]
 
+- name: Validate Telegram alert delivery settings
+  ansible.builtin.assert:
+    that:
+      - monitoring_stack_alert_telegram_bot_token | trim | length > 0
+      - (monitoring_stack_alert_telegram_chat_id | string | trim) is match('^-?[0-9]+$')
+    fail_msg: >-
+      monitoring_stack_alert_telegram_enabled is true but bot token or chat id
+      is missing/invalid. chat_id must be numeric (channel ids start with -100).
+  when: monitoring_stack_alert_telegram_enabled | bool
+  tags: [monitoring, metrics, alerting]
+
 - name: Ensure monitoring stack directories exist
   ansible.builtin.file:
     path: "{{ item }}"
@@ -93,14 +104,11 @@
     - src: openwrt-alerts.yml.j2
       dest: "{{ monitoring_stack_install_path }}/prometheus/openwrt-alerts.yml"
       mode: "0644"
+    - src: fleet-alerts.yml.j2
+      dest: "{{ monitoring_stack_install_path }}/prometheus/fleet-alerts.yml"
+      mode: "0644"
     - src: alertmanager.yml.j2
       dest: "{{ monitoring_stack_install_path }}/alertmanager/alertmanager.yml"
-      mode: "0644"
-    - src: loki.yml.j2
-      dest: "{{ monitoring_stack_install_path }}/loki/config.yml"
-      mode: "0644"
-    - src: promtail.yml.j2
-      dest: "{{ monitoring_stack_install_path }}/promtail/config.yml"
       mode: "0644"
     - src: grafana-datasources.yml.j2
       dest: "{{ monitoring_stack_install_path }}/grafana/provisioning/datasources/datasources.yml"
@@ -116,6 +124,22 @@
       mode: "0644"
   notify: Restart monitoring stack
   tags: [monitoring, metrics, grafana, prometheus, loki]
+
+- name: Render log pipeline config files
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - src: loki.yml.j2
+      dest: "{{ monitoring_stack_install_path }}/loki/config.yml"
+    - src: promtail.yml.j2
+      dest: "{{ monitoring_stack_install_path }}/promtail/config.yml"
+  when: monitoring_stack_enable_logs | bool
+  notify: Restart monitoring stack
+  tags: [monitoring, metrics, loki]
 
 - name: Copy YUSIC dashboard JSON files (built from jsonnet)
   ansible.builtin.copy:

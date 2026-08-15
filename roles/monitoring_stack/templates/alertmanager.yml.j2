@@ -1,4 +1,35 @@
+{% if monitoring_stack_alert_telegram_enabled | bool %}
+route:
+  receiver: telegram
+  group_by: ["alertname", "instance"]
+  group_wait: 30s
+  group_interval: 5m
+  # Keep re-notifying while an incident is open. A fleet node that stays down
+  # for a day should not go quiet after the first message.
+  repeat_interval: 4h
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - send_resolved: true
+        bot_token: {{ monitoring_stack_alert_telegram_bot_token | to_json }}
+        chat_id: {{ monitoring_stack_alert_telegram_chat_id | int }}
+{% if (monitoring_stack_alert_telegram_topic_id | default('') | string | trim) | length > 0 %}
+        message_thread_id: {{ monitoring_stack_alert_telegram_topic_id | int }}
+{% endif %}
+        parse_mode: HTML
+        message: |-
+          {% raw %}{{ if eq .Status "firing" }}🔴{{ else }}✅{{ end }} <b>{{ .CommonLabels.alertname }}</b> ({{ .Status }})
+          {{ range .Alerts }}<b>{{ .Labels.instance }}</b> — {{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          {{ end }}{% endraw %}
+{% else %}
+# Telegram delivery is disabled: set monitoring_stack_alert_telegram_enabled
+# plus bot token and chat id to make alerts leave this host. Until then alerts
+# fire in Prometheus and stop here.
 route:
   receiver: default
+
 receivers:
   - name: default
+{% endif %}

@@ -1,0 +1,75 @@
+groups:
+  - name: fleet-nodes
+    rules:
+      - alert: FleetNodeExporterDown
+        expr: up{job="monitoring-node-exporter"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          scope: fleet
+        annotations:
+          summary: "Node exporter is down on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "Prometheus cannot scrape node exporter on {% raw %}{{ $labels.instance }}{% endraw %}."
+
+      - alert: FleetCadvisorDown
+        expr: up{job="monitoring-cadvisor"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          scope: fleet
+        annotations:
+          summary: "cAdvisor is down on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "Container metrics are unavailable for {% raw %}{{ $labels.instance }}{% endraw %}."
+
+      - alert: FleetHighMemoryUsage
+        expr: >-
+          (1 - (node_memory_MemAvailable_bytes{job="monitoring-node-exporter"}
+          / node_memory_MemTotal_bytes{job="monitoring-node-exporter"})) > 0.90
+        for: 10m
+        labels:
+          severity: warning
+          scope: fleet
+        annotations:
+          summary: "Memory usage is high on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "Memory usage exceeds 90% for 10 minutes on {% raw %}{{ $labels.instance }}{% endraw %}."
+
+      - alert: FleetDiskAlmostFull
+        expr: >-
+          (node_filesystem_avail_bytes{job="monitoring-node-exporter",fstype!~"tmpfs|overlay|squashfs"}
+          / node_filesystem_size_bytes{job="monitoring-node-exporter",fstype!~"tmpfs|overlay|squashfs"}) < 0.10
+        for: 15m
+        labels:
+          severity: critical
+          scope: fleet
+        annotations:
+          summary: "Disk almost full on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: >-
+            Less than 10% free on {% raw %}{{ $labels.mountpoint }}{% endraw %}
+            at {% raw %}{{ $labels.instance }}{% endraw %}.
+
+      - alert: FleetHighLoad
+        expr: >-
+          node_load5{job="monitoring-node-exporter"}
+          / count by (instance) (node_cpu_seconds_total{job="monitoring-node-exporter",mode="idle"}) > 2
+        for: 15m
+        labels:
+          severity: warning
+          scope: fleet
+        annotations:
+          summary: "Load average is high on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: "5m load per CPU is above 2 on {% raw %}{{ $labels.instance }}{% endraw %}."
+
+  - name: fleet-monitoring-self
+    rules:
+      # Without this the whole alerting chain can fail silently: if Prometheus
+      # cannot reach Alertmanager, every other rule below still fires and goes
+      # nowhere. This one at least shows up in the Prometheus UI.
+      - alert: AlertmanagerUnreachable
+        expr: up{job="alertmanager"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          scope: monitoring
+        annotations:
+          summary: "Alertmanager is unreachable from Prometheus"
+          description: "Alert delivery is broken: Prometheus cannot scrape Alertmanager."

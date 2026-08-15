@@ -85,6 +85,9 @@ MONITORING_DEFAULTS = {
     "stack_retention_days": 7,
     "stack_grafana_admin_user": "admin",
     "stack_grafana_admin_password": "change_me",
+    # Loki + Promtail. Turn off on small hosts that also run production
+    # workloads: the metrics and alerting half of the stack keeps working.
+    "stack_enable_logs": True,
 }
 
 def fail(message: str) -> None:
@@ -281,6 +284,7 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
     monitoring_cfg["stack_grafana_admin_password"] = str(
         monitoring_cfg.get("stack_grafana_admin_password", "change_me") or "change_me"
     )
+    monitoring_cfg["stack_enable_logs"] = parse_bool(monitoring_cfg.get("stack_enable_logs", True))
 
     custom_roles = host_cfg.get("custom_roles", defaults.get("custom_roles", []))
     if custom_roles is None:

@@ -74,6 +74,8 @@
           {{ fleet_host_cfg.get('monitoring', {}).get('stack_grafana_admin_user', monitoring_stack_grafana_admin_user) }}
         monitoring_stack_grafana_admin_password: >-
           {{ fleet_host_cfg.get('monitoring', {}).get('stack_grafana_admin_password', monitoring_stack_grafana_admin_password) }}
+        monitoring_stack_enable_logs: >-
+          {{ fleet_host_cfg.get('monitoring', {}).get('stack_enable_logs', monitoring_stack_enable_logs) | bool }}
       changed_when: false
       tags: [always]
 
