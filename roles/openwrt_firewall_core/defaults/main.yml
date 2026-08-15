@@ -1,3 +1,9 @@
 ---
 openwrt_firewall_allow_zerotier_ssh: true
 openwrt_firewall_zerotier_src_cidr: 172.16.0.0/12
+
+# Second control channel. Without this rule the tailnet is reachable but SSH
+# on it is not, which defeats the purpose of having a fallback when the
+# ZeroTier data path dies. 100.64.0.0/10 is Tailscale's fixed CGNAT range.
+openwrt_firewall_allow_tailscale_ssh: true
+openwrt_firewall_tailscale_src_cidr: 100.64.0.0/10
