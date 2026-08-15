@@ -10,6 +10,7 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/openwrt-alerts.yml:/etc/prometheus/openwrt-alerts.yml:ro
+      - ./prometheus/fleet-alerts.yml:/etc/prometheus/fleet-alerts.yml:ro
       - prometheus_data:/prometheus
     ports:
       - "{{ monitoring_stack_bind_address }}:{{ monitoring_stack_prometheus_port }}:9090"
@@ -52,6 +53,7 @@ services:
 {% endif %}
     restart: unless-stopped
 
+{% if monitoring_stack_enable_logs | bool %}
   loki:
     image: {{ monitoring_stack_loki_image }}
     container_name: monitoring-loki
@@ -76,9 +78,12 @@ services:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
+{% endif %}
 
 volumes:
   prometheus_data:
   alertmanager_data:
   grafana_data:
+{% if monitoring_stack_enable_logs | bool %}
   loki_data:
+{% endif %}

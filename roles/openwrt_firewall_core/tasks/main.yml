@@ -7,6 +7,27 @@
   when: openwrt_firewall_allow_zerotier_ssh | bool
   tags: [openwrt, firewall]
 
+- name: Validate OpenWrt tailscale firewall inputs
+  ansible.builtin.assert:
+    that:
+      - openwrt_firewall_tailscale_src_cidr | trim | length > 0
+    fail_msg: "openwrt_firewall_tailscale_src_cidr must be a non-empty CIDR string."
+  when: openwrt_firewall_allow_tailscale_ssh | bool
+  tags: [openwrt, firewall]
+
+- name: Resolve whether the tailnet SSH rule should exist
+  ansible.builtin.set_fact:
+    # `effective_feature_tailscale` is set by playbook.openwrt.yml pre_tasks.
+    # Fall back to the plain feature flag so the role stays usable when it is
+    # included outside that playbook (molecule, ad-hoc runs).
+    openwrt_firewall_tailscale_rule_enabled: >-
+      {{
+        (openwrt_firewall_allow_tailscale_ssh | bool)
+        and (effective_feature_tailscale | default(feature_tailscale | default(false)) | bool)
+      }}
+  changed_when: false
+  tags: [openwrt, firewall]
+
 - name: Apply OpenWrt firewall baseline with SSH fail-safe
   ansible.builtin.raw: |
     set -eu
@@ -55,6 +76,22 @@
     else
       if uci -q get firewall.rule_ssh_zerotier >/dev/null 2>&1; then
         uci -q delete firewall.rule_ssh_zerotier
+        changed='1'
+      fi
+    fi
+
+    if [ "{{ openwrt_firewall_tailscale_rule_enabled | ternary('1', '0') }}" = "1" ]; then
+      ensure_type rule_ssh_tailscale rule
+      ensure_set firewall.rule_ssh_tailscale.name Allow-SSH-Tailscale
+      ensure_set firewall.rule_ssh_tailscale.src '*'
+      ensure_set firewall.rule_ssh_tailscale.proto tcp
+      ensure_set firewall.rule_ssh_tailscale.dest_port 22
+      ensure_set firewall.rule_ssh_tailscale.family ipv4
+      ensure_set firewall.rule_ssh_tailscale.src_ip '{{ openwrt_firewall_tailscale_src_cidr }}'
+      ensure_set firewall.rule_ssh_tailscale.target ACCEPT
+    else
+      if uci -q get firewall.rule_ssh_tailscale >/dev/null 2>&1; then
+        uci -q delete firewall.rule_ssh_tailscale
         changed='1'
       fi
     fi

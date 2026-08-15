@@ -26,3 +26,16 @@ monitoring_stack_grafana_admin_user: admin
 monitoring_stack_grafana_admin_password: ""
 monitoring_stack_scrape_fleet_agents: true
 monitoring_stack_scrape_openwrt_agents: true
+
+# Loki + Promtail are the memory-hungry half of the stack. On a small VPS that
+# also runs production workloads, turn this off to keep metrics and alerting
+# only — Grafana then ships without the Loki datasource.
+monitoring_stack_enable_logs: true
+
+# Incident delivery. With this off, alert rules still evaluate and fire, but
+# Alertmanager routes them into a null receiver and nobody learns anything.
+# Values normally come from the workflow environment (ALERT_TELEGRAM_*).
+monitoring_stack_alert_telegram_enabled: false
+monitoring_stack_alert_telegram_bot_token: ""
+monitoring_stack_alert_telegram_chat_id: ""
+monitoring_stack_alert_telegram_topic_id: ""

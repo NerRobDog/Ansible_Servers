@@ -233,6 +233,8 @@ openwrt_docker_stacks: []
 
 openwrt_firewall_allow_zerotier_ssh: true
 openwrt_firewall_zerotier_src_cidr: 172.16.0.0/12
+openwrt_firewall_allow_tailscale_ssh: true
+openwrt_firewall_tailscale_src_cidr: 100.64.0.0/10
 
 openwrt_monitoring_enabled: true
 openwrt_node_exporter_port: 9100
@@ -278,6 +280,9 @@ tailscale_package: tailscale
 tailscale_service_name: tailscaled
 tailscale_openwrt_service_name: tailscale
 tailscale_openwrt_prereq_packages: []
+tailscale_openwrt_extra_args:
+  - "--accept-dns=false"
+  - "--accept-routes=false"
 
 # Monitoring defaults
 monitoring_agent_bind_address: "0.0.0.0"
@@ -297,5 +302,22 @@ monitoring_stack_prometheus_port: 9090
 monitoring_stack_alertmanager_port: 9093
 monitoring_stack_grafana_port: 3000
 monitoring_stack_loki_port: 3100
+# Alert delivery credentials come from the workflow environment, not from the
+# fleet config secret — they are shared with the CI notifier and have their own
+# GitHub secrets. Delivery turns itself on as soon as both token and chat id
+# are present, so there is no separate flag to forget.
+monitoring_stack_alert_telegram_bot_token: "{{ lookup('env', 'ALERT_TELEGRAM_BOT_TOKEN') | default('', true) | trim }}"
+monitoring_stack_alert_telegram_chat_id: "{{ lookup('env', 'ALERT_TELEGRAM_CHAT_ID') | default('', true) | trim }}"
+monitoring_stack_alert_telegram_topic_id: >-
+  {{
+    (lookup('env', 'ALERT_TELEGRAM_TOPIC_ID_FLEET') | default('', true) | trim)
+    or (lookup('env', 'ALERT_TELEGRAM_TOPIC_ID') | default('', true) | trim)
+  }}
+monitoring_stack_alert_telegram_enabled: >-
+  {{
+    (monitoring_stack_alert_telegram_bot_token | trim | length > 0)
+    and (monitoring_stack_alert_telegram_chat_id | string | trim | length > 0)
+  }}
+monitoring_stack_enable_logs: true
 monitoring_stack_scrape_fleet_agents: true
 monitoring_stack_scrape_openwrt_agents: true

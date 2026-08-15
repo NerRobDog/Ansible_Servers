@@ -390,6 +390,10 @@ jobs:
           REMNAWAVE_API_ENDPOINT_TEMPLATE: ${{ vars.REMNAWAVE_API_ENDPOINT_TEMPLATE }}
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          ALERT_TELEGRAM_BOT_TOKEN: ${{ secrets.ALERT_TELEGRAM_BOT_TOKEN }}
+          ALERT_TELEGRAM_CHAT_ID: ${{ secrets.ALERT_TELEGRAM_CHAT_ID }}
+          ALERT_TELEGRAM_TOPIC_ID_FLEET: ${{ secrets.ALERT_TELEGRAM_TOPIC_ID_FLEET }}
+          ALERT_TELEGRAM_TOPIC_ID: ${{ secrets.ALERT_TELEGRAM_TOPIC_ID }}
         run: |
           if [[ "${TARGET}" == "remnawave" ]]; then
             cmd=(ansible-playbook -i .ansible/runtime/hosts.ini playbook.yml --limit "${LIMIT}" --extra-vars @.ansible/runtime/runtime_vars.json)

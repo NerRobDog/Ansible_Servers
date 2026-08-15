@@ -8,3 +8,14 @@ tailscale_package: tailscale
 tailscale_service_name: tailscaled
 tailscale_openwrt_service_name: tailscale
 tailscale_openwrt_prereq_packages: []
+
+# Appended to tailscale_extra_args on OpenWrt hosts only.
+# --accept-dns=false is mandatory on this fleet: the routers run OpenClash in
+# enhanced-mode fake-ip and own /etc/resolv.conf. Letting Tailscale install
+# MagicDNS resolvers there breaks name resolution for the router itself and
+# for every LAN client behind it.
+# --accept-routes=false keeps a subnet router advertised elsewhere in the
+# tailnet from injecting routes that collide with LAN/ZeroTier ranges.
+tailscale_openwrt_extra_args:
+  - "--accept-dns=false"
+  - "--accept-routes=false"

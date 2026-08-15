@@ -24,6 +24,10 @@ defaults:
     feature_openwrt_wan: true
     feature_openwrt_wan_apply_in_prod: false
     feature_openwrt_zerotier: true
+    # Second control channel, independent of ZeroTier. Enable together with
+    # feature_openwrt_firewall_core, otherwise the tailnet comes up but SSH
+    # over it stays closed. Requires TAILSCALE_AUTH_KEY in the same GitHub
+    # Environment that holds OPENWRT_FLEET_CONFIG_B64.
     feature_tailscale: false
     feature_openwrt_passwall2: true
     feature_openwrt_homeproxy_cleanup: true

@@ -2,8 +2,14 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 rule_files:
   - /etc/prometheus/openwrt-alerts.yml
+  - /etc/prometheus/fleet-alerts.yml
 
 scrape_configs:
   - job_name: prometheus
@@ -14,10 +20,12 @@ scrape_configs:
     static_configs:
       - targets: ["alertmanager:9093"]
 
+{% if monitoring_stack_enable_logs | bool %}
   - job_name: loki
     metrics_path: /metrics
     static_configs:
       - targets: ["loki:3100"]
+{% endif %}
 
 {% if monitoring_stack_scrape_fleet_agents | bool %}
   - job_name: monitoring-node-exporter

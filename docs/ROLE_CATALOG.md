@@ -29,9 +29,20 @@
 - Ключевые параметры:
   - `tailscale_auth_key_env` (по умолчанию `TAILSCALE_AUTH_KEY`)
   - `tailscale_extra_args` (доп. args для `tailscale up`)
+  - `tailscale_openwrt_extra_args` — добавляются к `tailscale_extra_args`
+    только на OpenWrt-хостах. По умолчанию `--accept-dns=false`
+    (роутеры работают в OpenClash fake-ip и владеют `/etc/resolv.conf`;
+    MagicDNS ломает резолв роутеру и всем клиентам за ним) и
+    `--accept-routes=false` (чужой subnet router не должен вкидывать
+    маршруты, конфликтующие с LAN и ZeroTier).
 - Поведение:
   - если хост уже авторизован, `tailscale up` не выполняется;
   - если хост не авторизован, нужен ключ из GitHub Secrets.
+- Роль работает и на серверах (apt/yum), и на OpenWrt (opkg + `raw`,
+  python на роутере не нужен). Ветка выбирается по `/etc/openwrt_release`.
+- Второй канал управления: на OpenWrt дополнительно нужен
+  `feature_openwrt_firewall_core=true` — иначе tailnet поднимется, но SSH
+  по нему будет закрыт. См. `openwrt_firewall_core`.
 
 ### `remnawave_node`
 - Назначение: deploy контейнера `remnawave/node`.
@@ -191,10 +202,20 @@ features:
 - Дефолт: выключена (`feature_openwrt_firewall_core=false`).
 - Поведение:
   - всегда держит allow SSH из LAN;
-  - при включённом ZeroTier добавляет allow SSH из `openwrt_firewall_zerotier_src_cidr`.
+  - при включённом ZeroTier добавляет allow SSH из `openwrt_firewall_zerotier_src_cidr`;
+  - при включённом `feature_tailscale` добавляет allow SSH из
+    `openwrt_firewall_tailscale_src_cidr` (правило `Allow-SSH-Tailscale`).
+    Флаг выключается — правило удаляется, чтобы не оставлять висячий allow.
 - Ключевые параметры:
   - `openwrt_firewall_allow_zerotier_ssh`
   - `openwrt_firewall_zerotier_src_cidr`
+  - `openwrt_firewall_allow_tailscale_ssh`
+  - `openwrt_firewall_tailscale_src_cidr` (по умолчанию `100.64.0.0/10` —
+    фиксированный CGNAT-диапазон Tailscale)
+- Зачем два канала: ZeroTier и Tailscale — независимые control-plane.
+  При деградации одного (например, когда data-path ZT между РФ-пирами
+  ложится, а ноды при этом online у контроллера) управление флотом
+  остаётся через второй.
 
 ### `openwrt_wan`
 - Назначение: managed конфиг `network.wan` для разных провайдеров.
