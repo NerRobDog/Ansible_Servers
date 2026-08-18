@@ -1,48 +1,45 @@
 name: Push mihomo subscription template
 
-# Durable-фикс маршрутизации в MIHOMO subscription-template Remnawave
+# Durable-фикс маршрутизации YouTube в MIHOMO subscription-template Remnawave
 # (панель ru.watchd0g.dev; роутеры OpenClash качают его как профиль Watchdog
-# через домен раздачи no.watchd0g.dev). Правит ЖИВОЙ шаблон через API,
-# секрет панели инжектится Actions и в клиентский контекст не попадает.
+# через домен раздачи no.watchd0g.dev). Правит ЖИВОЙ шаблон через API;
+# панель-токен инжектится Actions и в клиентский контекст не попадает.
+#
+# inspect — только GET (печать текущего порядка YouTube-группы + artifact).
+# apply   — GET -> реордер (заграница дефолтом) -> PATCH -> re-GET verify.
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "inspect (только GET) или apply (GET→правка YouTube→PATCH→verify)"
+        description: "inspect | apply"
         type: choice
         required: true
         default: inspect
-        options:
-          - inspect
-          - apply
+        options: [inspect, apply]
+      name:
+        description: "Имя MIHOMO-шаблона (Default = живой, отдаётся роутерам)"
+        type: string
+        required: false
+        default: Default
 
 jobs:
   push-template:
     runs-on: ubuntu-latest
     environment: Testing
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install deps
-        run: pip install --quiet ruamel.yaml certifi
-
-      - name: Run template push
+      - run: pip install --quiet ruamel.yaml certifi
+      - name: Run
         env:
           RW_PANEL_API_BASE_URL: ${{ vars.RW_PANEL_API_BASE_URL }}
           RW_PANEL_API_TOKEN: ${{ secrets.RW_PANEL_API_TOKEN }}
-        run: python3 .github/scripts/push_mihomo_template.py --mode "${{ inputs.mode }}"
-
-      - name: Upload live template artifact
+        run: python3 .github/scripts/push_mihomo_template.py --mode "${{ inputs.mode }}" --name "${{ inputs.name }}"
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
           name: live-mihomo-template-${{ inputs.mode }}
           path: live-mihomo-template.yaml

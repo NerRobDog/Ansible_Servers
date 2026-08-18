@@ -91,7 +91,7 @@ for alias in "${targets[@]}"; do
   fi
 
   echo "[smoke][$alias] Verify SSH connectivity"
-  run_ansible "$alias" -m ansible.builtin.ping >/dev/null
+  run_ansible "$alias" -m ansible.builtin.ping
 
   feature_docker="$(jq -r --arg alias "$alias" '.fleet_hosts[$alias].features.feature_docker // false' "$runtime_vars")"
   feature_tailscale="$(jq -r --arg alias "$alias" '.fleet_hosts[$alias].features.feature_tailscale // false' "$runtime_vars")"

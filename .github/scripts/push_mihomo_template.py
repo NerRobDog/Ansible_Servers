@@ -1,36 +1,35 @@
 #!/usr/bin/env python3
 """
-push_mihomo_template.py — читает/правит MIHOMO subscription-template в Remnawave.
+push_mihomo_template.py — durable-фикс маршрутизации YouTube в MIHOMO
+subscription-template Remnawave (панель ru.watchd0g.dev; роутеры OpenClash
+качают его как профиль Watchdog через домен раздачи no.watchd0g.dev).
 
-Назначение: durable-фикс маршрутизации YouTube в шаблоне, который панель
-(ru.watchd0g.dev) отдаёт роутерам OpenClash как профиль `Watchdog` через
-домен раздачи no.watchd0g.dev. Правит ЖИВОЙ шаблон (GET → mutate → PATCH),
-а не репную копию, чтобы не затереть расхождения prod↔repo (deploy-gap).
+Контракт панели (проверен на живой инстанции 2026-08-18):
+  * шаблоны адресуются по UUID, не по типу;
+  * список:   GET  /api/subscription-templates            -> response.templates[]
+  * один:     GET  /api/subscription-templates/{uuid}      -> response.encodedTemplateYaml (base64)
+  * update:   PATCH /api/subscription-templates  body {uuid, encodedTemplateYaml}
+              (имя НЕ слать — 'Default' зарезервировано, вернёт A172)
 
-Правка: в select-группе "📺 YouTube" ставит "🌍 Зарубежные серверы (баланс)"
-первым элементом (в mihomo select первый proxy = дефолт). RU-выход остаётся
-доступен ручным переключением. Идемпотентно: если уже так — PATCH не шлём.
+Правка select-группы "📺 YouTube": ставит алиас-заграницу "📺 YT фон / PiP"
+дефолтом (index 0), уводя YouTube с задушенного RKN RU-выхода. RU-премиум-алиас
+"📺 YT без рекламы" остаётся ручным выбором. Идемпотентно.
 
-Режимы:
-  inspect  — только GET, печать текущего шаблона и состояния YouTube-группы.
-  apply    — GET → правка → PATCH → повторный GET-verify.
-
-Env (оба обязательны):
-  RW_PANEL_API_BASE_URL  — https://ru.watchd0g.dev
-  RW_PANEL_API_TOKEN     — Bearer-токен Remnawave
+Env: RW_PANEL_API_BASE_URL, RW_PANEL_API_TOKEN
 """
 
 import argparse
 import base64
+import io
 import json
 import os
 import ssl
 import sys
 import urllib.request
 
-TEMPLATE_TYPE = "MIHOMO"
-YT_GROUP = "📺 YouTube"
-FOREIGN = "🌍 Зарубежные серверы (баланс)"
+GROUP = "📺 YouTube"
+FOREIGN_ALIAS = "📺 YT фон / PiP"          # -> 🌍 Зарубежные серверы (баланс)
+RU_ALIAS = "📺 YT без рекламы"             # -> 🚫 Недоступные из РФ (RU-first)
 
 
 def _ctx():
@@ -53,71 +52,70 @@ def _req(method, url, token, payload=None):
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=30, context=_ctx()) as r:
-            return json.loads(r.read())
+            return r.getcode(), json.loads(r.read())
     except urllib.request.HTTPError as e:
-        body = e.read().decode(errors="replace")
-        print(f"HTTP {e.code} on {method} {url}:\n{body}", file=sys.stderr)
-        raise
+        return e.code, e.read().decode(errors="replace")
 
 
-def get_template(base, token):
-    resp = _req("GET", f"{base}/api/subscription-templates/{TEMPLATE_TYPE}", token)
-    inner = resp.get("response", resp) if isinstance(resp, dict) else resp
-    return inner
+def find_uuid(base, token, name):
+    code, resp = _req("GET", f"{base}/api/subscription-templates", token)
+    if code != 200:
+        raise SystemExit(f"list GET {code}: {resp}")
+    tpls = (resp.get("response") or {}).get("templates", [])
+    mihomo = [t for t in tpls if t.get("templateType") == "MIHOMO"]
+    for t in mihomo:
+        if t.get("name") == name:
+            return t["uuid"]
+    raise SystemExit(
+        f"MIHOMO-шаблон name={name!r} не найден. Есть: "
+        + ", ".join(f"{t.get('name')}({t['uuid'][:8]})" for t in mihomo)
+    )
 
 
-def decode_yaml(inner):
-    """Достаёт YAML-текст из объекта шаблона независимо от точного имени поля."""
+def get_yaml(base, token, uuid):
+    code, resp = _req("GET", f"{base}/api/subscription-templates/{uuid}", token)
+    if code != 200:
+        raise SystemExit(f"template GET {code}: {resp}")
+    inner = resp.get("response", resp)
     b64 = inner.get("encodedTemplateYaml")
-    if b64:
-        return base64.b64decode(b64).decode("utf-8"), "encodedTemplateYaml"
-    # запасные варианты на случай иной схемы
-    for k in ("templateYaml", "template", "yaml"):
-        if inner.get(k):
-            return inner[k], k
-    raise SystemExit(f"Не нашёл YAML-поле в шаблоне. Ключи: {list(inner.keys())}")
+    if not b64:
+        raise SystemExit(f"encodedTemplateYaml пуст. Ключи: {list(inner.keys())}")
+    return base64.b64decode(b64).decode("utf-8")
 
 
-def youtube_state(text):
-    """Возвращает (found, foreign_first, proxies_list) для группы YouTube."""
+def yt_proxies(text):
     from ruamel.yaml import YAML
-    y = YAML()
-    data = y.load(text)
-    for g in data.get("proxy-groups", []) or []:
-        if g.get("name") == YT_GROUP:
-            pl = list(g.get("proxies", []))
-            return True, (bool(pl) and pl[0] == FOREIGN), pl
-    return False, False, []
+    for g in YAML().load(text).get("proxy-groups", []) or []:
+        if g.get("name") == GROUP:
+            return list(g.get("proxies", []))
+    return None
 
 
-def apply_fix(text):
-    """Ставит FOREIGN первым в proxies группы YouTube. Возвращает (new_text, changed)."""
+def reorder(text):
     from ruamel.yaml import YAML
-    import io
     y = YAML()
     y.preserve_quotes = True
-    y.width = 100000  # не переносить длинные строки
+    y.width = 100000
     data = y.load(text)
     changed = False
     for g in data.get("proxy-groups", []) or []:
-        if g.get("name") == YT_GROUP:
+        if g.get("name") == GROUP:
             pl = g.get("proxies")
             if pl is None:
-                raise SystemExit("У группы YouTube нет proxies — правка невозможна.")
-            plist = list(pl)
-            if FOREIGN not in plist:
-                raise SystemExit(f"'{FOREIGN}' нет в proxies YouTube: {plist}")
-            if plist[0] != FOREIGN:
-                plist.remove(FOREIGN)
-                plist.insert(0, FOREIGN)
-                # переписываем, сохраняя тип узла ruamel
+                raise SystemExit(f"У {GROUP} нет proxies.")
+            cur = list(pl)
+            if FOREIGN_ALIAS not in cur:
+                raise SystemExit(f"{FOREIGN_ALIAS!r} нет в {GROUP}: {cur}")
+            if cur[0] != FOREIGN_ALIAS:
+                cur.remove(FOREIGN_ALIAS)
+                cur.insert(0, FOREIGN_ALIAS)
                 del pl[:]
-                for item in plist:
-                    pl.append(item)
+                for it in cur:
+                    pl.append(it)
                 changed = True
             break
     else:
-        raise SystemExit(f"Группа '{YT_GROUP}' не найдена в шаблоне.")
+        raise SystemExit(f"Группа {GROUP} не найдена.")
     buf = io.StringIO()
     y.dump(data, buf)
     return buf.getvalue(), changed
@@ -126,6 +124,7 @@ def apply_fix(text):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["inspect", "apply"], default="inspect")
+    ap.add_argument("--name", default="Default", help="имя MIHOMO-шаблона (по умолч. Default = живой)")
     args = ap.parse_args()
 
     base = os.environ.get("RW_PANEL_API_BASE_URL", "").strip().rstrip("/")
@@ -134,50 +133,41 @@ def main():
         print("Нужны RW_PANEL_API_BASE_URL и RW_PANEL_API_TOKEN.", file=sys.stderr)
         sys.exit(2)
 
-    print(f"GET {base}/api/subscription-templates/{TEMPLATE_TYPE}")
-    inner = get_template(base, token)
-    print(f"Ключи объекта шаблона: {list(inner.keys())}")
-    text, field = decode_yaml(inner)
-    print(f"YAML-поле: {field}, длина {len(text)} симв., строк {text.count(chr(10)) + 1}")
+    uuid = find_uuid(base, token, args.name)
+    print(f"MIHOMO шаблон {args.name!r} -> {uuid}")
+    text = get_yaml(base, token, uuid)
+    pl = yt_proxies(text)
+    foreign_first = bool(pl) and pl[0] == FOREIGN_ALIAS
+    print(f"{GROUP}: {pl}")
+    print(f"foreign_first={foreign_first}")
 
-    found, foreign_first, pl = youtube_state(text)
-    print(f"Группа '{YT_GROUP}': found={found}, foreign_first={foreign_first}")
-    print(f"  proxies сейчас: {pl}")
-
-    # выгружаем полный живой шаблон в artifact для сверки
     with open("live-mihomo-template.yaml", "w", encoding="utf-8") as f:
         f.write(text)
-    print("Живой шаблон сохранён в live-mihomo-template.yaml (artifact).")
 
     if args.mode == "inspect":
-        print("MODE=inspect — PATCH не отправляю.")
+        print("MODE=inspect — PATCH не шлю.")
         return
 
-    if not found:
-        sys.exit(f"apply прерван: группа '{YT_GROUP}' не найдена.")
     if foreign_first:
-        print("apply: уже foreign-first, PATCH не нужен (идемпотентно).")
+        print("apply: уже foreign-first, PATCH не нужен.")
         return
 
-    new_text, changed = apply_fix(text)
+    new_text, changed = reorder(text)
     if not changed:
         print("apply: изменений нет.")
         return
-
     new_b64 = base64.b64encode(new_text.encode("utf-8")).decode("ascii")
-    payload = {"templateType": TEMPLATE_TYPE, field: new_b64}
-    print(f"PATCH {base}/api/subscription-templates  (field={field})")
-    _req("PATCH", f"{base}/api/subscription-templates", token, payload)
-    print("PATCH отправлен. Проверяю...")
+    code, resp = _req("PATCH", f"{base}/api/subscription-templates", token,
+                      {"uuid": uuid, "encodedTemplateYaml": new_b64})
+    print(f"PATCH -> {code}")
+    if not (200 <= code < 300):
+        sys.exit(f"PATCH failed: {resp}")
 
-    inner2 = get_template(base, token)
-    text2, _ = decode_yaml(inner2)
-    found2, ff2, pl2 = youtube_state(text2)
-    print(f"VERIFY: found={found2}, foreign_first={ff2}")
-    print(f"  proxies после: {pl2}")
-    if not ff2:
-        sys.exit("VERIFY FAIL: после PATCH группа YouTube не foreign-first.")
-    print("✓ Готово: YouTube в шаблоне теперь по умолчанию через заграницу.")
+    after = yt_proxies(get_yaml(base, token, uuid))
+    print(f"VERIFY {GROUP}: {after}")
+    if not (after and after[0] == FOREIGN_ALIAS):
+        sys.exit("VERIFY FAIL.")
+    print("✓ YouTube в шаблоне теперь по умолчанию через заграницу.")
 
 
 if __name__ == "__main__":
