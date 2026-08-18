@@ -151,12 +151,18 @@ for alias in "${targets[@]}"; do
   if [[ "$feature_monitoring_agent" == "true" ]]; then
     node_exporter_port="$(jq -r --arg alias "$alias" '.remnawave_runtime_host_vars[$alias].monitoring_agent_node_exporter_port // 9100' "$runtime_vars")"
     cadvisor_port="$(jq -r --arg alias "$alias" '.remnawave_runtime_host_vars[$alias].monitoring_agent_cadvisor_port // 8080' "$runtime_vars")"
+    agent_bind_address="$(jq -r --arg alias "$alias" '.remnawave_runtime_host_vars[$alias].monitoring_agent_bind_address // "127.0.0.1"' "$runtime_vars")"
+    if [[ "$agent_bind_address" == "0.0.0.0" ]]; then
+      agent_probe_address="127.0.0.1"
+    else
+      agent_probe_address="$agent_bind_address"
+    fi
 
     echo "[smoke][$alias] Check monitoring_agent containers and ports"
     run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-node-exporter$ | grep -q monitoring-node-exporter" >/dev/null
     run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/monitoring-cadvisor$ | grep -q monitoring-cadvisor" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://127.0.0.1:${node_exporter_port}/metrics' >/dev/null" >/dev/null
-    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://127.0.0.1:${cadvisor_port}/metrics' >/dev/null" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://${agent_probe_address}:${node_exporter_port}/metrics' >/dev/null" >/dev/null
+    run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --silent --show-error --fail 'http://${agent_probe_address}:${cadvisor_port}/metrics' >/dev/null" >/dev/null
   fi
 
   if [[ "$feature_monitoring_stack" == "true" ]]; then
