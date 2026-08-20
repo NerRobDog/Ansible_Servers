@@ -1,0 +1,185 @@
+---
+name: collect-fleet-logs
+
+# Nightly log archive for the fleet, delivered to the Telegram topic.
+#
+# Logs stream off the hosts and are assembled on the runner, so servers pay no
+# disk cost for retention — the archive lives in Telegram, not on the nodes.
+on:
+  schedule:
+    # 01:00 UTC == 03:00 Europe/Belgrade (CEST). GitHub cron has no timezone
+    # support, so this drifts to 02:00 local when the region leaves DST.
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub Environment containing fleet and alert secrets
+        required: true
+        default: production
+      limit:
+        description: Host aliases list (comma-separated) or all
+        required: false
+        default: all
+      since:
+        description: Log window passed to journalctl/docker (e.g. "24 hours ago")
+        required: false
+        default: "24 hours ago"
+
+env:
+  ANSIBLE_LOCAL_TEMP: .ansible/tmp
+  ANSIBLE_REMOTE_TEMP: .ansible/tmp
+  PY_COLORS: "1"
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || vars.RW_MONITOR_ENVIRONMENT || 'production' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install OS tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends jq openssh-client
+
+      - name: Prepare runtime directories
+        run: mkdir -p .ansible/tmp .ansible/runtime logs-out
+
+      - name: Decode fleet config from secret
+        env:
+          RW_FLEET_CONFIG_B64: ${{ secrets.RW_FLEET_CONFIG_B64 }}
+        run: |
+          if [[ -z "${RW_FLEET_CONFIG_B64}" ]]; then
+            echo "Secret RW_FLEET_CONFIG_B64 is required." >&2
+            exit 1
+          fi
+          echo "${RW_FLEET_CONFIG_B64}" | base64 --decode > .ansible/runtime/fleet_config.yaml
+
+      - name: Render runtime inventory
+        run: |
+          .github/scripts/render-fleet-runtime.py \
+            --fleet-config .ansible/runtime/fleet_config.yaml \
+            --mode deploy \
+            --inventory-out .ansible/runtime/hosts.ini \
+            --vars-out .ansible/runtime/runtime_vars.json \
+            --bootstrap-out .ansible/runtime/bootstrap_map.json
+
+      - name: Setup SSH private key
+        env:
+          ANSIBLE_SSH_PRIVATE_KEY: ${{ secrets.ANSIBLE_SSH_PRIVATE_KEY }}
+        run: |
+          if [[ -z "${ANSIBLE_SSH_PRIVATE_KEY}" ]]; then
+            echo "Secret ANSIBLE_SSH_PRIVATE_KEY is required." >&2
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "${ANSIBLE_SSH_PRIVATE_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Build known_hosts via ssh-keyscan
+        run: |
+          : > ~/.ssh/known_hosts
+          awk '
+            /^[^[]/ {
+              host="";
+              port="22";
+              for (i=1; i<=NF; i++) {
+                if ($i ~ /^ansible_host=/) { split($i, a, "="); host=a[2]; }
+                if ($i ~ /^ansible_port=/) { split($i, a, "="); port=a[2]; }
+              }
+              if (host != "") { print host " " port; }
+            }
+          ' .ansible/runtime/hosts.ini | sort -u > .ansible/runtime/host_ports.txt
+          if [[ ! -s .ansible/runtime/host_ports.txt ]]; then
+            echo "No hosts were generated from fleet config." >&2
+            exit 1
+          fi
+          # A down host must not abort the scan; the collector reports it instead.
+          while read -r host port; do
+            ssh-keyscan -T 8 -p "${port}" -H "${host}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          done < .ansible/runtime/host_ports.txt
+          sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Collect logs from fleet
+        id: collect
+        env:
+          LIMIT: ${{ github.event.inputs.limit || 'all' }}
+          SINCE: ${{ github.event.inputs.since || '24 hours ago' }}
+        run: |
+          stamp="$(date -u '+%Y-%m-%d')"
+          echo "stamp=${stamp}" >> "${GITHUB_OUTPUT}"
+          .github/scripts/collect-fleet-logs.sh \
+            --inventory .ansible/runtime/hosts.ini \
+            --out "logs-out/fleet-logs-${stamp}.tar" \
+            --since "${SINCE}" \
+            --limit "${LIMIT}"
+
+      - name: Split archive if it exceeds the Telegram document limit
+        id: parts
+        run: |
+          stamp="${{ steps.collect.outputs.stamp }}"
+          archive="logs-out/fleet-logs-${stamp}.tar"
+          # Bot API caps sendDocument at 50MB; stay under it with headroom.
+          limit_bytes=$((45 * 1024 * 1024))
+          size=$(wc -c < "${archive}" | tr -d ' ')
+          if (( size > limit_bytes )); then
+            split -b 45m -d "${archive}" "${archive}.part"
+            rm -f "${archive}"
+            echo "split=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "split=false" >> "${GITHUB_OUTPUT}"
+          fi
+          ls -la logs-out/
+
+      - name: Send archive to Telegram
+        env:
+          ALERT_TELEGRAM_BOT_TOKEN: ${{ secrets.ALERT_TELEGRAM_BOT_TOKEN }}
+          ALERT_TELEGRAM_CHAT_ID: ${{ secrets.ALERT_TELEGRAM_CHAT_ID }}
+          ALERT_TELEGRAM_TOPIC_ID: ${{ secrets.ALERT_TELEGRAM_TOPIC_ID }}
+          HOSTS_OK: ${{ steps.collect.outputs.hosts_ok }}
+          HOSTS_FAILED: ${{ steps.collect.outputs.hosts_failed }}
+          WAS_SPLIT: ${{ steps.parts.outputs.split }}
+        run: |
+          stamp="${{ steps.collect.outputs.stamp }}"
+          caption="Fleet logs ${stamp}
+          hosts ok: ${HOSTS_OK}, failed: ${HOSTS_FAILED}
+          window: ${{ github.event.inputs.since || '24 hours ago' }}"
+          if [[ "${WAS_SPLIT}" == "true" ]]; then
+            caption="${caption}
+          (split into parts — concatenate to restore the tar)"
+          fi
+          .github/scripts/send-telegram-document.sh \
+            --caption "${caption}" \
+            logs-out/*
+
+      - name: Upload archive as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fleet-logs-${{ steps.collect.outputs.stamp }}
+          path: logs-out/
+          retention-days: 7
+
+      - name: Report collection failures
+        if: always()
+        env:
+          HOSTS_FAILED: ${{ steps.collect.outputs.hosts_failed }}
+        run: |
+          if [[ -n "${HOSTS_FAILED}" && "${HOSTS_FAILED}" != "0" ]]; then
+            echo "::warning::${HOSTS_FAILED} host(s) failed log collection — see MANIFEST.txt in the archive."
+          fi
