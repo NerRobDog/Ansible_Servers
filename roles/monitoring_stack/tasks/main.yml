@@ -22,9 +22,12 @@
     that:
       - monitoring_stack_alert_telegram_bot_token | trim | length > 0
       - (monitoring_stack_alert_telegram_chat_id | string | trim) is match('^-?[0-9]+$')
+      - (monitoring_stack_alert_telegram_topic_id | default('') | string | trim) == ''
+        or (monitoring_stack_alert_telegram_topic_id | string | trim) is match('^[0-9]+$')
     fail_msg: >-
-      monitoring_stack_alert_telegram_enabled is true but bot token or chat id
-      is missing/invalid. chat_id must be numeric (channel ids start with -100).
+      monitoring_stack_alert_telegram_enabled is true but bot token, chat id, or
+      topic id is missing/invalid. chat_id must be numeric (channel ids start with
+      -100); topic id, when set, must be a positive integer.
   when: monitoring_stack_alert_telegram_enabled | bool
   tags: [monitoring, metrics, alerting]
 

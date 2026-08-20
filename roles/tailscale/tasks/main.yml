@@ -381,26 +381,24 @@
     - tailscale_is_openwrt | bool
   tags: [tailscale]
 
-- name: Resolve tailscale post-join status JSON + backend state
+# Do not round-trip this through a dict. `set_fact` type-casts a templated
+# string holding valid JSON into a mapping, so the captured stdout arrives
+# here as a dict on some paths and as a plain string on others (the pre-join
+# Resolve task reads `.stdout` straight off a register, which stays a
+# string). Feeding a dict to `from_json` raises "the JSON object must be
+# str, bytes or bytearray, not dict"; and a Jinja expression that *returns*
+# a dict comes back as a Python repr with single quotes, which set_fact then
+# fails to parse as JSON. Both shapes broke the play immediately after a
+# successful join on wrt_nab, 2026-08-15.
+# So: pull scalars out with a regex that matches JSON ("k":"v") and Python
+# repr ('k': 'v') alike, and never build an intermediate mapping.
+- name: Resolve tailscale post-join backend state
   ansible.builtin.set_fact:
-    tailscale_status_after_json: >-
-      {{
-        (
-          tailscale_post_join_status_stdout | default('') | trim | regex_search('^\{')
-        ) | ternary((tailscale_post_join_status_stdout | from_json), {})
-      }}
-    # Inline BackendState extraction — same self-contained pattern as the
-    # pre-join "Resolve tailscale status JSON + backend state" task. Ansible
-    # does not guarantee resolution order between sibling vars in one
-    # set_fact, so a reference to tailscale_status_after_json from a sibling
-    # would resolve as undefined.
     tailscale_backend_state_after: >-
       {{
-        (
-          (
-            tailscale_post_join_status_stdout | default('') | trim | regex_search('^\{')
-          ) | ternary((tailscale_post_join_status_stdout | from_json), {})
-        ).BackendState | default('NoState')
+        tailscale_post_join_status_stdout | default('') | string
+        | regex_search('BackendState[^A-Za-z]{1,6}([A-Za-z]+)', '\1')
+        | default(['NoState'], true) | first
       }}
   changed_when: false
   when: tailscale_enabled | bool
@@ -413,15 +411,17 @@
     fail_msg: >-
       Tailscale backend state is {{ tailscale_backend_state_after | default('unknown') }}
       on host {{ inventory_hostname }} after the post-join retry budget elapsed.
-      Last status stdout (truncated): {{ (tailscale_post_join_status_stdout | default(''))[:500] }}
-      Last status stderr (truncated): {{ (tailscale_post_join_status_stderr | default(''))[:500] }}
+      Last status stdout (truncated): {{ (tailscale_post_join_status_stdout | default('') | string)[:500] }}
+      Last status stderr (truncated): {{ (tailscale_post_join_status_stderr | default('') | string)[:500] }}
   when: tailscale_enabled | bool
   tags: [tailscale]
 
 # Expose this host's tailnet IPv4 as a fact so downstream roles
 # (monitoring_stack, monitoring_agent, etc.) can bind their service
-# ports to the tailnet interface instead of 0.0.0.0. The IPv4 is
-# pulled from the post-join status JSON; if no IPv4 is found (IPv6-only
+# ports to the tailnet interface instead of 0.0.0.0. Matched straight out
+# of the status text for the same shape-agnostic reason as the backend
+# state above. 100.64.0.0/10 is Tailscale's fixed CGNAT range, so this
+# cannot pick up a LAN address by accident. If no IPv4 is found (IPv6-only
 # tailnet, exotic config) `tailscale_self_ipv4` stays empty and the
 # downstream defaults fall back to 127.0.0.1 rather than expose
 # anything publicly.
@@ -429,11 +429,9 @@
   ansible.builtin.set_fact:
     tailscale_self_ipv4: >-
       {{
-        tailscale_status_after_json.TailscaleIPs
-        | default([])
-        | select('match', '^\d+\.\d+\.\d+\.\d+$')
-        | first
-        | default('')
+        tailscale_post_join_status_stdout | default('') | string
+        | regex_search('100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}')
+        | default('', true)
       }}
   changed_when: false
   when: tailscale_enabled | bool

@@ -50,7 +50,7 @@ groups:
       - alert: FleetHighLoad
         expr: >-
           node_load5{job="monitoring-node-exporter"}
-          / count by (instance) (node_cpu_seconds_total{job="monitoring-node-exporter",mode="idle"}) > 2
+          / on(instance) count by (instance) (node_cpu_seconds_total{job="monitoring-node-exporter",mode="idle"}) > 2
         for: 15m
         labels:
           severity: warning

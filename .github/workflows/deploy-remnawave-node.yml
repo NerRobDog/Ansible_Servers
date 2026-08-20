@@ -313,8 +313,15 @@ jobs:
             echo "No hosts were generated from fleet config." >&2
             exit 1
           fi
+          # Best-effort: keyscan every host in the rendered inventory, but never
+          # let an unreachable host abort the step. ssh-keyscan returns non-zero
+          # for a down host, and with `bash -e` that killed the whole deploy
+          # whenever ANY fleet host was offline — even when --limit targeted a
+          # live one. A bounded -T timeout keeps down hosts from stalling the run;
+          # `|| true` keeps the loop going. Ansible --limit still targets only the
+          # requested host, whose key was collected here.
           while read -r host port; do
-            ssh-keyscan -p "${port}" -H "${host}" >> ~/.ssh/known_hosts 2>/dev/null
+            ssh-keyscan -T 8 -p "${port}" -H "${host}" >> ~/.ssh/known_hosts 2>/dev/null || true
           done < .ansible/runtime/host_ports.txt
           sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
