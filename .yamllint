@@ -5,6 +5,7 @@ ignore: |
   .venv/
   .ansible/
   fleet.yml
+  config/mihomo/
 
 rules:
   line-length:
