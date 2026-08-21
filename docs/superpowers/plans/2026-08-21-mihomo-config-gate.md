@@ -1191,9 +1191,9 @@ A subscription URL is a bearer credential — anyone holding it gets working pro
 #   chmod 600 ~/.mihomo_test_subscription_url
 export MIHOMO_TEST_SUBSCRIPTION_URL="$(tr -d '\n' < ~/.mihomo_test_subscription_url)"
 python3 - <<'PY'
-import os, sys, yaml, urllib.request
+import os, sys, yaml
 sys.path.insert(0, '.github/scripts')
-import mihomo_candidate, mihomo_routing
+import mihomo_panel_api, mihomo_candidate, mihomo_routing
 
 DOMAINS = [
     "www.youtube.com", "chatgpt.com", "claude.ai", "x.com", "instagram.com",
@@ -1202,14 +1202,10 @@ DOMAINS = [
 ]
 
 template = yaml.safe_load(open('config/mihomo/default.template.yaml'))
-request = urllib.request.Request(
-    os.environ['MIHOMO_TEST_SUBSCRIPTION_URL'],
-    headers={'User-Agent': 'clash-meta/1.19.0'},
+proxies = mihomo_panel_api.fetch_rendered_proxies(
+    os.environ['MIHOMO_TEST_SUBSCRIPTION_URL']
 )
-with urllib.request.urlopen(request, timeout=30) as response:
-    rendered = yaml.safe_load(response.read().decode('utf-8'))
-
-candidate = mihomo_candidate.build_candidate(template, rendered['proxies'])
+candidate = mihomo_candidate.build_candidate(template, proxies)
 routes = mihomo_routing.probe_routes(
     candidate, DOMAINS, secret=mihomo_candidate.HARNESS_SECRET
 )
@@ -1281,7 +1277,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import urllib.request
 from pathlib import Path
 
 import yaml
@@ -1291,27 +1286,12 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 import mihomo_candidate  # noqa: E402
 import mihomo_lint  # noqa: E402
+import mihomo_panel_api  # noqa: E402
 import mihomo_routing  # noqa: E402
 
 REPO_ROOT = SCRIPT_DIR.parent.parent
 DEFAULT_TEMPLATE = REPO_ROOT / "config" / "mihomo" / "default.template.yaml"
 DEFAULT_EXPECTATIONS = REPO_ROOT / "config" / "mihomo" / "routing-expectations.yaml"
-
-
-def fetch_rendered_proxies(subscription_url: str) -> list[dict]:
-    """Read the real proxy list a router would receive.
-
-    Carries live credentials - never write the response to a log or artifact.
-    """
-    request = urllib.request.Request(
-        subscription_url, headers={"User-Agent": "clash-meta/1.19.0"}
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        rendered = yaml.safe_load(response.read().decode("utf-8"))
-    proxies = rendered.get("proxies") or []
-    if not proxies:
-        raise RuntimeError("rendered subscription contained no proxies")
-    return proxies
 
 
 def main() -> int:
@@ -1330,7 +1310,10 @@ def main() -> int:
     expectations = yaml.safe_load(args.expectations.read_text(encoding="utf-8"))["expectations"]
     domains = [item["domain"] for item in expectations]
 
-    proxies = fetch_rendered_proxies(subscription_url)
+    # Fetched via curl inside mihomo_panel_api: the macOS Python.framework
+    # interpreters have no CA bundle and urllib fails against the panel host.
+    # The response carries live credentials - never log it or upload it.
+    proxies = mihomo_panel_api.fetch_rendered_proxies(subscription_url)
     candidate = mihomo_candidate.build_candidate(template, proxies)
 
     report: list[str] = ["## mihomo config gate", ""]
