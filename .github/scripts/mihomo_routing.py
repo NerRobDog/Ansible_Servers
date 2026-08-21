@@ -96,25 +96,57 @@ _CONTAINER_NAME = "mihomo-gate-harness"
 _PROXY_PORT = 17890
 _READY_TIMEOUT_SECONDS = 60
 
+# Proves the CONNECT+TLS tunnel is serving, which is the path the real probes
+# use. A plain-http warmup is useless here: proxying http:// is absolute-URI
+# forwarding, ready at ~0.03s, while https CONNECT is not usable until
+# ~0.5-0.8s. Measured over three runs on Docker Desktop.
+_WARMUP_URL = "https://www.gstatic.com/generate_204"
+
 
 def _run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, capture_output=True, text=True, check=False, **kwargs)
 
 
-def _wait_until_ready(secret: str, timeout: int = _READY_TIMEOUT_SECONDS) -> None:
-    """Poll the Clash API until mihomo answers, or give up loudly."""
+def _proxy_usable(port: int) -> bool:
+    """True once a request actually completes through the mixed port.
+
+    A bare TCP connect is not enough: Docker publishes the host port
+    immediately, so it accepts long before mihomo serves it. Measured on Docker
+    Desktop, the controller answers at 0.01s while a proxied request still
+    fails at 0.05s with curl exit 35 (TLS) and only succeeds from ~0.5s.
+    """
+    result = _run([
+        "curl", "--silent", "--output", "/dev/null", "--max-time", "5",
+        "--proxy", f"http://127.0.0.1:{port}", _WARMUP_URL,
+    ])
+    return result.returncode == 0
+
+
+def _wait_until_ready(
+    secret: str,
+    proxy_port: int = _PROXY_PORT,
+    timeout: int = _READY_TIMEOUT_SECONDS,
+) -> None:
+    """Wait until BOTH the Clash API and the proxy port are actually serving."""
     request = urllib.request.Request(
         "http://127.0.0.1:19099/version", headers={"Authorization": f"Bearer {secret}"}
     )
     deadline = time.monotonic() + timeout
+    controller_ready = False
     while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(request, timeout=3) as response:
-                json.loads(response.read().decode("utf-8"))
-                return
-        except (urllib.error.URLError, OSError, ValueError):
-            time.sleep(1)
-    raise RuntimeError(f"mihomo did not become ready within {timeout}s")
+        if not controller_ready:
+            try:
+                with urllib.request.urlopen(request, timeout=3) as response:
+                    json.loads(response.read().decode("utf-8"))
+                controller_ready = True
+            except (urllib.error.URLError, OSError, ValueError):
+                time.sleep(0.5)
+                continue
+        if _proxy_usable(proxy_port):
+            return
+        time.sleep(0.5)
+    stage = "proxy port" if controller_ready else "control API"
+    raise RuntimeError(f"mihomo {stage} did not become ready within {timeout}s")
 
 
 def probe_routes(

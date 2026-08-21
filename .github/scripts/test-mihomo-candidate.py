@@ -118,6 +118,38 @@ def test_candidate_does_not_mutate_input() -> None:
     assert_true(template["tun"]["enable"] is True, "input template tun was mutated")
 
 
+def test_extract_proxies_reads_the_list() -> None:
+    document = (
+        "proxies:\n"
+        "- name: '🇷🇺 Без VPN'\n"
+        "  type: direct\n"
+        "- name: DNS-OUT\n"
+        "  type: dns\n"
+    )
+    proxies = mihomo_panel_api.extract_proxies(document)
+    assert_true([p["name"] for p in proxies] == ["🇷🇺 Без VPN", "DNS-OUT"], f"wrong proxies: {proxies}")
+
+
+def test_extract_proxies_rejects_a_document_without_proxies() -> None:
+    try:
+        mihomo_panel_api.extract_proxies("rules:\n- MATCH,DIRECT\n")
+    except RuntimeError as exc:
+        assert_true("no proxies" in str(exc), f"unhelpful error: {exc}")
+        return
+    raise AssertionError("a subscription without proxies must raise")
+
+
+def test_extract_proxies_rejects_an_empty_document() -> None:
+    # A blank or error response must fail loudly rather than yield an empty
+    # config that would later look like "every route disappeared".
+    try:
+        mihomo_panel_api.extract_proxies("")
+    except RuntimeError as exc:
+        assert_true("no proxies" in str(exc), f"unhelpful error: {exc}")
+        return
+    raise AssertionError("an empty subscription must raise")
+
+
 def main() -> int:
     tests = [
         test_decode_unwraps_response_envelope,
@@ -130,6 +162,9 @@ def main() -> int:
         test_candidate_forces_allow_lan,
         test_candidate_sets_controller,
         test_candidate_does_not_mutate_input,
+        test_extract_proxies_reads_the_list,
+        test_extract_proxies_rejects_a_document_without_proxies,
+        test_extract_proxies_rejects_an_empty_document,
     ]
     for test in tests:
         test()
