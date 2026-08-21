@@ -25,3 +25,11 @@ expectations:
   group: 🌍 Остальные сайты
 - domain: ru.watchd0g.dev
   group: 🌍 Остальные сайты
+# Subscription distribution. Every router fetches its OpenClash profile from
+# here, so this entry guards the most load-bearing domain in the fleet. It
+# currently falls through to the catch-all and therefore rides the proxy pool
+# itself: if the pool breaks, a router cannot fetch the config that would fix
+# it. Whether to break that circular dependency with an explicit DIRECT rule is
+# open - see beads as-6y4. Recorded here as observed, not as desired.
+- domain: no.watchd0g.dev
+  group: 🌍 Остальные сайты
