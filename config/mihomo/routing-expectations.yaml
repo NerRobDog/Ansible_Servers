@@ -1,0 +1,27 @@
+# Golden file: where each domain must route.
+# Changing a route means changing this file in the same commit - the gate
+# fails on any deviation, which is how an intended change is told apart
+# from a regression. Seeded from an observed run on the captured template.
+expectations:
+- domain: www.youtube.com
+  group: 📺 YouTube
+- domain: chatgpt.com
+  group: 🤖 ChatGPT и AI
+- domain: claude.ai
+  group: 🤖 ChatGPT и AI
+- domain: x.com
+  group: 🚫 Недоступные из РФ
+- domain: instagram.com
+  group: 📷 Instagram
+- domain: discord.com
+  group: 💬 Discord
+- domain: api.telegram.org
+  group: ➤ Telegram
+- domain: soundcloud.com
+  group: 🚫 Недоступные из РФ
+- domain: yandex.ru
+  group: ⚪🔵🔴 RU сайты
+- domain: www.gstatic.com
+  group: 🌍 Остальные сайты
+- domain: ru.watchd0g.dev
+  group: 🌍 Остальные сайты
