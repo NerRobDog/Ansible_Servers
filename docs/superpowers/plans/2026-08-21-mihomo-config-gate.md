@@ -1133,7 +1133,39 @@ The new imports must not break the pure tests. `import yaml` at module top means
 Run: `python3 .github/scripts/test-mihomo-routing.py`
 Expected: nine `PASS:` lines.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Prove `config_test()` works against the real template**
+
+No credentials and no real traffic — but the stand-in proxy list must include the template's OWN `proxies:` entries.
+
+That stub is not empty. It holds two static proxies: `🇷🇺 Без VPN` (type `direct`) and `DNS-OUT` (type `dns`). Three groups list `🇷🇺 Без VPN` as a member, and the config's very first rule is `DST-PORT,53,DNS-OUT`. The panel preserves both and appends the subscriber's real nodes on top — confirmed against a live rendered subscription, which returns exactly those two plus seven VLESS nodes. So `build_candidate()` replacing `proxies:` wholesale is right for real use; a stand-in list that drops the statics is simply unrepresentative.
+
+```bash
+python3 -c "
+import sys, yaml
+sys.path.insert(0, '.github/scripts')
+import mihomo_candidate, mihomo_routing
+template = yaml.safe_load(open('config/mihomo/default.template.yaml'))
+stand_in = [{'name': 'probe', 'type': 'direct', 'udp': True}]
+candidate = mihomo_candidate.build_candidate(template, template['proxies'] + stand_in)
+ok, output = mihomo_routing.config_test(candidate)
+print('mihomo -t ok:', ok)
+print(output.strip()[-400:])
+raise SystemExit(0 if ok else 1)
+"
+```
+
+Expected: `mihomo -t ok: True`, output ending in `configuration file /cfg/config.yaml test is successful`. Several `provider is Classical` warnings are normal.
+
+**This is the clearest evidence for why layer 2 exists.** Dropping the statics was tried during implementation. `mihomo -t` reported ONE missing reference — and a *different* one on each run, because Go randomises map iteration order, so the error names whichever group it evaluated first. `mihomo_lint.lint_config()` on the same input reported all four problems, deterministically and by name:
+
+```
+rule targets unknown outbound 'DNS-OUT': DST-PORT,53,DNS-OUT
+group '🧲 Торрент-трекеры' lists unknown member '🇷🇺 Без VPN'
+group '🎮 Игры' lists unknown member '🇷🇺 Без VPN'
+group '⚪🔵🔴 RU сайты' lists unknown member '🇷🇺 Без VPN'
+```
+
+- [ ] **Step 5: Commit**
 
 ```bash
 git add .github/scripts/mihomo_routing.py
