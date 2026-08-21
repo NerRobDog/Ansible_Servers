@@ -48,12 +48,88 @@ def test_roundtrip_preserves_non_ascii() -> None:
     assert_true(decoded == body, "non-ASCII round-trip corrupted the body")
 
 
+import mihomo_candidate  # noqa: E402
+
+
+def sample_template() -> dict:
+    return {
+        "mixed-port": 7890,
+        "allow-lan": False,
+        "tun": {"enable": True, "stack": "system"},
+        "proxies": [{"name": "🇷🇺 Без VPN", "type": "direct"}],
+        "proxy-groups": [
+            {
+                "name": "🌍 Остальные сайты",
+                "type": "select",
+                "remnawave": {"include-proxies": False},
+                "proxies": ["DIRECT"],
+            },
+            {"name": "📺 YouTube", "type": "select", "include-all": True},
+        ],
+        "rules": ["MATCH,🌍 Остальные сайты"],
+    }
+
+
+def real_proxies() -> list[dict]:
+    return [
+        {"name": "🇳🇱 Netherlands-2", "type": "vless", "server": "nl.example", "port": 443},
+        {"name": "🇺🇸 USA-2", "type": "vless", "server": "us.example", "port": 443},
+    ]
+
+
+def test_candidate_replaces_proxies() -> None:
+    result = mihomo_candidate.build_candidate(sample_template(), real_proxies())
+    names = [p["name"] for p in result["proxies"]]
+    assert_true(names == ["🇳🇱 Netherlands-2", "🇺🇸 USA-2"], f"stub proxies not replaced: {names}")
+
+
+def test_candidate_strips_remnawave_key() -> None:
+    result = mihomo_candidate.build_candidate(sample_template(), real_proxies())
+    leftovers = [g["name"] for g in result["proxy-groups"] if "remnawave" in g]
+    assert_true(not leftovers, f"remnawave key survived in: {leftovers}")
+
+
+def test_candidate_disables_tun() -> None:
+    # TUN needs NET_ADMIN and a real device; the harness is userspace-only.
+    result = mihomo_candidate.build_candidate(sample_template(), real_proxies())
+    assert_true(result["tun"]["enable"] is False, "tun must be disabled in the harness")
+    assert_true(result["tun"]["stack"] == "system", "unrelated tun settings must survive")
+
+
+def test_candidate_forces_allow_lan() -> None:
+    # With allow-lan false mihomo listens on loopback INSIDE the container, so a
+    # published port goes nowhere and curl fails in 3ms with http=000.
+    result = mihomo_candidate.build_candidate(sample_template(), real_proxies())
+    assert_true(result["allow-lan"] is True, "allow-lan must be forced on")
+    assert_true(result["bind-address"] == "*", "bind-address must be wildcard")
+
+
+def test_candidate_sets_controller() -> None:
+    result = mihomo_candidate.build_candidate(sample_template(), real_proxies(), secret="s3cr3t")
+    assert_true(result["external-controller"] == "0.0.0.0:9099", "controller not set")
+    assert_true(result["secret"] == "s3cr3t", "secret not set")
+    assert_true(result["log-level"] == "debug", "debug log level is required to read rule matches")
+
+
+def test_candidate_does_not_mutate_input() -> None:
+    template = sample_template()
+    mihomo_candidate.build_candidate(template, real_proxies())
+    assert_true("remnawave" in template["proxy-groups"][0], "input template was mutated")
+    assert_true(template["tun"]["enable"] is True, "input template tun was mutated")
+
+
 def main() -> int:
     tests = [
         test_decode_unwraps_response_envelope,
         test_decode_accepts_bare_payload,
         test_decode_rejects_empty_template,
         test_roundtrip_preserves_non_ascii,
+        test_candidate_replaces_proxies,
+        test_candidate_strips_remnawave_key,
+        test_candidate_disables_tun,
+        test_candidate_forces_allow_lan,
+        test_candidate_sets_controller,
+        test_candidate_does_not_mutate_input,
     ]
     for test in tests:
         test()
