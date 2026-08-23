@@ -40,6 +40,15 @@ jobs:
       - name: OpenWrt fleet renderer contract tests
         run: python .github/scripts/test-render-openwrt-fleet-runtime.py
 
+      - name: mihomo candidate contract tests
+        run: python .github/scripts/test-mihomo-candidate.py
+
+      - name: mihomo lint contract tests
+        run: python .github/scripts/test-mihomo-lint.py
+
+      - name: mihomo routing contract tests
+        run: python .github/scripts/test-mihomo-routing.py
+
       - name: Syntax check playbook.yml
         run: ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
 

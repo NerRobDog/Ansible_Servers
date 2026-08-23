@@ -1,0 +1,60 @@
+---
+name: mihomo-config-gate
+
+# Validates the routing config on every PR that touches it. Phase A: checks
+# only - the panel is not patched and no router is touched.
+#
+# The gate needs real proxies to build a runnable candidate, so it reads a
+# rendered subscription at run time. That response carries live credentials and
+# must never be written to a log or an artifact.
+on:
+  pull_request:
+    paths:
+      - "config/mihomo/**"
+      - ".github/scripts/mihomo_*.py"
+      - ".github/workflows/mihomo-config-gate.yml"
+  workflow_dispatch:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    environment: Testing
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyYAML
+
+      - name: Pull the mihomo image
+        run: docker pull metacubex/mihomo:latest
+
+      - name: Run the config gate
+        env:
+          MIHOMO_TEST_SUBSCRIPTION_URL: ${{ secrets.MIHOMO_TEST_SUBSCRIPTION_URL }}
+        run: python .github/scripts/mihomo_gate.py --report mihomo-gate-report.md
+
+      - name: Comment the routing report on the PR
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (!fs.existsSync('mihomo-gate-report.md')) return;
+            const body = fs.readFileSync('mihomo-gate-report.md', 'utf8');
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
