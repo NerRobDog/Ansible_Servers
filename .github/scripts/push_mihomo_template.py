@@ -19,6 +19,9 @@ subscription-template Remnawave (панель ru.watchd0g.dev; роутеры Op
      первым правилом. Без этого клиент за роутером резолвит время в fake-ip
      198.18.x и не может синкнуть UDP-123 -> кривые часы -> TLS Google падает ->
      YouTube 'Нет соединения' (диагноз на Яндекс-модуле за wrt-sh 2026-08-23).
+  3) Kinopoisk OTT CDN (trex.media, uma.media) в ru-inline + fake-ip-filter ->
+     RU-direct. Иначе домены падают в финальный MATCH -> заграничный выход ->
+     CDN geo-блочит RU-контент -> плеер Kinopoisk пустой.
 
 Env: RW_PANEL_API_BASE_URL, RW_PANEL_API_TOKEN
 """
@@ -46,6 +49,16 @@ NTP_DOMAINS = [
     "ntp.yandex.net", "+.gpsonextra.net",
 ]
 NTP_RULE = "DST-PORT,123,DIRECT"
+
+# Kinopoisk/Yandex OTT видео-CDN. Резолвится в RU-IP, но домены не входили ни в
+# один RU-rule-set -> финальный MATCH -> заграничный выход -> CDN видит не-RU IP
+# -> geo-блок RU-контента -> плеер Kinopoisk пустой (диагноз на Яндекс-модуле за
+# wrt-sh 2026-08-23, live rule-match подтверждён контейнером mihomo).
+# Пиним в ru-inline (-> ⚪🔵🔴 RU сайты, DIRECT) + fake-ip-filter (real RU IP).
+RU_INLINE_NAME = "ru-inline"          # inline rule-provider с payload классических правил
+RU_CDN_SUFFIXES = ["trex.media", "uma.media"]
+RU_CDN_RULES = [f"DOMAIN-SUFFIX,{s}" for s in RU_CDN_SUFFIXES]
+RU_CDN_FAKEIP = [f"+.{s}" for s in RU_CDN_SUFFIXES]
 
 
 def _ctx():
@@ -119,6 +132,18 @@ def ntp_status(text):
     return in_fif, has_rule
 
 
+def kp_status(text):
+    """(правила_в_ru-inline, домены_в_fake-ip-filter) для Kinopoisk CDN."""
+    from ruamel.yaml import YAML
+    data = YAML().load(text)
+    ru = ((data.get("rule-providers") or {}).get(RU_INLINE_NAME) or {}).get("payload", []) or []
+    have_r = set(str(x).replace(" ", "") for x in ru)
+    in_ru = [r for r in RU_CDN_RULES if r.replace(" ", "") in have_r]
+    fif = set(str(x) for x in (data.get("dns") or {}).get("fake-ip-filter", []) or [])
+    in_fif = [d for d in RU_CDN_FAKEIP if d in fif]
+    return in_ru, in_fif
+
+
 def transform(text):
     """Идемпотентно: YT-группа заграницей дефолтом + NTP durable-фикс.
     Обе правки за один load/dump. Возвращает (new_text, changes[])."""
@@ -166,6 +191,23 @@ def transform(text):
         rules.insert(0, NTP_RULE)
         changes.append(f"rules+={NTP_RULE}")
 
+    # 3) Kinopoisk OTT CDN -> RU (ru-inline payload + fake-ip-filter)
+    rp = data.get("rule-providers") or {}
+    ru_inline = rp.get(RU_INLINE_NAME)
+    if not ru_inline or "payload" not in ru_inline:
+        raise SystemExit(f"rule-provider {RU_INLINE_NAME!r} с payload не найден.")
+    pl = ru_inline["payload"]
+    have_rules = set(str(x).replace(" ", "") for x in pl)
+    for r in RU_CDN_RULES:
+        if r.replace(" ", "") not in have_rules:
+            pl.append(r)
+            changes.append(f"{RU_INLINE_NAME}.payload+={r}")
+    have_fif = set(str(x) for x in fif)
+    for d in RU_CDN_FAKEIP:
+        if d not in have_fif:
+            fif.append(d)
+            changes.append(f"fake-ip-filter+={d}")
+
     buf = io.StringIO()
     y.dump(data, buf)
     return buf.getvalue(), changes
@@ -189,9 +231,11 @@ def main():
     pl = yt_proxies(text)
     foreign_first = bool(pl) and pl[0] == FOREIGN_ALIAS
     ntp_fif, ntp_rule = ntp_status(text)
+    kp_ru, kp_fif = kp_status(text)
     print(f"{GROUP}: {pl}")
     print(f"foreign_first={foreign_first}")
     print(f"NTP: домены={len(ntp_fif)}/{len(NTP_DOMAINS)}, DST-PORT,123,DIRECT={ntp_rule}")
+    print(f"KP-CDN: ru-inline={len(kp_ru)}/{len(RU_CDN_RULES)}, fake-ip-filter={len(kp_fif)}/{len(RU_CDN_FAKEIP)}")
 
     with open("live-mihomo-template.yaml", "w", encoding="utf-8") as f:
         f.write(text)
@@ -202,7 +246,7 @@ def main():
 
     new_text, changed = transform(text)
     if not changed:
-        print("apply: уже всё на месте (YT foreign-first + NTP), PATCH не нужен.")
+        print("apply: уже всё на месте (YT foreign-first + NTP + KP-CDN), PATCH не нужен.")
         return
     print("changes:", changed)
     new_b64 = base64.b64encode(new_text.encode("utf-8")).decode("ascii")
@@ -215,13 +259,17 @@ def main():
     after_text = get_yaml(base, token, uuid)
     after = yt_proxies(after_text)
     a_fif, a_rule = ntp_status(after_text)
+    a_kp_ru, a_kp_fif = kp_status(after_text)
     print(f"VERIFY {GROUP}: {after}")
     print(f"VERIFY NTP: домены={len(a_fif)}/{len(NTP_DOMAINS)}, rule={a_rule}")
+    print(f"VERIFY KP-CDN: ru-inline={len(a_kp_ru)}/{len(RU_CDN_RULES)}, fake-ip-filter={len(a_kp_fif)}/{len(RU_CDN_FAKEIP)}")
     if not (after and after[0] == FOREIGN_ALIAS):
         sys.exit("VERIFY FAIL: YT не foreign-first.")
     if len(a_fif) != len(NTP_DOMAINS) or not a_rule:
         sys.exit("VERIFY FAIL: NTP-фикс не полный.")
-    print("✓ Шаблон: YouTube через заграницу + NTP durable-фикс на месте.")
+    if len(a_kp_ru) != len(RU_CDN_RULES) or len(a_kp_fif) != len(RU_CDN_FAKEIP):
+        sys.exit("VERIFY FAIL: KP-CDN-пин не полный.")
+    print("✓ Шаблон: YouTube загран + NTP durable + Kinopoisk CDN на RU.")
 
 
 if __name__ == "__main__":
