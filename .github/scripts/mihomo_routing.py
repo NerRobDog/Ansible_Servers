@@ -83,7 +83,12 @@ def compare_routes(
         expected_group = expectation["group"]
         route = actual.get(domain)
         if route is None:
-            mismatches.append(f"{domain}: no route observed (expected {expected_group!r})")
+            # Worded to match the report table: a silent probe is not the same
+            # finding as a route that moved, even though both fail the gate.
+            mismatches.append(
+                f"{domain}: probe failed, no route observed "
+                f"(expected {expected_group!r})"
+            )
             continue
         if route.group != expected_group:
             mismatches.append(

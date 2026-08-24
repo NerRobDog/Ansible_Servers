@@ -60,6 +60,14 @@ def extract_proxies(subscription_yaml: str) -> list[dict[str, Any]]:
             f"rendered subscription is not valid YAML ({type(exc).__name__}); "
             "body withheld - it carries live proxy credentials"
         ) from None
+    # A plain-text panel error ("Not Found", an interstitial) is valid YAML and
+    # parses to a str, so .get() would raise a bare AttributeError. Name the
+    # type only - never the body.
+    if rendered is not None and not isinstance(rendered, dict):
+        raise RuntimeError(
+            f"rendered subscription is not a YAML mapping (got {type(rendered).__name__}); "
+            "body withheld - it carries live proxy credentials"
+        )
     proxies = (rendered or {}).get("proxies") or []
     if not proxies:
         raise RuntimeError("rendered subscription contained no proxies")
