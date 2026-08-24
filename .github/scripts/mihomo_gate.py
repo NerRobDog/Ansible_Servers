@@ -31,6 +31,43 @@ REPO_ROOT = SCRIPT_DIR.parent.parent
 DEFAULT_TEMPLATE = REPO_ROOT / "config" / "mihomo" / "default.template.yaml"
 DEFAULT_EXPECTATIONS = REPO_ROOT / "config" / "mihomo" / "routing-expectations.yaml"
 
+# Shorter than this and a "secret" is not one - a port such as "443" would be
+# masked out of unrelated prose and shred the diagnostics this report exists
+# to carry.
+_MIN_REDACTED_LENGTH = 4
+
+
+def _redaction_tokens(proxies: list[dict]) -> list[str]:
+    """Every string value anywhere in the proxy list, longest first.
+
+    The rendered subscription is a bearer artifact: names, servers, UUIDs and
+    passwords all identify the fleet. Longest-first so a longer secret is
+    masked before a shorter one that happens to be its substring.
+    """
+    tokens: set[str] = set()
+
+    def walk(value: object) -> None:
+        if isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+        elif isinstance(value, str) and len(value) >= _MIN_REDACTED_LENGTH:
+            tokens.add(value)
+
+    walk(proxies)
+    # Length first, then the token itself, so the order is deterministic
+    # regardless of set iteration order.
+    return sorted(tokens, key=lambda token: (-len(token), token))
+
+
+def _redact(text: str, tokens: list[str]) -> str:
+    """Mask every proxy-derived value out of text bound for a public comment."""
+    for token in tokens:
+        text = text.replace(token, "<redacted>")
+    return text
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate the mihomo routing config.")
@@ -61,7 +98,11 @@ def main() -> int:
     report.append(f"- **Syntax (`mihomo -t`)**: {'PASS' if ok else 'FAIL'}")
     if not ok:
         failed = True
-        report.extend(["", "```", output.strip()[-2000:], "```", ""])
+        # This is the failure path, i.e. exactly when the output is least
+        # predictable: a proxy-initialisation error echoes the offending
+        # proxy's fields, and this report is posted as a public PR comment.
+        redacted = _redact(output, _redaction_tokens(proxies)).strip()
+        report.extend(["", "```", redacted[-2000:], "```", ""])
 
     errors, warnings = mihomo_lint.lint_config(candidate)
     report.append(f"- **Referential integrity**: {'PASS' if not errors else 'FAIL'}")
@@ -86,16 +127,22 @@ def main() -> int:
     mismatches = mihomo_routing.compare_routes(routes, expectations)
     report.append(f"- **Routing regression**: {'PASS' if not mismatches else 'FAIL'}")
 
-    report.extend(["", "| domain | rule | group | node |", "|---|---|---|---|"])
+    # No `node` column, deliberately - do not restore it. Two reasons: the node
+    # names come from the rendered subscription and are descriptive (country,
+    # role), so publishing them in a PR comment publishes the fleet's exit
+    # inventory; and url-test / load-balance groups resolve to whichever node
+    # won the last health check, so the column churns run-to-run on an
+    # unchanged config - noise in the one artifact a human diffs by eye.
+    report.extend(["", "| domain | rule | group |", "|---|---|---|"])
     for item in expectations:
         route = routes.get(item["domain"])
         if route is None:
-            report.append(f"| {item['domain']} | — | **no route** | — |")
+            # Distinct from a group mismatch: the probe never produced a log
+            # line, which is a failed measurement and not a routing change.
+            report.append(f"| {item['domain']} | — | **probe failed (no route observed)** |")
             continue
         marker = "" if route.group == item["group"] else " ⚠️"
-        report.append(
-            f"| {item['domain']} | `{route.rule}` | {route.group}{marker} | {route.node} |"
-        )
+        report.append(f"| {item['domain']} | `{route.rule}` | {route.group}{marker} |")
 
     if mismatches:
         failed = True

@@ -17,7 +17,14 @@ on:
 
 jobs:
   gate:
+    # Defense in depth. The path filter above includes the very scripts that
+    # receive MIHOMO_TEST_SUBSCRIPTION_URL, so a PR could edit the code that
+    # handles the secret. GitHub already withholds secrets from fork-originated
+    # pull_request runs, but that is one repo setting away from changing, and
+    # this credential grants working proxy access to the whole fleet.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: Testing
     permissions:
       contents: read
@@ -36,14 +43,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install PyYAML
 
+      # Pinned: see the MIHOMO_IMAGE comment in mihomo_routing.py. Keep the two
+      # in step - an upstream log-format change reds PRs that changed nothing.
       - name: Pull the mihomo image
-        run: docker pull metacubex/mihomo:latest
+        run: docker pull metacubex/mihomo:v1.19.23
 
       - name: Run the config gate
         env:
           MIHOMO_TEST_SUBSCRIPTION_URL: ${{ secrets.MIHOMO_TEST_SUBSCRIPTION_URL }}
         run: python .github/scripts/mihomo_gate.py --report mihomo-gate-report.md
 
+      # Upsert rather than append: one comment per PR that gets rewritten on
+      # every push, so the thread stays readable instead of accumulating a
+      # fresh copy of the table each time.
       - name: Comment the routing report on the PR
         if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
@@ -51,10 +63,34 @@ jobs:
           script: |
             const fs = require('fs');
             if (!fs.existsSync('mihomo-gate-report.md')) return;
-            const body = fs.readFileSync('mihomo-gate-report.md', 'utf8');
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body,
+            const marker = '<!-- mihomo-gate-report -->';
+            const body = marker + '\n' + fs.readFileSync('mihomo-gate-report.md', 'utf8');
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
             });
+            const existing = comments.find(
+              (comment) =>
+                comment.user &&
+                comment.user.login === 'github-actions[bot]' &&
+                (comment.body || '').startsWith(marker)
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }

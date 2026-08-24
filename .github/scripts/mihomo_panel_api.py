@@ -49,7 +49,17 @@ def fetch_template(base_url: str, token: str, uuid: str = MIHOMO_DEFAULT_UUID) -
 
 def extract_proxies(subscription_yaml: str) -> list[dict[str, Any]]:
     """Pull the proxy list out of a rendered subscription document."""
-    rendered = yaml.safe_load(subscription_yaml)
+    # PyYAML quotes a snippet of the offending document in its error message,
+    # and this body carries live proxy credentials while the gate's Actions log
+    # is public. `from None` is load-bearing: without it the original exception
+    # rides along as __context__ and Python prints the snippet anyway.
+    try:
+        rendered = yaml.safe_load(subscription_yaml)
+    except yaml.YAMLError as exc:
+        raise RuntimeError(
+            f"rendered subscription is not valid YAML ({type(exc).__name__}); "
+            "body withheld - it carries live proxy credentials"
+        ) from None
     proxies = (rendered or {}).get("proxies") or []
     if not proxies:
         raise RuntimeError("rendered subscription contained no proxies")
@@ -69,11 +79,14 @@ def fetch_rendered_proxies(subscription_url: str) -> list[dict[str, Any]]:
     to an artifact, and never include curl's stderr in an error message because
     the URL itself is a bearer credential.
     """
+    # The URL goes in on stdin via `curl --config -` rather than as an argv
+    # element: argv is readable through `ps` by any local user for the life of
+    # the request, and this URL is itself a bearer credential.
+    escaped_url = subscription_url.replace("\\", "\\\\").replace('"', '\\"')
+    curl_config = f'url = "{escaped_url}"\nuser-agent = "{CLASH_USER_AGENT}"\n'
     result = subprocess.run(
-        [
-            "curl", "--silent", "--show-error", "--fail", "--max-time", "30",
-            "--user-agent", CLASH_USER_AGENT, subscription_url,
-        ],
+        ["curl", "--silent", "--show-error", "--fail", "--max-time", "30", "--config", "-"],
+        input=curl_config,
         capture_output=True,
         text=True,
         check=False,

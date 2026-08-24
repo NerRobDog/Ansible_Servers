@@ -68,6 +68,31 @@ def test_last_observation_wins() -> None:
     assert_true(routes["a.com"].group == "🅱 Two", f"later line should win: {routes['a.com']}")
 
 
+def test_parse_routes_merges_across_two_log_reads() -> None:
+    # probe_routes re-probes the domains that produced no log line and reads the
+    # container logs a second time. The merge must keep the first pass's
+    # observations and let the retry's win where they overlap.
+    first = (
+        'time="2026-08-21T10:11:45.800262511Z" level=info msg="[TCP] 172.56.198.41:30089 '
+        '--> www.youtube.com:443 match RuleSet(youtube) using 📺 YouTube[🇳🇱 Netherlands-2]"\n'
+        'time="2026-08-21T10:11:47.131630053Z" level=info msg="[TCP] 172.56.198.41:40549 '
+        '--> chatgpt.com:443 match RuleSet(openai-inline) using 🤖 ChatGPT и AI[🇺🇸 USA-2]"\n'
+    )
+    second = (
+        'time="2026-08-21T10:12:01.004112233Z" level=info msg="[TCP] 172.56.198.41:41880 '
+        '--> x.com:443 match RuleSet(no-russia-hosts) using 🚫 Недоступные из РФ[🇺🇸 USA-2]"\n'
+        'time="2026-08-21T10:12:02.551900871Z" level=info msg="[TCP] 172.56.198.41:41902 '
+        '--> www.youtube.com:443 match RuleSet(youtube) using 📺 YouTube[🇳🇱 Netherlands-3]"\n'
+    )
+    merged = {**mihomo_routing.parse_routes(first), **mihomo_routing.parse_routes(second)}
+    assert_true(merged["chatgpt.com"].group == "🤖 ChatGPT и AI", "first-pass route was dropped")
+    assert_true(merged["x.com"].group == "🚫 Недоступные из РФ", "retry route was not merged in")
+    assert_true(
+        merged["www.youtube.com"].node == "🇳🇱 Netherlands-3",
+        f"retry observation must win: {merged['www.youtube.com']}",
+    )
+
+
 def test_compare_routes_reports_missing_domain() -> None:
     expectations = [{"domain": "a.com", "group": "🅰 One"}]
     mismatches = mihomo_routing.compare_routes({}, expectations)
@@ -95,6 +120,7 @@ def main() -> int:
         test_ignores_non_connection_lines,
         test_parses_direct_outbound_without_node_brackets,
         test_last_observation_wins,
+        test_parse_routes_merges_across_two_log_reads,
         test_compare_routes_reports_missing_domain,
         test_compare_routes_reports_wrong_group,
         test_compare_routes_passes_when_matching,

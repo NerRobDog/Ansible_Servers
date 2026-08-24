@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -91,7 +92,13 @@ def compare_routes(
     return mismatches
 
 
-MIHOMO_IMAGE = "metacubex/mihomo:latest"
+# Pinned deliberately, and bumping it is a deliberate act. The gate's whole
+# job is telling a change apart from a regression, so an upstream log-format
+# change would turn every domain into "no route observed" and red a PR that
+# changed nothing. v1.19.23 is also the core version the fleet's routers run:
+# v1.19.30 is known to break REALITY authentication to amalthea.watchd0g.dev,
+# so the gate must not silently start testing on it.
+MIHOMO_IMAGE = "metacubex/mihomo:v1.19.23"
 _CONTAINER_NAME = "mihomo-gate-harness"
 _PROXY_PORT = 17890
 _READY_TIMEOUT_SECONDS = 60
@@ -149,6 +156,20 @@ def _wait_until_ready(
     raise RuntimeError(f"mihomo {stage} did not become ready within {timeout}s")
 
 
+def _drive(domains: Iterable[str]) -> None:
+    """Send one request per domain through the harness proxy."""
+    for domain in domains:
+        _run([
+            "curl", "--silent", "--output", "/dev/null", "--max-time", "20",
+            "--proxy", f"http://127.0.0.1:{_PROXY_PORT}", f"https://{domain}",
+        ])
+
+
+def _read_routes() -> dict[str, Route]:
+    logs = _run(["docker", "logs", _CONTAINER_NAME])
+    return parse_routes(logs.stdout + logs.stderr)
+
+
 def probe_routes(
     candidate: dict[str, Any], domains: list[str], *, secret: str
 ) -> dict[str, Route]:
@@ -162,7 +183,10 @@ def probe_routes(
     try:
         started = _run([
             "docker", "run", "-d", "--name", _CONTAINER_NAME,
-            "-p", f"{_PROXY_PORT}:7890", "-p", "19099:9099",
+            # Loopback-only: published on 0.0.0.0 this is an unauthenticated
+            # proxy out through the fleet's exit nodes for anyone on the LAN,
+            # plus the control API behind a secret that lives in the source.
+            "-p", f"127.0.0.1:{_PROXY_PORT}:7890", "-p", "127.0.0.1:19099:9099",
             "-v", f"{workdir}:/cfg", MIHOMO_IMAGE, "-d", "/cfg",
         ])
         if started.returncode != 0:
@@ -170,26 +194,37 @@ def probe_routes(
 
         _wait_until_ready(secret)
 
-        for domain in domains:
-            _run([
-                "curl", "--silent", "--output", "/dev/null", "--max-time", "20",
-                "--proxy", f"http://127.0.0.1:{_PROXY_PORT}", f"https://{domain}",
-            ])
+        _drive(domains)
+        routes = _read_routes()
 
-        logs = _run(["docker", "logs", _CONTAINER_NAME])
-        return parse_routes(logs.stdout + logs.stderr)
+        # A domain that produced no log line is indistinguishable from a real
+        # routing change downstream, and with a dozen third-party endpoints a
+        # transient upstream failure is a matter of time. Retry those once.
+        missing = [domain for domain in domains if domain not in routes]
+        if missing:
+            _drive(missing)
+            routes = {**routes, **_read_routes()}
+
+        return routes
     finally:
         _run(["docker", "rm", "-f", _CONTAINER_NAME])
+        # The candidate on disk is the rendered subscription: real servers,
+        # real UUIDs, real passwords. Do not leave copies under /var/folders.
+        shutil.rmtree(workdir, ignore_errors=True)
 
 
 def config_test(candidate: dict[str, Any]) -> tuple[bool, str]:
     """Run `mihomo -t` against the candidate. Returns (ok, output)."""
     workdir = tempfile.mkdtemp(prefix="mihomo-test-")
-    config_path = Path(workdir) / "config.yaml"
-    with config_path.open("w", encoding="utf-8") as handle:
-        yaml.safe_dump(candidate, handle, allow_unicode=True, sort_keys=False)
-    result = _run([
-        "docker", "run", "--rm", "-v", f"{workdir}:/cfg", MIHOMO_IMAGE, "-d", "/cfg", "-t",
-    ])
-    output = result.stdout + result.stderr
-    return result.returncode == 0, output
+    try:
+        config_path = Path(workdir) / "config.yaml"
+        with config_path.open("w", encoding="utf-8") as handle:
+            yaml.safe_dump(candidate, handle, allow_unicode=True, sort_keys=False)
+        result = _run([
+            "docker", "run", "--rm", "-v", f"{workdir}:/cfg", MIHOMO_IMAGE, "-d", "/cfg", "-t",
+        ])
+        output = result.stdout + result.stderr
+        return result.returncode == 0, output
+    finally:
+        # Same reason as probe_routes: this file carries live credentials.
+        shutil.rmtree(workdir, ignore_errors=True)

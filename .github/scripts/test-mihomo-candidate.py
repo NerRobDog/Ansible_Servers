@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""Contract tests for mihomo_panel_api.py and mihomo_candidate.py."""
+"""Contract tests for mihomo_panel_api.py, mihomo_candidate.py and the
+report-redaction helpers in mihomo_gate.py."""
 
 from __future__ import annotations
 
 import base64
 import sys
+import traceback
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
+import mihomo_candidate  # noqa: E402
+import mihomo_gate  # noqa: E402
 import mihomo_panel_api  # noqa: E402
 
 
@@ -46,9 +50,6 @@ def test_roundtrip_preserves_non_ascii() -> None:
     encoded = mihomo_panel_api.encode_template_yaml(body)
     decoded = mihomo_panel_api.decode_template_payload({"encodedTemplateYaml": encoded})
     assert_true(decoded == body, "non-ASCII round-trip corrupted the body")
-
-
-import mihomo_candidate  # noqa: E402
 
 
 def sample_template() -> dict:
@@ -150,6 +151,88 @@ def test_extract_proxies_rejects_an_empty_document() -> None:
     raise AssertionError("an empty subscription must raise")
 
 
+# A body that is not YAML at all, carrying a value that must never surface in
+# an error message. PyYAML quotes a snippet of the offending document, and the
+# gate's Actions log is world-readable.
+LEAKY_MALFORMED_BODY = (
+    "proxies: [\n"
+    "  name: leaky-node\n"
+    "  password: hunter2-do-not-leak\n"
+)
+
+
+def test_extract_proxies_rejects_invalid_yaml() -> None:
+    try:
+        mihomo_panel_api.extract_proxies(LEAKY_MALFORMED_BODY)
+    except RuntimeError as exc:
+        assert_true("not valid YAML" in str(exc), f"unhelpful error: {exc}")
+        return
+    raise AssertionError("a non-YAML subscription body must raise RuntimeError")
+
+
+def test_invalid_yaml_error_withholds_the_body() -> None:
+    # The whole point of the guard: PyYAML's own message embeds a snippet of the
+    # offending document. What matters is what an unhandled failure would
+    # actually print, so assert on the rendered traceback - that is where
+    # `raise ... from None` does its work via __suppress_context__.
+    try:
+        mihomo_panel_api.extract_proxies(LEAKY_MALFORMED_BODY)
+    except RuntimeError as exc:
+        rendered = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        assert_true("hunter2-do-not-leak" not in rendered, f"traceback leaked the body:\n{rendered}")
+        assert_true(exc.__suppress_context__, "the original YAMLError must be suppressed")
+        return
+    raise AssertionError("a non-YAML subscription body must raise RuntimeError")
+
+
+def leaky_proxies() -> list[dict]:
+    return [
+        {
+            "name": "🇳🇱 Netherlands-2",
+            "type": "vless",
+            "server": "nl.example",
+            "port": 443,
+            "uuid": "1ef0346d-7989-4e50-88e6-bbe2b99672fc",
+            "alpn": ["h2", "http/1.1"],
+            "reality-opts": {"public-key": "Xy9-public-key-material"},
+        },
+    ]
+
+
+def test_redaction_tokens_walk_nested_dicts_and_lists() -> None:
+    tokens = mihomo_gate._redaction_tokens(leaky_proxies())
+    assert_true("Xy9-public-key-material" in tokens, f"nested dict value missed: {tokens}")
+    assert_true("http/1.1" in tokens, f"list value missed: {tokens}")
+    assert_true("nl.example" in tokens, f"top-level value missed: {tokens}")
+
+
+def test_redaction_tokens_are_longest_first() -> None:
+    # A longer secret must be masked before a shorter one that is its
+    # substring, otherwise the shorter pass shreds the longer token.
+    tokens = mihomo_gate._redaction_tokens([{"a": "abcdefgh", "b": "abcd", "c": "abcdef"}])
+    assert_true(tokens == ["abcdefgh", "abcdef", "abcd"], f"not longest-first: {tokens}")
+
+
+def test_redaction_tokens_ignore_short_values() -> None:
+    # Masking "443" would shred every port number in unrelated diagnostics.
+    tokens = mihomo_gate._redaction_tokens([{"port": 443, "sni": "443", "type": "vless"}])
+    assert_true("443" not in tokens, f"a 3-character value must not be a token: {tokens}")
+    assert_true("vless" in tokens, f"a 5-character value must be a token: {tokens}")
+
+
+def test_redact_masks_every_proxy_value() -> None:
+    tokens = mihomo_gate._redaction_tokens(leaky_proxies())
+    output = (
+        "proxy 🇳🇱 Netherlands-2 initialisation failed: "
+        "dial nl.example:443 uuid=1ef0346d-7989-4e50-88e6-bbe2b99672fc"
+    )
+    redacted = mihomo_gate._redact(output, tokens)
+    for secret in ("🇳🇱 Netherlands-2", "nl.example", "1ef0346d-7989-4e50-88e6-bbe2b99672fc"):
+        assert_true(secret not in redacted, f"{secret!r} survived redaction: {redacted}")
+    assert_true("initialisation failed" in redacted, f"diagnostic text was lost: {redacted}")
+    assert_true(":443" in redacted, f"a bare port must survive: {redacted}")
+
+
 def main() -> int:
     tests = [
         test_decode_unwraps_response_envelope,
@@ -165,6 +248,12 @@ def main() -> int:
         test_extract_proxies_reads_the_list,
         test_extract_proxies_rejects_a_document_without_proxies,
         test_extract_proxies_rejects_an_empty_document,
+        test_extract_proxies_rejects_invalid_yaml,
+        test_invalid_yaml_error_withholds_the_body,
+        test_redaction_tokens_walk_nested_dicts_and_lists,
+        test_redaction_tokens_are_longest_first,
+        test_redaction_tokens_ignore_short_values,
+        test_redact_masks_every_proxy_value,
     ]
     for test in tests:
         test()

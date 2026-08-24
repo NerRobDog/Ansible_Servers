@@ -29,4 +29,9 @@ config by splicing in real proxies and dropping the `remnawave:` key.
 ## Related
 
 - `routing-expectations.yaml` — golden file asserting where each domain routes.
+  It records one known hazard as-observed rather than as-desired:
+  `no.watchd0g.dev`, the domain every router fetches its config from, currently
+  falls through to the catch-all foreign group, so a broken proxy pool blocks the
+  very fetch that would fix it — a circular dependency tracked as beads `as-6y4`.
+  The inline comment in the file explains it.
 - `docs/superpowers/specs/2026-08-21-mihomo-config-gate-design.md` — design.

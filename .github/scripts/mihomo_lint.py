@@ -6,6 +6,10 @@ this covers the class it misses: dangling references. Written against the real
 config, which contains three shapes that break naive parsers - logic rules with
 nested parentheses, `no-resolve` trailing modifiers, and rule targets that are
 proxies (`DNS-OUT`) rather than groups.
+
+Known limits: `proxy-providers` and group `use:` members are not covered, and a
+`SUB-RULE` target would be reported as an unknown outbound. Neither shape
+appears in the template today.
 """
 
 from __future__ import annotations
@@ -13,8 +17,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# Split on commas that are NOT inside parentheses, so a logic rule such as
-# AND,((RULE-SET,x),(NETWORK,udp)),GROUP keeps its middle field intact.
+# Split a rule into fields on commas that are not inside parentheses. This does
+# not keep a logic rule's nested condition in one piece - AND,((RULE-SET,x),
+# (NETWORK,udp)),GRP still splits into four parts. What it does guarantee is the
+# only thing rule_target reads: the last field is the outbound target.
 _TOP_LEVEL_COMMA = re.compile(r",(?![^(]*\))")
 
 # Matches RULE-SET references anywhere, including nested inside logic rules.
