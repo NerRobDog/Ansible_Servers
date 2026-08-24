@@ -195,6 +195,17 @@ dns:
   - rule-set:ru-inline
   - rule-set:ru-apps
   - rule-set:geosite-ru
+  - +.pool.ntp.org
+  - +.ntp.org
+  - time.android.com
+  - +.time.android.com
+  - time.google.com
+  - time.windows.com
+  - time.apple.com
+  - ntp.yandex.net
+  - +.gpsonextra.net
+  - +.trex.media
+  - +.uma.media
   default-nameserver:
   - 1.1.1.1
   - 8.8.8.8
@@ -776,6 +787,8 @@ rule-providers:
     - DOMAIN-KEYWORD,ozon
     - DOMAIN-KEYWORD,wildberries
 
+    - DOMAIN-SUFFIX,trex.media
+    - DOMAIN-SUFFIX,uma.media
   instagram-inline:
     type: inline
     behavior: classical
@@ -838,6 +851,7 @@ rule-providers:
     proxy: "🚫 Недоступные из РФ"
 
 rules:
+- DST-PORT,123,DIRECT
   # DNS hijack
 - DST-PORT,53,DNS-OUT
 

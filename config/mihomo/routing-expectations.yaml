@@ -33,3 +33,12 @@ expectations:
 # open - see beads as-6y4. Recorded here as observed, not as desired.
 - domain: no.watchd0g.dev
   group: 🌍 Остальные сайты
+# Kinopoisk OTT CDN. Added to the ru-inline provider by 7f9759e on master after
+# p1.trex.media fell through every RU rule-set to the catch-all and played the
+# video from abroad. Guarded here because that fix lives in provider payload the
+# panel push script appends: without an expectation, a later template edit could
+# drop it and nothing would notice until someone watched a film.
+- domain: p1.trex.media
+  group: ⚪🔵🔴 RU сайты
+- domain: uma.media
+  group: ⚪🔵🔴 RU сайты

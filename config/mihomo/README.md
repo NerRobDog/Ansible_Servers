@@ -11,6 +11,19 @@ files (`mihomo-remnawave-davoyan-rubypass-v2.*.yaml`) were detached drafts that
 had drifted behind the live template by two fixes. Editing the template through
 the panel web UI reintroduces that drift — change this file instead.
 
+**The web UI is not the only way to reintroduce it.**
+`.github/scripts/push_mihomo_template.py` appends rules to the live panel
+template directly, and it drifted this file again while the gate was being
+built: `DST-PORT,123,DIRECT`, the NTP fake-ip-filter entries and the Kinopoisk
+CDN suffixes all reached the panel and not the repo. The capture here was
+refreshed from the panel on 2026-08-24 to take them back in.
+
+Note what that episode shows about the gate's reach: it guards the domains
+listed in `routing-expectations.yaml`, not equality between this file and the
+live template, so the drift passed a fully green run unnoticed. Reconciling the
+push script with this file — and adding a drift-detection layer — is Phase B
+work, tracked as beads `as-3m8`.
+
 ## Why it is excluded from yamllint
 
 `.yamllint` ignores this directory. The file is a verbatim capture, and the
