@@ -101,9 +101,13 @@ Four layers, each catching a class the previous cannot:
 
 1. **Syntax** — `mihomo -t` on the assembled candidate.
 2. **Referential integrity** — every rule targets a group that exists; every
-   `RULE-SET` names a declared provider; every provider URL returns 200; every regex
-   in `exclude-filter`/`filter` compiles; no orphan groups. This is the class where a
-   renamed group leaves a dangling rule.
+   `RULE-SET` names a declared provider; every regex in `exclude-filter`/`filter`
+   compiles; no orphan groups. This is the class where a renamed group leaves a
+   dangling rule.
+   *Deferred, not built:* fetching every provider URL to check it returns 200.
+   `mihomo_lint.py` does not do it — the layer is purely offline today, and a
+   network check would make the gate fail on upstream outages that have nothing
+   to do with the PR. Tracked as beads `as-w6c`.
 3. **Routing** — run the harness, drive the whole domain list, record
    domain → rule → group.
 4. **Regression** — compare that map against the expectations file. This is the layer
@@ -112,7 +116,7 @@ Four layers, each catching a class the previous cannot:
 
 ### 3.1 Declaring intent
 
-`tests/mihomo-routing-expectations.yaml` holds domain → expected group. Changing a
+`config/mihomo/routing-expectations.yaml` holds domain → expected group. Changing a
 route means changing the expectation in the same commit, so the PR diff shows the
 intent and a reviewer sees it. The gate fails on any deviation from the file.
 
@@ -191,7 +195,7 @@ phase 2 lands, but it does not have to wait for it.
 
 ## 7. Open items
 
-- Confirm the domain list for `tests/mihomo-routing-expectations.yaml`; it should
+- Confirm the domain list for `config/mihomo/routing-expectations.yaml`; it should
   overlap with the site list from `as-7oj` rather than diverge from it.
 - Decide where the canonical config file lives in the tree (`config/mihomo/` is the
   natural home) and set the workflow path filter accordingly.

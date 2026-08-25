@@ -11,18 +11,27 @@ files (`mihomo-remnawave-davoyan-rubypass-v2.*.yaml`) were detached drafts that
 had drifted behind the live template by two fixes. Editing the template through
 the panel web UI reintroduces that drift — change this file instead.
 
-**The web UI is not the only way to reintroduce it.**
-`.github/scripts/push_mihomo_template.py` appends rules to the live panel
-template directly, and it drifted this file again while the gate was being
-built: `DST-PORT,123,DIRECT`, the NTP fake-ip-filter entries and the Kinopoisk
-CDN suffixes all reached the panel and not the repo. The capture here was
-refreshed from the panel on 2026-08-24 to take them back in.
+**The web UI is not the only way to reintroduce it, and the worst way leaves no
+trace on GitHub at all.** While the gate was being built, `DST-PORT,123,DIRECT`,
+the NTP fake-ip-filter entries and the Kinopoisk CDN suffixes
+(`trex.media`, `uma.media`) all reached the live panel without reaching this
+file. They did not come from `.github/scripts/push_mihomo_template.py` as it
+exists on `origin/master` — that revision appends none of them. They came from a
+**local, unpushed revision** of that script (commits `91b48a3` and `7f9759e`,
+present on one workstation's `master` and on no remote) run against the panel.
 
-Note what that episode shows about the gate's reach: it guards the domains
+So for a stretch, production was defined by a script that existed on a single
+machine: neither `origin/master` nor this template described what routers were
+actually being served, and no diff anywhere on GitHub would have shown it. The
+capture here was refreshed from the panel on 2026-08-24 to take those rules back
+in — but that only closes the instance, not the hole.
+
+Note also what the episode shows about the gate's reach: it guards the domains
 listed in `routing-expectations.yaml`, not equality between this file and the
-live template, so the drift passed a fully green run unnoticed. Reconciling the
-push script with this file — and adding a drift-detection layer — is Phase B
-work, tracked as beads `as-3m8`.
+live template, so the drift passed a fully green run unnoticed. Pushing those
+commits, reconciling the push script with this file, and adding a
+drift-detection layer that compares the repo against the panel are Phase B work,
+tracked as beads `as-3m8`.
 
 ## Why it is excluded from yamllint
 

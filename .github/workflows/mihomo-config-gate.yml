@@ -4,9 +4,17 @@ name: mihomo-config-gate
 # Validates the routing config on every PR that touches it. Phase A: checks
 # only - the panel is not patched and no router is touched.
 #
-# The gate needs real proxies to build a runnable candidate, so it reads a
-# rendered subscription at run time. That response carries live credentials and
-# must never be written to a log or an artifact.
+# Two jobs, split by whether they need a credential:
+#
+#   validate - syntax and referential integrity, built on the template's own
+#              static proxies. No secret, no environment, no `if:` guard, so it
+#              runs on fork PRs too. THIS is the job to mark required.
+#   gate     - the full four layers including the routing probe. Needs the
+#              rendered subscription, so it is gated to same-repo PRs.
+#
+# The split exists because GitHub scores a skipped job as a *successful* check.
+# With only the guarded job, a fork PR editing config/mihomo/** would show a
+# green required check having run zero validation.
 on:
   pull_request:
     paths:
@@ -15,13 +23,55 @@ on:
       - ".github/workflows/mihomo-config-gate.yml"
   workflow_dispatch:
 
+# One run per PR. Without this, two rapid pushes race in the comment upsert:
+# both find no marked comment and each create one, or the older run finishes
+# last and overwrites the newer report.
+concurrency:
+  group: mihomo-config-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  validate:
+    # Deliberately unguarded and secretless. Every condition attached to this
+    # job is a condition under which a config change ships unchecked.
+    name: syntax and integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyYAML
+
+      # Pinned: see the MIHOMO_IMAGE comment in mihomo_routing.py. Keep the two
+      # in step - an upstream log-format change reds PRs that changed nothing.
+      - name: Pull the mihomo image
+        run: docker pull metacubex/mihomo:v1.19.23
+
+      # No MIHOMO_TEST_SUBSCRIPTION_URL in this job's env, by design.
+      - name: Validate syntax and referential integrity
+        run: python .github/scripts/mihomo_gate.py --no-routing --report mihomo-gate-report.md
+
   gate:
+    name: routing probe
     # Defense in depth. The path filter above includes the very scripts that
     # receive MIHOMO_TEST_SUBSCRIPTION_URL, so a PR could edit the code that
     # handles the secret. GitHub already withholds secrets from fork-originated
     # pull_request runs, but that is one repo setting away from changing, and
     # this credential grants working proxy access to the whole fleet.
+    #
+    # A fork PR therefore skips this job. That is safe only because `validate`
+    # above has no such condition - do not add one there.
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -43,8 +93,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install PyYAML
 
-      # Pinned: see the MIHOMO_IMAGE comment in mihomo_routing.py. Keep the two
-      # in step - an upstream log-format change reds PRs that changed nothing.
       - name: Pull the mihomo image
         run: docker pull metacubex/mihomo:v1.19.23
 
@@ -55,7 +103,8 @@ jobs:
 
       # Upsert rather than append: one comment per PR that gets rewritten on
       # every push, so the thread stays readable instead of accumulating a
-      # fresh copy of the table each time.
+      # fresh copy of the table each time. Serialized by the concurrency group
+      # at the top of this file.
       - name: Comment the routing report on the PR
         if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7

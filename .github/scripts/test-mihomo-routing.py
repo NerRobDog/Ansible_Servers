@@ -3,8 +3,12 @@
 
 from __future__ import annotations
 
+import glob
+import os
 import sys
+import tempfile
 from pathlib import Path
+from unittest import mock
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
@@ -106,6 +110,54 @@ def test_compare_routes_reports_wrong_group() -> None:
     assert_true(any("🅰 One" in m and "🅱 Two" in m for m in mismatches), f"wrong group not reported: {mismatches}")
 
 
+CREDENTIAL_BEARING_CANDIDATE = {
+    "proxies": [{"name": "nl-1", "server": "nl.example", "password": "hunter2-do-not-leak"}],
+}
+
+
+def probe_leftovers(root: str) -> list[str]:
+    return glob.glob(os.path.join(root, "mihomo-gate-*"))
+
+
+def test_probe_routes_removes_its_workdir_when_docker_fails_to_start() -> None:
+    # The config on disk is the rendered subscription. Anything that can raise
+    # must sit inside the try:, or a directory full of real servers, UUIDs and
+    # passwords outlives the run.
+    with tempfile.TemporaryDirectory() as root:
+        with mock.patch.object(tempfile, "gettempdir", lambda: root), \
+                mock.patch.object(
+                    mihomo_routing, "_run",
+                    lambda command, **kwargs: mock.Mock(returncode=1, stdout="", stderr="boom"),
+                ):
+            try:
+                mihomo_routing.probe_routes(
+                    CREDENTIAL_BEARING_CANDIDATE, ["a.com"], secret="s"
+                )
+            except RuntimeError:
+                pass
+        leftovers = probe_leftovers(root)
+        assert_true(not leftovers, f"the credential-bearing workdir survived: {leftovers}")
+
+
+def test_probe_routes_removes_its_workdir_when_the_config_write_fails() -> None:
+    # The regression this guards: the write used to happen before the try:, so
+    # a failure there skipped the cleanup handler entirely.
+    def explode(*args: object, **kwargs: object) -> None:
+        raise OSError("No space left on device")
+
+    with tempfile.TemporaryDirectory() as root:
+        with mock.patch.object(tempfile, "gettempdir", lambda: root), \
+                mock.patch.object(mihomo_routing.yaml, "safe_dump", explode):
+            try:
+                mihomo_routing.probe_routes(
+                    CREDENTIAL_BEARING_CANDIDATE, ["a.com"], secret="s"
+                )
+            except OSError:
+                pass
+        leftovers = probe_leftovers(root)
+        assert_true(not leftovers, f"the credential-bearing workdir survived: {leftovers}")
+
+
 def test_compare_routes_passes_when_matching() -> None:
     actual = {"a.com": mihomo_routing.Route(rule="RuleSet(x)", group="🅰 One", node="n1")}
     expectations = [{"domain": "a.com", "group": "🅰 One"}]
@@ -124,6 +176,8 @@ def main() -> int:
         test_compare_routes_reports_missing_domain,
         test_compare_routes_reports_wrong_group,
         test_compare_routes_passes_when_matching,
+        test_probe_routes_removes_its_workdir_when_docker_fails_to_start,
+        test_probe_routes_removes_its_workdir_when_the_config_write_fails,
     ]
     for test in tests:
         test()

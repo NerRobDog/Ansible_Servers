@@ -33,11 +33,13 @@ expectations:
 # open - see beads as-6y4. Recorded here as observed, not as desired.
 - domain: no.watchd0g.dev
   group: 🌍 Остальные сайты
-# Kinopoisk OTT CDN. Added to the ru-inline provider by 7f9759e on master after
-# p1.trex.media fell through every RU rule-set to the catch-all and played the
-# video from abroad. Guarded here because that fix lives in provider payload the
-# panel push script appends: without an expectation, a later template edit could
-# drop it and nothing would notice until someone watched a film.
+# Kinopoisk OTT CDN. Pinned to the RU exit after p1.trex.media fell through
+# every RU rule-set to the catch-all and played the video from abroad. The fix
+# reached the live panel from commit 7f9759e - which is local and unpushed, so
+# it is on no remote and `origin/master`'s push script appends nothing of the
+# sort. That is the hazard this expectation exists for: the rule is real in
+# production, invisible in the repo's history, and a later template edit could
+# drop it with nothing to notice until someone watched a film. See beads as-3m8.
 - domain: p1.trex.media
   group: ⚪🔵🔴 RU сайты
 - domain: uma.media

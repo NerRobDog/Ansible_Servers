@@ -68,9 +68,34 @@ def extract_proxies(subscription_yaml: str) -> list[dict[str, Any]]:
             f"rendered subscription is not a YAML mapping (got {type(rendered).__name__}); "
             "body withheld - it carries live proxy credentials"
         )
-    proxies = (rendered or {}).get("proxies") or []
+    proxies = (rendered or {}).get("proxies")
     if not proxies:
         raise RuntimeError("rendered subscription contained no proxies")
+    # `proxies: Not Found` is valid YAML and truthy, so the emptiness check
+    # above lets it through and the caller then indexes ['name'] on a str. The
+    # gate dies before it writes a report, and the failure reads like a bug in
+    # the harness rather than a bad response from the panel.
+    if not isinstance(proxies, list):
+        raise RuntimeError(
+            f"rendered subscription 'proxies' is not a list (got {type(proxies).__name__}); "
+            "body withheld - it carries live proxy credentials"
+        )
+    for index, proxy in enumerate(proxies):
+        # Index and type only. Never the entry: every field of it is a
+        # credential and this runs inside a public Actions log.
+        if not isinstance(proxy, dict):
+            raise RuntimeError(
+                f"rendered subscription proxy #{index} of {len(proxies)} is not a mapping "
+                f"(got {type(proxy).__name__}); body withheld - it carries live "
+                "proxy credentials"
+            )
+        name = proxy.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise RuntimeError(
+                f"rendered subscription proxy #{index} of {len(proxies)} has no usable "
+                f"'name' (got {type(name).__name__}); body withheld - it carries live "
+                "proxy credentials"
+            )
     return proxies
 
 

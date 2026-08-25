@@ -180,12 +180,17 @@ def probe_routes(
 ) -> dict[str, Route]:
     """Run the candidate in Docker, drive `domains` through it, return routes."""
     workdir = tempfile.mkdtemp(prefix="mihomo-gate-")
-    config_path = Path(workdir) / "config.yaml"
-    with config_path.open("w", encoding="utf-8") as handle:
-        yaml.safe_dump(candidate, handle, allow_unicode=True, sort_keys=False)
-
-    _run(["docker", "rm", "-f", _CONTAINER_NAME])
+    # Everything after mkdtemp lives inside the try: the moment the directory
+    # exists it is going to hold the rendered subscription, so nothing that can
+    # raise may sit between its creation and the cleanup handler. A disk-full
+    # write or a docker binary that is not on PATH would otherwise leave real
+    # servers, UUIDs and passwords behind under /var/folders.
     try:
+        config_path = Path(workdir) / "config.yaml"
+        with config_path.open("w", encoding="utf-8") as handle:
+            yaml.safe_dump(candidate, handle, allow_unicode=True, sort_keys=False)
+
+        _run(["docker", "rm", "-f", _CONTAINER_NAME])
         started = _run([
             "docker", "run", "-d", "--name", _CONTAINER_NAME,
             # Loopback-only: published on 0.0.0.0 this is an unauthenticated
