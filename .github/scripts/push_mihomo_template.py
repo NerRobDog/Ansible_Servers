@@ -60,6 +60,17 @@ RU_CDN_SUFFIXES = ["trex.media", "uma.media"]
 RU_CDN_RULES = [f"DOMAIN-SUFFIX,{s}" for s in RU_CDN_SUFFIXES]
 RU_CDN_FAKEIP = [f"+.{s}" for s in RU_CDN_SUFFIXES]
 
+# Google Antigravity уходил мимо WARP: в google-warp-inline лежало
+# 'DOMAIN-SUFFIX,antigravity.google', а DOMAIN-SUFFIX совпадает по границам
+# меток справа — оно ловит antigravity.google и *.antigravity.google, но не
+# antigravity.google.com. Реальный хост проваливался в финальный MATCH и
+# выходил через обычную заграничную ноду вместо Cloudflare-IP, то есть
+# location_unsupported у всех. У соседнего notebookLM в списке лежат обе
+# формы; для antigravity вторую забыли (подтверждено прогоном живой подписки
+# через mihomo 1.10.0, 2026-09-01).
+WARP_INLINE_NAME = "google-warp-inline"
+WARP_RULES = ["DOMAIN-SUFFIX,antigravity.google.com"]
+
 
 def _ctx():
     try:
@@ -144,8 +155,17 @@ def kp_status(text):
     return in_ru, in_fif
 
 
+def warp_status(text):
+    """Какие из WARP-правил уже лежат в google-warp-inline."""
+    from ruamel.yaml import YAML
+    data = YAML().load(text)
+    pl = ((data.get("rule-providers") or {}).get(WARP_INLINE_NAME) or {}).get("payload", []) or []
+    have = set(str(x).replace(" ", "") for x in pl)
+    return [r for r in WARP_RULES if r.replace(" ", "") in have]
+
+
 def transform(text):
-    """Идемпотентно: YT-группа заграницей дефолтом + NTP durable-фикс.
+    """Идемпотентно: YT загран + NTP + Kinopoisk CDN + Antigravity на WARP.
     Обе правки за один load/dump. Возвращает (new_text, changes[])."""
     from ruamel.yaml import YAML
     y = YAML()
@@ -208,6 +228,17 @@ def transform(text):
             fif.append(d)
             changes.append(f"fake-ip-filter+={d}")
 
+    # 4) Antigravity -> WARP (см. комментарий у WARP_RULES)
+    warp_inline = rp.get(WARP_INLINE_NAME)
+    if not warp_inline or "payload" not in warp_inline:
+        raise SystemExit(f"rule-provider {WARP_INLINE_NAME!r} с payload не найден.")
+    wpl = warp_inline["payload"]
+    have_warp = set(str(x).replace(" ", "") for x in wpl)
+    for r in WARP_RULES:
+        if r.replace(" ", "") not in have_warp:
+            wpl.append(r)
+            changes.append(f"{WARP_INLINE_NAME}.payload+={r}")
+
     buf = io.StringIO()
     y.dump(data, buf)
     return buf.getvalue(), changes
@@ -232,10 +263,12 @@ def main():
     foreign_first = bool(pl) and pl[0] == FOREIGN_ALIAS
     ntp_fif, ntp_rule = ntp_status(text)
     kp_ru, kp_fif = kp_status(text)
+    warp = warp_status(text)
     print(f"{GROUP}: {pl}")
     print(f"foreign_first={foreign_first}")
     print(f"NTP: домены={len(ntp_fif)}/{len(NTP_DOMAINS)}, DST-PORT,123,DIRECT={ntp_rule}")
     print(f"KP-CDN: ru-inline={len(kp_ru)}/{len(RU_CDN_RULES)}, fake-ip-filter={len(kp_fif)}/{len(RU_CDN_FAKEIP)}")
+    print(f"WARP: google-warp-inline={len(warp)}/{len(WARP_RULES)}")
 
     with open("live-mihomo-template.yaml", "w", encoding="utf-8") as f:
         f.write(text)
@@ -260,16 +293,20 @@ def main():
     after = yt_proxies(after_text)
     a_fif, a_rule = ntp_status(after_text)
     a_kp_ru, a_kp_fif = kp_status(after_text)
+    a_warp = warp_status(after_text)
     print(f"VERIFY {GROUP}: {after}")
     print(f"VERIFY NTP: домены={len(a_fif)}/{len(NTP_DOMAINS)}, rule={a_rule}")
     print(f"VERIFY KP-CDN: ru-inline={len(a_kp_ru)}/{len(RU_CDN_RULES)}, fake-ip-filter={len(a_kp_fif)}/{len(RU_CDN_FAKEIP)}")
+    print(f"VERIFY WARP: google-warp-inline={len(a_warp)}/{len(WARP_RULES)}")
     if not (after and after[0] == FOREIGN_ALIAS):
         sys.exit("VERIFY FAIL: YT не foreign-first.")
     if len(a_fif) != len(NTP_DOMAINS) or not a_rule:
         sys.exit("VERIFY FAIL: NTP-фикс не полный.")
     if len(a_kp_ru) != len(RU_CDN_RULES) or len(a_kp_fif) != len(RU_CDN_FAKEIP):
         sys.exit("VERIFY FAIL: KP-CDN-пин не полный.")
-    print("✓ Шаблон: YouTube загран + NTP durable + Kinopoisk CDN на RU.")
+    if len(a_warp) != len(WARP_RULES):
+        sys.exit("VERIFY FAIL: Antigravity не в google-warp-inline.")
+    print("✓ Шаблон: YouTube загран + NTP durable + Kinopoisk CDN на RU + Antigravity на WARP.")
 
 
 if __name__ == "__main__":

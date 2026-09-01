@@ -444,7 +444,11 @@ rule-providers:
     payload:
       # Google services that require a Cloudflare IP (show "location_unsupported" otherwise).
       # Tested 2026-04-15: all return HTTP 200 through WatchNet (104.28.197.7).
+      # Обе формы нужны: DOMAIN-SUFFIX совпадает по границам меток, поэтому
+      # antigravity.google ловит только antigravity.google и его поддомены,
+      # а реальный хост — antigravity.google.com.
       - DOMAIN-SUFFIX,antigravity.google
+      - DOMAIN-SUFFIX,antigravity.google.com
       - DOMAIN-SUFFIX,gweb-jetski.appspot.com
       - DOMAIN-SUFFIX,notebooklm.google
       - DOMAIN-SUFFIX,notebooklm.google.com
