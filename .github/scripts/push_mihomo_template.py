@@ -71,6 +71,19 @@ RU_CDN_FAKEIP = [f"+.{s}" for s in RU_CDN_SUFFIXES]
 WARP_INLINE_NAME = "google-warp-inline"
 WARP_RULES = ["DOMAIN-SUFFIX,antigravity.google.com"]
 
+# Режим «за границей». Тот же конфиг умеет обе задачи, если у двух select-групп
+# есть по второму варианту: RU-сайты ходят через русский выход (иначе банки и
+# госуслуги видят иностранный адрес), а всё прочее — напрямую (иначе человек в
+# Берлине платит крюк до Амстердама за каждую страницу). Клиент переключает
+# режим через PUT /proxies/{группа}, конфиг при этом не переписывается.
+#
+# Варианты ДОПИСЫВАЮТСЯ в хвост: первый элемент остаётся дефолтом, поэтому у
+# всех, кто сидит в России и режим не трогал, ничего не меняется.
+ROAM_OPTIONS = {
+    "⚪🔵🔴 RU сайты": "🇷🇺 Обход блокировок РФ (авто)",
+    "🌍 Остальные сайты": "🇷🇺 Без VPN",
+}
+
 
 def _ctx():
     try:
@@ -164,6 +177,16 @@ def warp_status(text):
     return [r for r in WARP_RULES if r.replace(" ", "") in have]
 
 
+def roam_status(text):
+    """У каких групп уже есть вариант для режима «за границей»."""
+    from ruamel.yaml import YAML
+    data = YAML().load(text)
+    groups = {g.get("name"): [str(x) for x in (g.get("proxies") or [])]
+              for g in (data.get("proxy-groups") or [])}
+    return [name for name, option in ROAM_OPTIONS.items()
+            if option in groups.get(name, [])]
+
+
 def transform(text):
     """Идемпотентно: YT загран + NTP + Kinopoisk CDN + Antigravity на WARP.
     Обе правки за один load/dump. Возвращает (new_text, changes[])."""
@@ -239,6 +262,19 @@ def transform(text):
             wpl.append(r)
             changes.append(f"{WARP_INLINE_NAME}.payload+={r}")
 
+    # 5) Режим «за границей»: второй вариант в двух select-группах
+    by_name = {g.get("name"): g for g in (data.get("proxy-groups") or [])}
+    for name, option in ROAM_OPTIONS.items():
+        g = by_name.get(name)
+        if g is None:
+            raise SystemExit(f"Группа {name!r} не найдена — режим «за границей» не собрать.")
+        gpl = g.get("proxies")
+        if gpl is None:
+            raise SystemExit(f"У {name} нет proxies.")
+        if option not in [str(x) for x in gpl]:
+            gpl.append(option)
+            changes.append(f"{name}.proxies+={option}")
+
     buf = io.StringIO()
     y.dump(data, buf)
     return buf.getvalue(), changes
@@ -264,11 +300,13 @@ def main():
     ntp_fif, ntp_rule = ntp_status(text)
     kp_ru, kp_fif = kp_status(text)
     warp = warp_status(text)
+    roam = roam_status(text)
     print(f"{GROUP}: {pl}")
     print(f"foreign_first={foreign_first}")
     print(f"NTP: домены={len(ntp_fif)}/{len(NTP_DOMAINS)}, DST-PORT,123,DIRECT={ntp_rule}")
     print(f"KP-CDN: ru-inline={len(kp_ru)}/{len(RU_CDN_RULES)}, fake-ip-filter={len(kp_fif)}/{len(RU_CDN_FAKEIP)}")
     print(f"WARP: google-warp-inline={len(warp)}/{len(WARP_RULES)}")
+    print(f"ROAM: групп с вариантом «за границей»={len(roam)}/{len(ROAM_OPTIONS)} {roam}")
 
     with open("live-mihomo-template.yaml", "w", encoding="utf-8") as f:
         f.write(text)
@@ -294,10 +332,12 @@ def main():
     a_fif, a_rule = ntp_status(after_text)
     a_kp_ru, a_kp_fif = kp_status(after_text)
     a_warp = warp_status(after_text)
+    a_roam = roam_status(after_text)
     print(f"VERIFY {GROUP}: {after}")
     print(f"VERIFY NTP: домены={len(a_fif)}/{len(NTP_DOMAINS)}, rule={a_rule}")
     print(f"VERIFY KP-CDN: ru-inline={len(a_kp_ru)}/{len(RU_CDN_RULES)}, fake-ip-filter={len(a_kp_fif)}/{len(RU_CDN_FAKEIP)}")
     print(f"VERIFY WARP: google-warp-inline={len(a_warp)}/{len(WARP_RULES)}")
+    print(f"VERIFY ROAM: {len(a_roam)}/{len(ROAM_OPTIONS)} {a_roam}")
     if not (after and after[0] == FOREIGN_ALIAS):
         sys.exit("VERIFY FAIL: YT не foreign-first.")
     if len(a_fif) != len(NTP_DOMAINS) or not a_rule:
@@ -306,6 +346,8 @@ def main():
         sys.exit("VERIFY FAIL: KP-CDN-пин не полный.")
     if len(a_warp) != len(WARP_RULES):
         sys.exit("VERIFY FAIL: Antigravity не в google-warp-inline.")
+    if len(a_roam) != len(ROAM_OPTIONS):
+        sys.exit("VERIFY FAIL: режим «за границей» собран не полностью.")
     print("✓ Шаблон: YouTube загран + NTP durable + Kinopoisk CDN на RU + Antigravity на WARP.")
 
 
