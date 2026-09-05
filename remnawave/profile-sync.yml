@@ -3,13 +3,36 @@
 # Host-level values are resolved from fleet config (hosts.<alias>.remnawave.*).
 # Optional global placeholders may still come from RW_PROFILE_VARS_B64.
 
+# Template used when the host sets neither remnawave.profile_template nor
+# remnawave.warp_mode (or sets warp_mode: none).
 default_profile_template: remnawave/profiles/rw_vless_reality.json
+
+# Cloudflare WARP shapes are versioned as sibling templates and are selected
+# automatically by hosts.<alias>.remnawave.warp_mode:
+#   warp_mode: none     -> default_profile_template (above)
+#   warp_mode: all      -> remnawave/profiles/rw_vless_reality_warp_all.json
+#                          WARP outbound first => the whole node exits via WARP
+#   warp_mode: inbound  -> remnawave/profiles/rw_vless_reality_warp_inbound.json
+#                          extra inbound "<inbound_tag>_WARP" on
+#                          remnawave.warp_inbound_port (default 2053) routed to
+#                          a WARP outbound; the :443 inbound keeps exiting DIRECT
+# An explicit remnawave.profile_template (fleet or nodes[] below) always wins.
+#
+# The sync is fail-closed: it refuses to PATCH a live profile when the render
+# would DELETE an outbound tag, an inbound tag, a routing rule or
+# routing.domainStrategy that the panel has today. It prints
+#   sync:would_remove:<profile>: ...
+#   sync:blocked:<profile>: ...
+# skips that profile AND its node assignment, and exits non-zero.
+# Override per host with remnawave.allow_destructive_profile_sync: true.
 
 nodes:
   # Optional override map for host-level assignment.
   # Usually assignment fields are stored in fleet config under hosts.<alias>.remnawave:
   #   panel_node_uuid, target_profile_name, inbound_tag, target_inbound_tags,
-  #   reality_target, reality_short_id, reality_private_key, reality_server_name
+  #   reality_target, reality_short_id, reality_private_key, reality_server_name,
+  #   profile_template, warp_mode, warp_inbound_port,
+  #   allow_destructive_profile_sync
   # reality_short_id and reality_private_key are optional in fleet and are auto-generated
   # deterministically from node_secret_key when omitted.
   #

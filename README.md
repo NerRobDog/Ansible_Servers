@@ -74,6 +74,17 @@ Pre-step перед Ansible:
 - манифест: `remnawave/profile-sync.yml`
 - шаблоны: `remnawave/profiles/*.json`
 
+Cloudflare WARP на ноде задаётся во fleet config через `hosts.<alias>.remnawave.warp_mode`:
+- `none` (default) — WARP нет, выход DIRECT;
+- `all` — outbound `WARP` первым, весь узел выходит через WARP;
+- `inbound` — дополнительный inbound `<inbound_tag>_WARP` на `warp_inbound_port`
+  (default `2053`), правило маршрутизации отправляет его в `WARP`; `:443` остаётся DIRECT.
+
+Sync — fail-closed: если рендер удалил бы существующий в панели outbound/inbound/routing-rule,
+профиль не перезаписывается, в лог печатаются `sync:would_remove:` и `sync:blocked:`,
+назначение ноды тоже пропускается, скрипт завершается ненулевым кодом.
+Обойти можно только явным `remnawave.allow_destructive_profile_sync: true`.
+
 ### Monitoring workflow
 
 Файл: `.github/workflows/monitor-remnawave-node.yml`

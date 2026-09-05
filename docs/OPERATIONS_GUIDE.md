@@ -183,6 +183,55 @@ workers:
 - `remnawave.reality_short_id` и `remnawave.reality_private_key` опциональны: если пусто, API sync сгенерирует их детерминированно на основе `node_secret_key`.
 - Если `panel_node_uuid` пустой, sync сначала ищет ноду по имени `hosts.<alias>`, затем по `ansible_host == node.address`.
 
+### Cloudflare WARP на ноде
+
+`hosts.<alias>.remnawave.warp_mode` выбирает шаблон профиля:
+
+| значение | что получается |
+|---|---|
+| `none` (default) | outbounds `[DIRECT, BLOCK]` — как было всегда |
+| `all` | outbound `WARP` первым: весь трафик ноды выходит через WARP, плюс `routing.domainStrategy: IPIfNonMatch` |
+| `inbound` | дополнительный inbound `<inbound_tag>_WARP` на `warp_inbound_port` (default `2053`) с правилом `-> WARP`; основной `:443` остаётся DIRECT |
+
+```yaml
+hosts:
+  dh-germ-1:
+    remnawave:
+      warp_mode: all
+  tw-germ-1:
+    remnawave:
+      warp_mode: inbound
+      warp_inbound_port: 2053
+```
+
+Для `warp_mode: inbound` `target_inbound_tags` по умолчанию становится
+`[<inbound_tag>, <inbound_tag>_WARP]` — обе точки входа активируются на ноде.
+
+На хосте WARP-интерфейс обязан называться `warp`.
+
+### Защита от затирания профиля (fail-closed)
+
+Sync никогда не перезаписывает профиль в панели, если рендер **удалил бы**
+outbound, inbound, routing-правило или `routing.domainStrategy`, которые в панели
+уже есть. В логе:
+
+```
+sync:would_remove:tw-germ-1: would remove outbounds=[WARP] inbounds=[VLESS_TW_GERM_1_WARP] rules=[...]
+sync:blocked:tw-germ-1: would remove outbounds=[WARP] inbounds=[VLESS_TW_GERM_1_WARP] rules=[...]
+node:skip:blocked-profile:tw-germ-1:tw-germ-1
+sync:blocked_total:1
+```
+
+Скрипт завершается кодом 1. Что делать:
+
+1. Правильный путь — привести fleet config в соответствие с панелью
+   (`warp_mode: all` / `warp_mode: inbound`), тогда рендер совпадёт и блокировка уйдёт.
+2. Если удаление действительно нужно — `remnawave.allow_destructive_profile_sync: true`
+   для этого хоста.
+
+`panel_sync_enforce=false` не разблокирует запись — профиль всё равно не будет
+перезаписан, изменится только то, что деплой продолжится с warning.
+
 ## 5) Как обновить `RW_FLEET_CONFIG_B64`
 
 1. Подготовьте файл `fleet.yaml`.

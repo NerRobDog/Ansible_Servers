@@ -342,4 +342,77 @@ hosts:
 - `target_profile_name` по умолчанию = alias хоста; можно задать вручную.
 - `inbound_tag` по умолчанию = `VLESS_<HOST_ALIAS>`; можно задать вручную.
 - `reality_short_id` и `reality_private_key` опциональны: при пустых значениях генерируются детерминированно из `node_secret_key`.
-- `target_inbound_tags` по умолчанию берётся из сгенерированного `inbound_tag`.
+- `target_inbound_tags` по умолчанию берётся из сгенерированного `inbound_tag`
+  (для `warp_mode: inbound` — это `[<inbound_tag>, <inbound_tag>_WARP]`).
+
+### Cloudflare WARP: `warp_mode`
+
+- Где задаётся: fleet config, `hosts.<alias>.remnawave.warp_mode`
+- Тип: `str` (`none` | `all` | `inbound`)
+- Default: `none`
+- Обязательность: опционален
+- Что делает: выбирает JSON-шаблон профиля панели.
+
+| `warp_mode` | Шаблон | Форма профиля |
+|---|---|---|
+| `none` | `remnawave/profiles/rw_vless_reality.json` | outbounds `[DIRECT, BLOCK]`, один inbound `:443` |
+| `all` | `remnawave/profiles/rw_vless_reality_warp_all.json` | outbounds `[WARP, DIRECT, BLOCK]` (WARP первый = дефолтный выход), `routing.domainStrategy: IPIfNonMatch` |
+| `inbound` | `remnawave/profiles/rw_vless_reality_warp_inbound.json` | inbounds `[<TAG>:443, <TAG>_WARP:<warp_inbound_port>]`, outbounds `[DIRECT, WARP, BLOCK]`, правило `inboundTag=<TAG>_WARP -> WARP` после трёх BLOCK-правил |
+
+Явный `remnawave.profile_template` всегда побеждает авто-выбор.
+
+При неправильном значении sync падает с `remnawave.warp_mode must be one of none, all, inbound`.
+
+Пример:
+
+```yaml
+hosts:
+  dh-germ-1:
+    remnawave:
+      warp_mode: all
+  tw-germ-1:
+    remnawave:
+      warp_mode: inbound
+      warp_inbound_port: 2053
+```
+
+Требование к хосту: WARP-интерфейс должен называться `warp` (`streamSettings.sockopt.interface: warp`),
+иначе xray не поднимет outbound.
+
+### `warp_inbound_port`
+
+- Где задаётся: fleet config, `hosts.<alias>.remnawave.warp_inbound_port`
+- Тип: `int`
+- Default: `2053`
+- Обязательность: используется только при `warp_mode: inbound`
+- При значении вне `1..65535` sync падает.
+
+### `allow_destructive_profile_sync`
+
+- Где задаётся: fleet config, `hosts.<alias>.remnawave.allow_destructive_profile_sync`
+- Тип: `bool`
+- Default: `false`
+- Что делает: снимает fail-closed защиту профиля.
+
+Sync сравнивает живой конфиг профиля с отрендеренным. Если рендер **удаляет**
+outbound tag, inbound tag, routing-правило или `routing.domainStrategy`, sync:
+
+```
+sync:would_remove:<profile>: would remove outbounds=[WARP] inbounds=[...] rules=[...]
+sync:blocked:<profile>: would remove outbounds=[WARP] inbounds=[...] rules=[...]
+node:skip:blocked-profile:<alias>:<profile>
+```
+
+профиль не перезаписывается, назначение ноды пропускается, скрипт завершается кодом 1
+(`panel_sync_enforce=false` в workflow превращает это в warning).
+Добавления и правки существующих полей работают как раньше.
+
+#### Проверка результата
+
+```bash
+python .github/scripts/test-remnawave-api-sync.py
+```
+
+Read-only прогон против панели (без записи): `deploy-remnawave-node` c
+`check_mode=true`, `panel_sync_write=false` — в логе шага `Sync RemaWave profiles`
+не должно быть строк `sync:blocked:`.
