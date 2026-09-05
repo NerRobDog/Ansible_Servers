@@ -65,7 +65,8 @@
           "privateKey": "TEST_ONLY_NOT_A_REAL_PRIVATE_KEY_0000000000",
           "serverNames": [
             "node1.example.com"
-          ]
+          ],
+          "minClientVer": "1.0.0"
         }
       }
     },
@@ -99,7 +100,8 @@
           "privateKey": "TEST_ONLY_NOT_A_REAL_PRIVATE_KEY_0000000000",
           "serverNames": [
             "node1.example.com"
-          ]
+          ],
+          "minClientVer": "1.0.0"
         }
       }
     }
