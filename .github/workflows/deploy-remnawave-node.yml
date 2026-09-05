@@ -60,6 +60,14 @@ on:
         options:
           - "true"
           - "false"
+      refresh_images:
+        description: Pull latest container images (remnanode etc.) — upgrades Xray
+        required: false
+        type: choice
+        default: "false"
+        options:
+          - "false"
+          - "true"
       tags:
         description: Optional ansible tags filter
         required: false
@@ -393,6 +401,7 @@ jobs:
           WORKER_MODE: ${{ inputs.worker_mode }}
           WORKER_IMAGE_TAG: ${{ inputs.worker_image_tag }}
           RUN_SMOKE: ${{ inputs.run_smoke }}
+          REFRESH_IMAGES: ${{ inputs.refresh_images }}
           RW_PANEL_API_TOKEN: ${{ secrets.RW_PANEL_API_TOKEN }}
           REMNAWAVE_API_ENDPOINT_TEMPLATE: ${{ vars.REMNAWAVE_API_ENDPOINT_TEMPLATE }}
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
@@ -404,6 +413,11 @@ jobs:
         run: |
           if [[ "${TARGET}" == "remnawave" ]]; then
             cmd=(ansible-playbook -i .ansible/runtime/hosts.ini playbook.yml --limit "${LIMIT}" --extra-vars @.ansible/runtime/runtime_vars.json)
+            if [[ "${REFRESH_IMAGES}" == "true" ]]; then
+              # Opt-in only: the default (`missing`) keeps pinned images in place, so a
+              # routine deploy never silently upgrades Xray inside remnanode.
+              cmd+=(--extra-vars "remnawave_node_compose_pull=always")
+            fi
             if [[ -n "${TAGS}" ]]; then
               cmd+=(--tags "${TAGS}")
             fi
