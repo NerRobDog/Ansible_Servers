@@ -261,6 +261,13 @@ base64 -i fleet.yaml | tr -d '\n' | gh secret set RW_FLEET_CONFIG_B64 --env prod
    - `check_mode`: сначала `true`, потом `false`;
    - `panel_sync_write`: `false` для read-only отчёта, `true` для применения изменений в панели.
    - `run_smoke`: `true` для автоматических пост-деплой проверок.
+   - `refresh_images`: по умолчанию `false` — образы не перекачиваются
+     (`remnawave_node_compose_pull=missing`, поведение как раньше). `true` добавляет
+     `--extra-vars remnawave_node_compose_pull=always`, то есть `remnanode` подтянет
+     свежий образ и **обновит Xray**. Включайте осознанно и отдельным прогоном,
+     а не вместе с обычным конфигурационным деплоем.
+     Роли `monitoring_agent` / `monitoring_stack` тянут `pull: missing` жёстко и
+     на этот флаг не реагируют; у `caddy_node` контейнеров нет.
 
 ## 6.1) Шаг profile sync
 
