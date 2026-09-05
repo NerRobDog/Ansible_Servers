@@ -1,0 +1,29 @@
+[Unit]
+Description=Monitoring stack compose project (Prometheus, Alertmanager, Grafana, Loki)
+Documentation=https://github.com/NerRobDog/Ansible_Servers
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+{% if monitoring_stack_bind_address not in ['0.0.0.0', '127.0.0.1', '::', '::1'] %}
+# Dashboards are published on {{ monitoring_stack_bind_address }}, which tailscaled assigns
+# a few seconds after dockerd starts. A container whose *start* fails at daemon boot
+# ("cannot assign requested address") is not retried by docker's restart manager, so
+# systemd owns the retry loop.
+After=tailscaled.service
+Wants=tailscaled.service
+{% endif %}
+PartOf=docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory={{ monitoring_stack_install_path }}
+ExecStart={{ monitoring_stack_docker_binary }} compose up -d --remove-orphans
+ExecStop=-{{ monitoring_stack_docker_binary }} compose stop
+TimeoutStartSec=600
+Restart=on-failure
+RestartSec={{ monitoring_stack_boot_retry_seconds }}
+
+[Install]
+WantedBy=multi-user.target

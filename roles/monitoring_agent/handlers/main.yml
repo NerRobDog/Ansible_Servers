@@ -6,3 +6,13 @@
     pull: missing
     remove_orphans: true
   when: monitoring_agent_manage_runtime | bool
+
+- name: Restart monitoring agent boot unit
+  ansible.builtin.systemd:
+    name: "{{ monitoring_agent_boot_unit_name }}"
+    daemon_reload: true
+    enabled: true
+    state: restarted
+  when:
+    - monitoring_agent_manage_runtime | bool
+    - monitoring_agent_manage_boot_unit | bool

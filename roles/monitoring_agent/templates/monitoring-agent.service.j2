@@ -1,0 +1,31 @@
+[Unit]
+Description=Monitoring agent compose project (node-exporter, cAdvisor)
+Documentation=https://github.com/NerRobDog/Ansible_Servers
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+{% if monitoring_agent_bind_address not in ['0.0.0.0', '127.0.0.1', '::', '::1'] %}
+# Ports are published on {{ monitoring_agent_bind_address }}, which is not a boot-time
+# address (tailscaled assigns it a few seconds after the daemon starts). Docker restores
+# containers with a restart policy when dockerd boots, but a container whose *start* fails
+# ("cannot assign requested address") is not retried by the restart manager - RestartCount
+# stays 0 and the exporter stays Exited(255) until the next manual deploy. systemd owns the
+# retry loop instead.
+After=tailscaled.service
+Wants=tailscaled.service
+{% endif %}
+PartOf=docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory={{ monitoring_agent_install_path }}
+ExecStart={{ monitoring_agent_docker_binary }} compose up -d --remove-orphans
+ExecStop=-{{ monitoring_agent_docker_binary }} compose stop
+TimeoutStartSec=300
+Restart=on-failure
+RestartSec={{ monitoring_agent_boot_retry_seconds }}
+
+[Install]
+WantedBy=multi-user.target

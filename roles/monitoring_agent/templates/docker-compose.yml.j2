@@ -1,3 +1,7 @@
+# NOTE: the restart policy below only covers container *exits*. When dockerd restores
+# containers at boot and the start itself fails (published port on an address tailscaled
+# has not assigned yet), the restart manager does not retry - see
+# roles/monitoring_agent/templates/monitoring-agent.service.j2, which owns that retry.
 services:
 {% if monitoring_agent_enable_node_exporter | bool %}
   node_exporter:

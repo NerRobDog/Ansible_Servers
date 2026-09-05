@@ -39,3 +39,11 @@ monitoring_stack_alert_telegram_enabled: false
 monitoring_stack_alert_telegram_bot_token: ""
 monitoring_stack_alert_telegram_chat_id: ""
 monitoring_stack_alert_telegram_topic_id: ""
+
+# Boot-time convergence: a systemd oneshot unit re-runs `docker compose up -d` until it
+# succeeds, so the stack comes back after a reboot even when its bind address (tailnet IPv4)
+# is not yet assigned when dockerd restores containers.
+monitoring_stack_manage_boot_unit: true
+monitoring_stack_boot_unit_name: monitoring-stack.service
+monitoring_stack_docker_binary: /usr/bin/docker
+monitoring_stack_boot_retry_seconds: 15
