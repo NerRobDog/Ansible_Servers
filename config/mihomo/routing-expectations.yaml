@@ -1,0 +1,46 @@
+# Golden file: where each domain must route.
+# Changing a route means changing this file in the same commit - the gate
+# fails on any deviation, which is how an intended change is told apart
+# from a regression. Seeded from an observed run on the captured template.
+expectations:
+- domain: www.youtube.com
+  group: 📺 YouTube
+- domain: chatgpt.com
+  group: 🤖 ChatGPT и AI
+- domain: claude.ai
+  group: 🤖 ChatGPT и AI
+- domain: x.com
+  group: 🚫 Недоступные из РФ
+- domain: instagram.com
+  group: 📷 Instagram
+- domain: discord.com
+  group: 💬 Discord
+- domain: api.telegram.org
+  group: ➤ Telegram
+- domain: soundcloud.com
+  group: 🚫 Недоступные из РФ
+- domain: yandex.ru
+  group: ⚪🔵🔴 RU сайты
+- domain: www.gstatic.com
+  group: 🌍 Остальные сайты
+- domain: ru.watchd0g.dev
+  group: 🌍 Остальные сайты
+# Subscription distribution. Every router fetches its OpenClash profile from
+# here, so this entry guards the most load-bearing domain in the fleet. It
+# currently falls through to the catch-all and therefore rides the proxy pool
+# itself: if the pool breaks, a router cannot fetch the config that would fix
+# it. Whether to break that circular dependency with an explicit DIRECT rule is
+# open - see beads as-6y4. Recorded here as observed, not as desired.
+- domain: no.watchd0g.dev
+  group: 🌍 Остальные сайты
+# Kinopoisk OTT CDN. Pinned to the RU exit after p1.trex.media fell through
+# every RU rule-set to the catch-all and played the video from abroad. The fix
+# reached the live panel from commit 7f9759e - which is local and unpushed, so
+# it is on no remote and `origin/master`'s push script appends nothing of the
+# sort. That is the hazard this expectation exists for: the rule is real in
+# production, invisible in the repo's history, and a later template edit could
+# drop it with nothing to notice until someone watched a film. See beads as-3m8.
+- domain: p1.trex.media
+  group: ⚪🔵🔴 RU сайты
+- domain: uma.media
+  group: ⚪🔵🔴 RU сайты
