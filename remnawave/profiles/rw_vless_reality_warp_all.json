@@ -33,7 +33,8 @@
           "privateKey": "${RW_REALITY_PRIVATE_KEY}",
           "serverNames": [
             "${RW_REALITY_SERVER_NAME}"
-          ]
+          ],
+          "minClientVer": "1.0.0"
         }
       }
     }
