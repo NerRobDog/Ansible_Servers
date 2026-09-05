@@ -39,3 +39,27 @@
     remove_orphans: true
   when: monitoring_agent_manage_runtime | bool
   tags: [monitoring, metrics, agent]
+
+- name: Install monitoring agent boot unit
+  ansible.builtin.template:
+    src: monitoring-agent.service.j2
+    dest: "/etc/systemd/system/{{ monitoring_agent_boot_unit_name }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - monitoring_agent_manage_runtime | bool
+    - monitoring_agent_manage_boot_unit | bool
+  notify: Restart monitoring agent boot unit
+  tags: [monitoring, metrics, agent]
+
+- name: Enable monitoring agent boot unit
+  ansible.builtin.systemd:
+    name: "{{ monitoring_agent_boot_unit_name }}"
+    daemon_reload: true
+    enabled: true
+    state: started
+  when:
+    - monitoring_agent_manage_runtime | bool
+    - monitoring_agent_manage_boot_unit | bool
+  tags: [monitoring, metrics, agent]

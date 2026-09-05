@@ -6,3 +6,13 @@
     pull: missing
     remove_orphans: true
   when: monitoring_stack_manage_runtime | bool
+
+- name: Restart monitoring stack boot unit
+  ansible.builtin.systemd:
+    name: "{{ monitoring_stack_boot_unit_name }}"
+    daemon_reload: true
+    enabled: true
+    state: restarted
+  when:
+    - monitoring_stack_manage_runtime | bool
+    - monitoring_stack_manage_boot_unit | bool

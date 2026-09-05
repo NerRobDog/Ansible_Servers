@@ -84,6 +84,12 @@
   - `monitoring.agent_bind_address` (по умолчанию `0.0.0.0`)
   - `monitoring.agent_node_exporter_port` (по умолчанию `9100`)
   - `monitoring.agent_cadvisor_port` (по умолчанию `8080`)
+- Загрузка после reboot: роль ставит `monitoring-agent.service` (systemd oneshot,
+  `docker compose up -d` с `Restart=on-failure`). Нужен потому, что при
+  `agent_bind_address` = tailnet-IP docker при старте демона не может забиндить адрес,
+  которого ещё нет (`cannot assign requested address`), и **не повторяет попытку**:
+  контейнер остаётся `Exited(255)` с `RestartCount=0` до следующего деплоя.
+  Отключается через `monitoring_agent_manage_boot_unit: false`.
 
 ### `monitoring_stack`
 - Назначение: центральный стек `Prometheus + Alertmanager + Grafana + Loki + Promtail`.
@@ -95,6 +101,9 @@
 - Подключение нод:
   - автоматически берёт хосты с `feature_monitoring_agent=true` из `fleet_hosts`.
   - скрапит `node_exporter`/`cadvisor` по `ansible_host` и monitoring-портам.
+- Загрузка после reboot: аналогичный `monitoring-stack.service` (та же причина —
+  `monitoring_stack_bind_address` по умолчанию равен tailnet-IP хоста).
+  Отключается через `monitoring_stack_manage_boot_unit: false`.
 
 ### `user_shell`
 - Назначение: пользователь, authorized_keys, sudo, shell-окружение.

@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eEuo pipefail
+
+# Ansible's own deprecation banners drowned the real failure out of the alert tail
+# (the Telegram notifier ships `tail -n 20` of this log).
+export ANSIBLE_DEPRECATION_WARNINGS=False
+
+last_check=""
+trap 'rc=$?; if [[ -n "${last_check}" ]]; then echo "[smoke] FAILED (rc=${rc}): ${last_check}" >&2; fi' ERR
 
 inventory=""
 runtime_vars=""
@@ -81,7 +88,8 @@ fi
 run_ansible() {
   local alias="$1"
   shift
-  ansible -i "$inventory" "$alias" -o "$@"
+  last_check="${alias}: $*"
+  ansible -i "$inventory" "$alias" "$@"
 }
 
 for alias in "${targets[@]}"; do
