@@ -57,6 +57,25 @@
 - `reality_short_id` — shortId Reality (опционально; если пусто, генерируется автоматически и стабильно из `node_secret_key`).
 - `reality_private_key` — privateKey Reality (опционально; если пусто, генерируется автоматически и стабильно из `node_secret_key`).
 - `reality_server_name` — обычно ваш `caddy_domain`.
+- `warp_mode` — `none` (default) | `all` | `inbound`: выбирает шаблон профиля с Cloudflare WARP
+  (`all` — весь узел через WARP; `inbound` — дополнительный inbound `<inbound_tag>_WARP`).
+- `warp_inbound_port` — порт WARP-inbound, только для `warp_mode: inbound` (default `2053`).
+- `allow_destructive_profile_sync` — `true` снимает fail-closed защиту профиля
+  (по умолчанию sync отказывается перезаписывать профиль, если это удалит
+  существующие в панели outbound/inbound/routing-правила).
+
+Пример для двух узлов с WARP:
+
+```yaml
+hosts:
+  dh-germ-1:
+    remnawave:
+      warp_mode: all
+  tw-germ-1:
+    remnawave:
+      warp_mode: inbound
+      warp_inbound_port: 2053
+```
 
 Если `panel_node_uuid` пустой, sync ищет ноду по имени `hosts.<alias>`, и только потом делает fallback по `ansible_host == node.address`.
 

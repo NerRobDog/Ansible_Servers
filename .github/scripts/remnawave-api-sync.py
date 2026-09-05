@@ -20,6 +20,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,22 @@ except Exception:  # pragma: no cover
 PLACEHOLDER_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 TAG_SAFE_RE = re.compile(r"[^A-Z0-9_]+")
 HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
+
+# Cloudflare WARP exit modes (fleet: hosts.<alias>.remnawave.warp_mode).
+#   none    - no WARP outbound at all (default, historical behaviour)
+#   all     - WARP outbound placed first => default exit for the whole node
+#   inbound - extra "<TAG>_WARP" inbound routed to a WARP outbound; the
+#             primary inbound keeps exiting via DIRECT
+WARP_MODE_NONE = "none"
+WARP_MODE_ALL = "all"
+WARP_MODE_INBOUND = "inbound"
+WARP_MODES = (WARP_MODE_NONE, WARP_MODE_ALL, WARP_MODE_INBOUND)
+WARP_MODE_TEMPLATES = {
+    WARP_MODE_ALL: "remnawave/profiles/rw_vless_reality_warp_all.json",
+    WARP_MODE_INBOUND: "remnawave/profiles/rw_vless_reality_warp_inbound.json",
+}
+WARP_INBOUND_TAG_SUFFIX = "_WARP"
+DEFAULT_WARP_INBOUND_PORT = 2053
 
 
 def fail(message: str) -> None:
@@ -200,16 +217,60 @@ def normalize_short_id(value: str, context: str) -> str:
     return result
 
 
-def ensure_inbound_tags(config: dict[str, Any], tag_base: str) -> list[str]:
+def normalize_warp_mode(value: Any, context: str) -> str:
+    mode = str(value or "").strip().lower() or WARP_MODE_NONE
+    if mode not in WARP_MODES:
+        fail(f"{context} must be one of {', '.join(WARP_MODES)} (got {value!r}).")
+    return mode
+
+
+def normalize_warp_inbound_port(value: Any, context: str) -> int:
+    raw = str(value if value is not None else "").strip()
+    if not raw:
+        return DEFAULT_WARP_INBOUND_PORT
+    try:
+        port = int(raw)
+    except (TypeError, ValueError):
+        fail(f"{context} must be an integer TCP port (got {value!r}).")
+    if port < 1 or port > 65535:
+        fail(f"{context} must be within 1..65535 (got {port}).")
+    return port
+
+
+def warp_inbound_tag_suffixes(warp_mode: str) -> list[str]:
+    """Explicit tag suffixes for inbounds 2..N, by WARP mode.
+
+    Without this the positional fallback would rename the WARP inbound to
+    "<TAG>_2" and silently break the routing rule that references
+    "<TAG>_WARP".
+    """
+    if warp_mode == WARP_MODE_INBOUND:
+        return [WARP_INBOUND_TAG_SUFFIX]
+    return []
+
+
+def ensure_inbound_tags(
+    config: dict[str, Any],
+    tag_base: str,
+    extra_tag_suffixes: list[str] | None = None,
+) -> list[str]:
     inbounds = config.get("inbounds")
     if not isinstance(inbounds, list) or not inbounds:
         fail("Rendered profile config must include non-empty 'inbounds' array.")
 
+    suffixes = list(extra_tag_suffixes or [])
     tags: list[str] = []
     for idx, inbound in enumerate(inbounds, start=1):
         if not isinstance(inbound, dict):
             fail("Each inbound item must be an object.")
-        tag = tag_base if idx == 1 else f"{tag_base}_{idx}"
+        if idx == 1:
+            tag = tag_base
+        else:
+            suffix_idx = idx - 2
+            if suffix_idx < len(suffixes):
+                tag = f"{tag_base}{suffixes[suffix_idx]}"
+            else:
+                tag = f"{tag_base}_{idx}"
         inbound["tag"] = tag
         tags.append(tag)
     return tags
@@ -233,6 +294,97 @@ def detect_duplicate_tags(profile_specs: list[dict[str, Any]]) -> None:
             if existing and existing != profile_name:
                 fail(f"Inbound tag '{tag}' is duplicated across profiles '{existing}' and '{profile_name}'. Tags must be globally unique.")
             tag_owner[tag] = profile_name
+
+
+def collect_tags(config: Any, section: str) -> list[str]:
+    items = config.get(section) if isinstance(config, dict) else None
+    if not isinstance(items, list):
+        return []
+    tags: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        tag = str(item.get("tag", "") or "").strip()
+        if tag:
+            tags.append(tag)
+    return tags
+
+
+def collect_routing_rules(config: Any) -> list[str]:
+    routing = config.get("routing") if isinstance(config, dict) else None
+    rules = routing.get("rules") if isinstance(routing, dict) else None
+    if not isinstance(rules, list):
+        return []
+    return [canonical_json(rule) for rule in rules]
+
+
+def routing_domain_strategy(config: Any) -> str:
+    routing = config.get("routing") if isinstance(config, dict) else None
+    if not isinstance(routing, dict):
+        return ""
+    return str(routing.get("domainStrategy", "") or "").strip()
+
+
+def removed_items(current: list[str], rendered: list[str]) -> list[str]:
+    """Multiset difference current - rendered, order preserved."""
+    remaining = Counter(rendered)
+    removed: list[str] = []
+    for item in current:
+        if remaining.get(item, 0) > 0:
+            remaining[item] -= 1
+            continue
+        removed.append(item)
+    return removed
+
+
+def diff_profile_removals(current_config: Any, rendered_config: Any) -> dict[str, Any]:
+    """What the rendered config would DELETE from the live config.
+
+    Only removals matter here: additive and in-place edits keep the historical
+    behaviour. Removals are what silently destroy hand-made panel routing.
+    """
+    return {
+        "outbounds": removed_items(
+            collect_tags(current_config, "outbounds"),
+            collect_tags(rendered_config, "outbounds"),
+        ),
+        "inbounds": removed_items(
+            collect_tags(current_config, "inbounds"),
+            collect_tags(rendered_config, "inbounds"),
+        ),
+        "rules": removed_items(
+            collect_routing_rules(current_config),
+            collect_routing_rules(rendered_config),
+        ),
+        "routing_domain_strategy": (
+            routing_domain_strategy(current_config)
+            if routing_domain_strategy(current_config)
+            and not routing_domain_strategy(rendered_config)
+            else ""
+        ),
+    }
+
+
+def has_removals(removals: dict[str, Any]) -> bool:
+    return bool(
+        removals.get("outbounds")
+        or removals.get("inbounds")
+        or removals.get("rules")
+        or removals.get("routing_domain_strategy")
+    )
+
+
+def format_removals(removals: dict[str, Any]) -> str:
+    parts = [
+        "would remove",
+        "outbounds=[" + ",".join(removals.get("outbounds", [])) + "]",
+        "inbounds=[" + ",".join(removals.get("inbounds", [])) + "]",
+        "rules=[" + ",".join(removals.get("rules", [])) + "]",
+    ]
+    domain_strategy = removals.get("routing_domain_strategy", "")
+    if domain_strategy:
+        parts.append(f"routing.domainStrategy={domain_strategy}")
+    return " ".join(parts)
 
 
 class PanelClient:
@@ -310,7 +462,7 @@ def normalize_manifest(manifest: dict[str, Any], repo_root: Path) -> dict[str, A
     }
 
 
-def normalize_fleet_hosts(fleet_data: dict[str, Any], default_template_rel: str) -> dict[str, dict[str, Any]]:
+def normalize_fleet_hosts(fleet_data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     hosts = fleet_data.get("hosts")
     if not isinstance(hosts, dict) or not hosts:
         fail("Fleet config must contain non-empty object field 'hosts'.")
@@ -348,6 +500,20 @@ def normalize_fleet_hosts(fleet_data: dict[str, Any], default_template_rel: str)
         reality_server_name = str(remnawave.get("reality_server_name", "") or "").strip() or caddy_domain
         reality_target = str(remnawave.get("reality_target", "") or "").strip() or "127.0.0.1:8443"
 
+        warp_mode = normalize_warp_mode(
+            remnawave.get("warp_mode", ""), f"hosts.{alias}.remnawave.warp_mode"
+        )
+        warp_inbound_port = normalize_warp_inbound_port(
+            remnawave.get("warp_inbound_port"), f"hosts.{alias}.remnawave.warp_inbound_port"
+        )
+        allow_destructive = bool(remnawave.get("allow_destructive_profile_sync", False))
+
+        # target_inbound_tags default follows the WARP shape: warp_mode=inbound
+        # publishes two inbounds and both must stay active on the node.
+        explicit_inbound_tags = remnawave.get("target_inbound_tags") is not None
+        if not explicit_inbound_tags and warp_mode == WARP_MODE_INBOUND:
+            target_inbound_tags = [inbound_tag, f"{inbound_tag}{WARP_INBOUND_TAG_SUFFIX}"]
+
         normalized[alias] = {
             "alias": alias,
             "ansible_host": ansible_host,
@@ -355,7 +521,10 @@ def normalize_fleet_hosts(fleet_data: dict[str, Any], default_template_rel: str)
             "panel_node_uuid": str(remnawave.get("panel_node_uuid", "") or "").strip(),
             "target_profile_name": profile_name,
             "target_inbound_tags": [str(tag).strip() for tag in target_inbound_tags if str(tag).strip()],
-            "profile_template": str(remnawave.get("profile_template", "") or default_template_rel).strip(),
+            "profile_template": str(remnawave.get("profile_template", "") or "").strip(),
+            "warp_mode": warp_mode,
+            "warp_inbound_port": warp_inbound_port,
+            "allow_destructive_profile_sync": allow_destructive,
             "inbound_tag": inbound_tag,
             "reality_target": reality_target,
             "reality_short_id": str(remnawave.get("reality_short_id", "") or "").strip(),
@@ -398,6 +567,16 @@ def normalize_manifest_nodes(nodes_raw: list[Any], known_hosts: set[str]) -> dic
         ):
             if key in item:
                 node_cfg[key] = str(item.get(key, "") or "").strip()
+        if "warp_mode" in item:
+            node_cfg["warp_mode"] = normalize_warp_mode(
+                item.get("warp_mode"), f"Manifest nodes[{idx}].warp_mode"
+            )
+        if "warp_inbound_port" in item:
+            node_cfg["warp_inbound_port"] = normalize_warp_inbound_port(
+                item.get("warp_inbound_port"), f"Manifest nodes[{idx}].warp_inbound_port"
+            )
+        if "allow_destructive_profile_sync" in item:
+            node_cfg["allow_destructive_profile_sync"] = bool(item.get("allow_destructive_profile_sync"))
         if "target_inbound_tags" in item:
             node_cfg["target_inbound_tags"] = [tag.strip() for tag in (inbound_tags or []) if tag.strip()]
         normalized[host_alias] = node_cfg
@@ -431,15 +610,37 @@ def merge_node_assignments(
     return filtered
 
 
+def resolve_profile_template(cfg: dict[str, Any], default_template_rel: str) -> str:
+    """Explicit profile_template always wins; otherwise warp_mode picks it."""
+    explicit = str(cfg.get("profile_template", "") or "").strip()
+    if explicit:
+        return explicit
+    warp_mode = str(cfg.get("warp_mode", WARP_MODE_NONE) or WARP_MODE_NONE).strip().lower()
+    return WARP_MODE_TEMPLATES.get(warp_mode, default_template_rel)
+
+
 def build_profile_specs(
     assignments: dict[str, dict[str, Any]],
     repo_root: Path,
     global_placeholder_vars: dict[str, Any],
+    default_template_rel: str,
 ) -> list[dict[str, Any]]:
     profile_specs_by_name: dict[str, dict[str, Any]] = {}
 
     for alias, cfg in assignments.items():
-        template_rel = ensure_non_empty_str(cfg.get("profile_template", ""), f"host '{alias}' profile_template")
+        warp_mode = normalize_warp_mode(
+            cfg.get("warp_mode", WARP_MODE_NONE), f"host '{alias}' remnawave.warp_mode"
+        )
+        cfg["warp_mode"] = warp_mode
+        warp_inbound_port = normalize_warp_inbound_port(
+            cfg.get("warp_inbound_port"), f"host '{alias}' remnawave.warp_inbound_port"
+        )
+        cfg["warp_inbound_port"] = warp_inbound_port
+
+        template_rel = ensure_non_empty_str(
+            resolve_profile_template(cfg, default_template_rel),
+            f"host '{alias}' profile_template",
+        )
         template_path = (repo_root / template_rel).resolve()
         if not template_path.exists():
             fail(f"Host '{alias}' profile template not found: {template_rel}")
@@ -466,27 +667,36 @@ def build_profile_specs(
             "RW_REALITY_PRIVATE_KEY": private_key,
             "RW_REALITY_SERVER_NAME": server_name,
             "RW_INBOUND_TAG": inbound_tag,
+            "RW_WARP_INBOUND_TAG": f"{inbound_tag}{WARP_INBOUND_TAG_SUFFIX}",
+            "RW_WARP_INBOUND_PORT": warp_inbound_port,
         }
         render_vars = dict(global_placeholder_vars)
         render_vars.update(host_vars)
 
         rendered_config = render_profile_template(template_path, render_vars)
-        generated_tags = ensure_inbound_tags(rendered_config, inbound_tag)
+        generated_tags = ensure_inbound_tags(
+            rendered_config, inbound_tag, warp_inbound_tag_suffixes(warp_mode)
+        )
 
         target_inbound_tags = cfg.get("target_inbound_tags")
         if not isinstance(target_inbound_tags, list) or not target_inbound_tags:
             cfg["target_inbound_tags"] = generated_tags
 
+        allow_destructive = bool(cfg.get("allow_destructive_profile_sync", False))
+
         existing = profile_specs_by_name.get(profile_name)
         if existing is not None:
             if canonical_json(existing["config"]) != canonical_json(rendered_config):
                 fail(f"Profile name '{profile_name}' is generated by multiple hosts with different configs.")
+            existing["allow_destructive"] = existing["allow_destructive"] or allow_destructive
             continue
 
         profile_specs_by_name[profile_name] = {
             "name": profile_name,
             "template_rel": template_rel,
             "config": rendered_config,
+            "warp_mode": warp_mode,
+            "allow_destructive": allow_destructive,
         }
 
     profile_specs = list(profile_specs_by_name.values())
@@ -513,7 +723,7 @@ def upsert_profiles(
     client: PanelClient,
     profile_specs: list[dict[str, Any]],
     write_mode: bool,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, list[str]]:
     payload = extract_response_payload(client.request("GET", "config-profiles"))
     profile_list = payload.get("configProfiles", []) if isinstance(payload, dict) else []
     if not isinstance(profile_list, list):
@@ -523,6 +733,7 @@ def upsert_profiles(
     created = 0
     updated = 0
     drift = 0
+    blocked: list[str] = []
     for spec in profile_specs:
         rendered_config = spec["config"]
         existing = existing_by_name.get(spec["name"])
@@ -538,6 +749,17 @@ def upsert_profiles(
 
         current_config = existing.get("config", {})
         if canonical_json(current_config) != canonical_json(rendered_config):
+            # Fail-closed: a template render must never DELETE outbounds,
+            # inbounds or routing rules that live in the panel today.
+            removals = diff_profile_removals(current_config, rendered_config)
+            if has_removals(removals):
+                summary = format_removals(removals)
+                print(f"sync:would_remove:{spec['name']}: {summary}")
+                if not spec.get("allow_destructive", False):
+                    print(f"sync:blocked:{spec['name']}: {summary}")
+                    blocked.append(spec["name"])
+                    continue
+                print(f"sync:destructive_allowed:{spec['name']}: {summary}")
             if write_mode:
                 client.request(
                     "PATCH",
@@ -553,7 +775,7 @@ def upsert_profiles(
             else:
                 print(f"profile:drift:config-mismatch:{spec['name']}")
                 drift += 1
-    return created, updated, drift
+    return created, updated, drift, blocked
 
 
 def fetch_profiles_by_name(client: PanelClient) -> dict[str, dict[str, Any]]:
@@ -602,6 +824,7 @@ def assign_profiles_to_nodes(
     assignments: dict[str, dict[str, Any]],
     profiles_by_name: dict[str, dict[str, Any]],
     write_mode: bool,
+    blocked_profiles: set[str] | None = None,
 ) -> tuple[int, int]:
     nodes = fetch_nodes(client)
     nodes_by_uuid, nodes_by_address, nodes_by_name = build_node_lookup(nodes)
@@ -613,6 +836,12 @@ def assign_profiles_to_nodes(
         target_inbound_tags = assignment.get("target_inbound_tags", [])
         panel_node_uuid = str(assignment.get("panel_node_uuid", "")).strip()
         ansible_host = assignment.get("ansible_host", "")
+
+        if target_profile_name in (blocked_profiles or set()):
+            # The profile write was refused; do not touch the node assignment
+            # either, or we would strip the very inbounds we just protected.
+            print(f"node:skip:blocked-profile:{alias}:{target_profile_name}")
+            continue
 
         if not target_profile_name:
             fail(f"Host '{alias}' must define remnawave.target_profile_name for API sync.")
@@ -735,11 +964,16 @@ def main() -> None:
     manifest_cfg = normalize_manifest(manifest_data, repo_root)
 
     global_placeholder_vars = load_optional_json_map(profile_vars_path)
-    fleet_hosts = normalize_fleet_hosts(fleet_data, manifest_cfg["default_profile_template"])
+    fleet_hosts = normalize_fleet_hosts(fleet_data)
     selected_hosts = parse_limit(args.limit, set(fleet_hosts.keys()))
     manifest_nodes = normalize_manifest_nodes(manifest_cfg["nodes"], set(fleet_hosts.keys()))
     assignments = merge_node_assignments(fleet_hosts, manifest_nodes, selected_hosts)
-    profile_specs = build_profile_specs(assignments, repo_root, global_placeholder_vars)
+    profile_specs = build_profile_specs(
+        assignments,
+        repo_root,
+        global_placeholder_vars,
+        manifest_cfg["default_profile_template"],
+    )
 
     api_token = args.api_token or os.getenv("RW_PANEL_API_TOKEN", "")
     panel_base = args.panel_api_base_url or os.getenv("RW_PANEL_API_BASE_URL", "")
@@ -750,28 +984,46 @@ def main() -> None:
     print(f"sync:profiles:{len(profile_specs)}")
     print(f"sync:node_assignments:{len(assignments)}")
 
-    profile_created, profile_updated, profile_drift = upsert_profiles(client, profile_specs, args.write)
+    profile_created, profile_updated, profile_drift, blocked_profiles = upsert_profiles(
+        client, profile_specs, args.write
+    )
     profiles_by_name = fetch_profiles_by_name(client)
-    node_updated, node_drift = assign_profiles_to_nodes(client, assignments, profiles_by_name, args.write)
+    node_updated, node_drift = assign_profiles_to_nodes(
+        client, assignments, profiles_by_name, args.write, set(blocked_profiles)
+    )
 
+    print(f"sync:blocked_total:{len(blocked_profiles)}")
+
+    total_drift = 0
     if not args.write:
-        profile_names = {spec["name"] for spec in profile_specs}
+        profile_names = {spec["name"] for spec in profile_specs} - set(blocked_profiles)
         missing_profiles = sorted(name for name in profile_names if name not in profiles_by_name)
         profile_drift += len(missing_profiles)
         for profile_name in missing_profiles:
             print(f"profile:drift:missing-after-read:{profile_name}")
         total_drift = profile_drift + node_drift
         print(f"sync:drift_total:{total_drift}")
-        if total_drift > 0:
-            fail("Read-only sync detected drift. Re-run with --write to apply changes.")
 
     print(
         "sync:summary:"
         f"profile_created={profile_created},"
         f"profile_updated={profile_updated},"
+        f"profile_blocked={len(blocked_profiles)},"
         f"node_updated={node_updated},"
         f"node_drift={node_drift}"
     )
+
+    # Blocked profiles first: they carry the actionable message.
+    if blocked_profiles:
+        fail(
+            "Refused to overwrite panel profiles that would lose live routing: "
+            f"{', '.join(sorted(blocked_profiles))}. "
+            "Align the profile template (remnawave.warp_mode) with the panel, or set "
+            "remnawave.allow_destructive_profile_sync: true for that host to accept the loss."
+        )
+
+    if not args.write and total_drift > 0:
+        fail("Read-only sync detected drift. Re-run with --write to apply changes.")
 
 
 if __name__ == "__main__":

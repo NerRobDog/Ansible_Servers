@@ -50,6 +50,23 @@ defaults:
     # reality_short_id: "7642b35f5570246f"
     # reality_private_key: "REPLACE_ME"
     # reality_server_name: "node1.example.com"
+    #
+    # Cloudflare WARP exit shape for the generated xray config profile.
+    #   none    (default) - no WARP outbound, node exits DIRECT
+    #   all     - WARP outbound placed first => the whole node exits via WARP
+    #             (template remnawave/profiles/rw_vless_reality_warp_all.json)
+    #   inbound - extra inbound "<inbound_tag>_WARP" on warp_inbound_port,
+    #             routed to a WARP outbound; the :443 inbound stays DIRECT
+    #             (template remnawave/profiles/rw_vless_reality_warp_inbound.json)
+    # An explicit profile_template always wins over this auto-selection.
+    warp_mode: none
+    # warp_inbound_port: 2053        # only for warp_mode: inbound
+    # profile_template: "remnawave/profiles/rw_vless_reality.json"
+    #
+    # Panel sync is fail-closed: it refuses to overwrite a live profile when the
+    # render would DELETE an outbound/inbound/routing rule that exists in the
+    # panel today. Set this to true only when you really want to drop them.
+    # allow_destructive_profile_sync: false
   custom_roles: []
   yusic_worker:
     relay_host_alias: fra_node_1
@@ -108,6 +125,8 @@ hosts:
       # reality_server_name: "node1.example.com"
       # reality_short_id: "7642b35f5570246f"
       # reality_private_key: "REPLACE_ME"
+      # Whole node exits through Cloudflare WARP:
+      # warp_mode: all
     custom_roles: []
     monitoring:
       agent_bind_address: "0.0.0.0"
@@ -139,6 +158,10 @@ hosts:
       # reality_server_name: "node2.example.com"
       # reality_short_id: "c0d2ed6aa8460e20"
       # reality_private_key: "REPLACE_ME"
+      # Second WARP-only inbound next to the plain :443 one.
+      # target_inbound_tags defaults to both tags in this mode.
+      # warp_mode: inbound
+      # warp_inbound_port: 2053
     custom_roles: []
     monitoring:
       agent_bind_address: "0.0.0.0"

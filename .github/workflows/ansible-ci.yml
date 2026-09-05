@@ -40,6 +40,9 @@ jobs:
       - name: OpenWrt fleet renderer contract tests
         run: python .github/scripts/test-render-openwrt-fleet-runtime.py
 
+      - name: RemaWave panel sync contract tests
+        run: python .github/scripts/test-remnawave-api-sync.py
+
       - name: mihomo candidate contract tests
         run: python .github/scripts/test-mihomo-candidate.py
 
