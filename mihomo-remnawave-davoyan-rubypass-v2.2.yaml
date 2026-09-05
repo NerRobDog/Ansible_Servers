@@ -1,0 +1,805 @@
+---
+# Remnawave Mihomo template (Davoyan-based, customized split by RU bypass and foreign pools)
+# Version: v2.2 (2026-05-13)
+# Changes over v2.1:
+# - Added Perplexity domains to openai-inline (was relying on MetaCubeX ai.mrs — now
+#   pinned locally so upstream updates don't drift routing). Path unchanged:
+#   perplexity.ai -> 🤖 ChatGPT и AI -> 🌍 Зарубежные серверы (баланс). NOT via WARP
+#   (Cloudflare IPs return HTTP 403 from Perplexity).
+# - Added individual node picker to 💬 Discord, 🎮 Игры, 🤖 ChatGPT и AI via
+#   include-all: true. User can pin a specific exit node instead of being limited to
+#   bundle groups. AI excludes WARP (HTTP 403 on Cloudflare IPs).
+# - YouTube selector aliases: 📺 YT без рекламы (RU YouTube-Premium nodes, no ads via
+#   YT RU contract) and 📺 YT фон / PiP (foreign nodes — Picture-in-Picture works
+#   without YT Premium subscription on non-RU IPs). 📺 YouTube group exposes aliased
+#   names instead of raw bundle group names so UI is self-documenting.
+# - Expanded adult-extra-inline: 21 sites from ru-inside that weren't reliably
+#   covered by category-porn.mrs. Prevents ru-inside [25] from routing them via
+#   🇷🇺 Обход блокировок РФ.
+# - nudevista routed via 🏴‍☠️ Cloudflare WARP (google-warp-inline). Site
+#   self-censors on non-CF exits and serves Bryansk court-order stub (HTTP 200,
+#   site's own HTML — not RKN provider page). User verified 2026-05-14:
+#   nudevista.at and CF/WARP IPs return real content; US VPS exits get stub.
+# - Reordered proxy-groups: user-facing selectors (🌍 Остальные сайты first/Global,
+#   📺/➤/📷/💬/🤖/🎮/🔞/📍/⚪🔵🔴) at top, visible bundles in middle
+#   (🚫 Недоступные из РФ, 🧲 Торрент-трекеры, 🏴‍☠️ WARP), hidden internals at
+#   bottom (YT aliases, 🌍 баланс, 🇷🇺 авто, PROXY). YT aliases now hidden:true —
+#   accessible from 📺 YouTube selector menu but absent from main UI list.
+#
+# Previous v2.1 changes over v2.0:
+# - Added "📷 Instagram" selector group. Default routing remains via "🚫 Недоступные из
+#   РФ" (RU YouTube/Inst/TG nodes), but user can manually switch to foreign balance or
+#   RU-bypass-only. Useful when an RU node's CDN flaps or Reels quality drops.
+# - Added "📍 IP Check" selector group with DIRECT (default — see real IP) and 🏴‍☠️
+#   Cloudflare WARP (checker logs CF IP). Either way the VLESS exit nodes never appear
+#   in IP-checker scraper logs.
+# - New ip-check-inline rule-set covers ipinfo.io / ipapi.co / ifconfig.me/co /
+#   icanhazip.com / ipify.org / ip-api.com / myip.com / whatismyipaddress.com / ip.sb /
+#   2ip.ru / whoer.net / browserleaks.com. Rule placed BEFORE ru-inline so 2ip.ru hits
+#   the selector instead of falling through to RU-direct.
+# Goals:
+# - RU sites -> DIRECT
+# - Blocked from inside RU (YouTube/Discord/X/Instagram/re-filter) -> "🇷🇺 Обход блокировок РФ (авто)" first, then "🌍 Зарубежные серверы (баланс)"
+# - Telegram and AI/ChatGPT -> "🌍 Зарубежные серверы (баланс)" by default
+# - Generic external traffic -> "🌍 Зарубежные серверы (баланс)" load-balance
+# - Torrent clients -> DIRECT, torrent trackers -> "🇷🇺 Обход блокировок РФ (авто)" first
+# - QUIC is not blocked globally (keeps media paths working on router clients and end devices)
+# - MAX messenger/platform domains are blocked (REJECT)
+# - Added "🎮 Игры" strategy with process-aware routing for common game launchers
+# - Google Antigravity + NotebookLM -> "🏴‍☠️ Cloudflare WARP" (pirate-flag nodes only)
+#   Rationale: these services return "location_unsupported" from RU IPs, but work on
+#   Cloudflare IPs (tested 2026-04-15, WatchNet IP 104.28.197.7).
+#   Claude.ai / ChatGPT / Perplexity are NOT routed via WARP — they return HTTP 403
+#   on Cloudflare IPs and must stay on regular foreign servers.
+# - Adult content (category-porn + extras) -> "🔞 Для взрослых" -> international servers only
+#   Rationale: pornhub/xvideos/xhamster are in ru-inside (RU-bypass-first), which is slower.
+#   Rule placed BEFORE ru-inside so they go direct to foreign servers.
+
+mixed-port: 7890
+mode: rule
+log-level: warning
+allow-lan: false
+ipv6: false
+tcp-concurrent: true
+unified-delay: true
+find-process-mode: strict
+
+profile:
+  store-selected: true
+  store-fake-ip: true
+
+sniffer:
+  enable: true
+  force-dns-mapping: true
+  parse-pure-ip: true
+  override-destination: false
+  sniff:
+    HTTP:
+      ports:
+        - 80
+        - 8080-8880
+    TLS:
+      ports:
+        - 443
+        - 8443
+  # Telegram uses MTProto (not TLS) on port 443 — sniffer must skip these IPs
+  # or it waits for TLS ClientHello that never arrives, causing connection delays
+  skip-dst-address:
+    - 91.108.4.0/22
+    - 91.108.8.0/22
+    - 91.108.12.0/22
+    - 91.108.16.0/22
+    - 91.108.56.0/22
+    - 91.105.192.0/23
+    - 149.154.160.0/20
+    - 185.76.151.0/24
+    - 0.0.0.0/8
+    - 10.0.0.0/8
+    - 100.64.0.0/10
+    - 127.0.0.0/8
+    - 169.254.0.0/16
+    - 172.16.0.0/12
+    - 192.0.0.0/24
+    - 192.0.2.0/24
+    - 192.88.99.0/24
+    - 192.168.0.0/16
+    - 198.51.100.0/24
+    - 203.0.113.0/24
+    - 224.0.0.0/3
+    - "::/127"
+    - "fc00::/7"
+    - "fe80::/10"
+    - "ff00::/8"
+
+tun:
+  enable: true
+  stack: gvisor
+  auto-route: true
+  auto-detect-interface: true
+  dns-hijack:
+    - any:53
+    - tcp://any:53
+  strict-route: true
+  route-exclude-address:
+    - 0.0.0.0/8
+    - 10.0.0.0/8
+    - 100.64.0.0/10
+    - 127.0.0.0/8
+    - 169.254.0.0/16
+    - 172.16.0.0/12
+    - 192.0.0.0/24
+    - 192.0.2.0/24
+    - 192.88.99.0/24
+    - 192.168.0.0/16
+    - 198.51.100.0/24
+    - 203.0.113.0/24
+    - 224.0.0.0/3
+    - "::/127"
+    - "fc00::/7"
+    - "fe80::/10"
+    - "ff00::/8"
+
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - rule-set:geosite-private
+    - "*.lan"
+    - "*.local"
+    - "*.msftncsi.com"
+    - "*.msftconnecttest.com"
+  default-nameserver:
+    - 1.1.1.1
+    - 8.8.8.8
+  proxy-server-nameserver:
+    - https://1.1.1.1/dns-query#DIRECT
+    - https://8.8.8.8/dns-query#DIRECT
+  direct-nameserver:
+    - 77.88.8.8#DIRECT
+    - https://77.88.8.8/dns-query#DIRECT
+    - system
+  nameserver:
+    - https://1.1.1.1/dns-query#🌍 Остальные сайты
+    - https://8.8.8.8/dns-query#🌍 Остальные сайты
+  nameserver-policy:
+    rule-set:geosite-private:
+      - system
+    rule-set:ru-inline,ru-apps,geosite-ru:
+      - 77.88.8.8#DIRECT
+      - https://77.88.8.8/dns-query#DIRECT
+    rule-set:ru-inside,refilter-domains,youtube,discord-domains,x-inline:
+      - https://1.1.1.1/dns-query#🚫 Недоступные из РФ
+      - https://8.8.8.8/dns-query#🚫 Недоступные из РФ
+    # Instagram DNS follows the 📷 Instagram selector — switching exit also switches
+    # resolver, so CDN/geo-localization tracks the chosen path (Codex P2 fix).
+    rule-set:instagram-inline:
+      - https://1.1.1.1/dns-query#📷 Instagram
+      - https://8.8.8.8/dns-query#📷 Instagram
+    # IP-checker DNS: resolver is always Cloudflare DoH (1.1.1.1 / 8.8.8.8), but the
+    # DoH transport follows the 📍 IP Check selector — DIRECT means the DNS query
+    # leaves from your real client IP, WARP means it leaves from a Cloudflare IP.
+    # Matches the transport path of the actual checker request.
+    rule-set:ip-check-inline:
+      - https://1.1.1.1/dns-query#📍 IP Check
+      - https://8.8.8.8/dns-query#📍 IP Check
+    rule-set:google-warp-inline:
+      - https://1.1.1.1/dns-query#🏴‍☠️ Cloudflare WARP
+      - https://8.8.8.8/dns-query#🏴‍☠️ Cloudflare WARP
+    rule-set:intl-blocked-inline:
+      - https://1.1.1.1/dns-query#🌍 Зарубежные серверы (баланс)
+      - https://8.8.8.8/dns-query#🌍 Зарубежные серверы (баланс)
+    rule-set:ai,openai-inline:
+      - https://1.1.1.1/dns-query#🤖 ChatGPT и AI
+      - https://8.8.8.8/dns-query#🤖 ChatGPT и AI
+    rule-set:telegram-domains,additional-telegram-domains:
+      - https://1.1.1.1/dns-query#🌍 Зарубежные серверы (баланс)
+      - https://8.8.8.8/dns-query#🌍 Зарубежные серверы (баланс)
+    rule-set:torrent-trackers:
+      - https://1.1.1.1/dns-query#🧲 Торрент-трекеры
+      - https://8.8.8.8/dns-query#🧲 Торрент-трекеры
+
+proxies:
+  - name: "🇷🇺 Без VPN"
+    type: direct
+    udp: true
+  - name: DNS-OUT
+    type: dns
+  # LEAVE THIS LINE!
+
+proxy-groups:
+  # ═══════════════════════════════════════════════════════════════
+  # USER-FACING SELECTORS (top of list — visible in client UI)
+  # ═══════════════════════════════════════════════════════════════
+
+  - name: "🌍 Остальные сайты"
+    type: select
+    remnawave:
+      include-proxies: false
+    proxies:
+      - "🌍 Зарубежные серверы (баланс)"
+      - "🇷🇺 Обход блокировок РФ (авто)"
+
+  - name: "📺 YouTube"
+    type: select
+    remnawave:
+      include-proxies: false
+    # Aliased entries — user-friendly names per capability:
+    #   📺 YT без рекламы = RU YouTube-Premium nodes (no ads via YT RU contract)
+    #   📺 YT фон / PiP   = foreign nodes (Picture-in-Picture without Premium sub)
+    proxies:
+      - "📺 YT без рекламы"
+      - "📺 YT фон / PiP"
+
+  - name: "➤ Telegram"
+    type: select
+    remnawave:
+      include-proxies: false
+    proxies:
+      - "🌍 Зарубежные серверы (баланс)"
+
+  - name: "📷 Instagram"
+    type: select
+    remnawave:
+      include-proxies: false
+    # Default: RU YouTube/Inst/TG nodes via fallback (🚫 Недоступные из РФ tries
+    # 🇷🇺 Обход блокировок РФ first, then foreign balance). Manual options below
+    # let you force foreign-only when RU node CDN flaps or Reels quality drops.
+    proxies:
+      - "🚫 Недоступные из РФ"
+      - "🌍 Зарубежные серверы (баланс)"
+      - "🇷🇺 Обход блокировок РФ (авто)"
+
+  - name: "💬 Discord"
+    type: select
+    include-all: true
+    # Individual nodes appended after bundles for manual pin (e.g., voice latency tuning).
+    exclude-filter: "(?i)(Без\\s*VPN|DNS-OUT)"
+    remnawave:
+      include-proxies: false
+    proxies:
+      - "🚫 Недоступные из РФ"
+      - "🌍 Зарубежные серверы (баланс)"
+
+  - name: "🤖 ChatGPT и AI"
+    type: select
+    include-all: true
+    # WARP excluded: Claude/ChatGPT/Perplexity return HTTP 403 on Cloudflare IPs.
+    # DNS-OUT/direct stubs excluded to avoid bypassing AI routing entirely.
+    exclude-filter: "(?i)(WatchNet|Без\\s*VPN|DNS-OUT)"
+    remnawave:
+      include-proxies: false
+    proxies:
+      - "🌍 Зарубежные серверы (баланс)"
+      - "🚫 Недоступные из РФ"
+      - "🇷🇺 Обход блокировок РФ (авто)"
+
+  - name: "🎮 Игры"
+    type: select
+    include-all: true
+    # Individual nodes appended for region-specific game servers (e.g., EU vs US matchmaking).
+    exclude-filter: "(?i)(DNS-OUT)"
+    remnawave:
+      include-proxies: false
+    proxies:
+      - "🇷🇺 Без VPN"
+      - "🌍 Зарубежные серверы (баланс)"
+      - "🚫 Недоступные из РФ"
+
+  - name: "🔞 Для взрослых"
+    type: select
+    remnawave:
+      include-proxies: false
+    proxies:
+      - "🌍 Зарубежные серверы (баланс)"
+      - "🚫 Недоступные из РФ"
+
+  - name: "📍 IP Check"
+    type: select
+    remnawave:
+      include-proxies: false
+    # DIRECT: checker sees your real client IP — useful for self-diagnosis.
+    # WARP: checker sees Cloudflare IP (104.28.x) — useful when verifying how a
+    # CF-fronted service perceives you. VLESS exit nodes are hidden either way
+    # (checker is called from client, not from node).
+    proxies:
+      - DIRECT
+      - "🏴‍☠️ Cloudflare WARP"
+
+  - name: "⚪🔵🔴 RU сайты"
+    type: select
+    remnawave:
+      include-proxies: false
+    proxies:
+      - "🇷🇺 Без VPN"
+
+  # ═══════════════════════════════════════════════════════════════
+  # BUNDLES — visible (referenced as options inside selectors above)
+  # ═══════════════════════════════════════════════════════════════
+
+  - name: "🚫 Недоступные из РФ"
+    type: fallback
+    remnawave:
+      include-proxies: false
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    lazy: true
+    proxies:
+      - "🇷🇺 Обход блокировок РФ (авто)"
+      - "🌍 Зарубежные серверы (баланс)"
+
+  - name: "🧲 Торрент-трекеры"
+    type: fallback
+    remnawave:
+      include-proxies: false
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    lazy: true
+    proxies:
+      - "🇷🇺 Обход блокировок РФ (авто)"
+      - "🌍 Зарубежные серверы (баланс)"
+      - "🇷🇺 Без VPN"
+
+  - name: "🏴‍☠️ Cloudflare WARP"
+    type: url-test
+    include-all: true
+    tolerance: 100
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    # No `hidden: true` — group must be visible so 📍 IP Check selector can target it.
+    remnawave:
+      include-proxies: false
+    # Pirate-flag nodes = Cloudflare WARP endpoints. Named "WatchNet" in this subscription.
+    # Google Antigravity and NotebookLM require a Cloudflare IP; other AI services (Claude,
+    # ChatGPT, Perplexity) return HTTP 403 on Cloudflare IPs — do NOT route them here.
+    filter: "(?i)WatchNet"
+    exclude-filter: "(?i)(Без\\s*VPN|DNS-OUT)"
+
+  # ═══════════════════════════════════════════════════════════════
+  # INTERNAL (hidden — background machinery + aliases)
+  # ═══════════════════════════════════════════════════════════════
+
+  - name: "📺 YT без рекламы"
+    type: select
+    hidden: true
+    remnawave:
+      include-proxies: false
+    # Alias -> RU YouTube-Premium nodes (fallback chain tries RU bypass first, then foreign)
+    proxies:
+      - "🚫 Недоступные из РФ"
+
+  - name: "📺 YT фон / PiP"
+    type: select
+    hidden: true
+    remnawave:
+      include-proxies: false
+    # Alias -> foreign load-balance. PiP/background work without YT Premium on non-RU IPs.
+    proxies:
+      - "🌍 Зарубежные серверы (баланс)"
+
+  - name: "🌍 Зарубежные серверы (баланс)"
+    type: load-balance
+    strategy: consistent-hashing
+    include-all: true
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    hidden: true
+    remnawave:
+      include-proxies: false
+    # All non-RU nodes go here. Adjust regex to your naming convention.
+    # Exclude: RU nodes + direct stub + DNS stub + WARP nodes (WatchNet/pirate-flag).
+    # WARP nodes must NOT be in this pool — Anthropic/OpenAI block Cloudflare IPs (HTTP 403).
+    exclude-filter: "(?i)(🇷🇺|\\bRU\\b|RUS|Russia|Moscow|Saint\\s*Petersburg|SPB|Без\\s*VPN|DNS-OUT|WatchNet)"
+    proxies: []
+
+  - name: "🇷🇺 Обход блокировок РФ (авто)"
+    type: url-test
+    include-all: true
+    tolerance: 150
+    url: "https://www.gstatic.com/generate_204"
+    interval: 300
+    hidden: true
+    remnawave:
+      include-proxies: false
+    # RU servers that still bypass internal restrictions.
+    filter: "(?i)(🇷🇺|\\bRU\\b|RUS|Russia|Moscow|Saint\\s*Petersburg|SPB)"
+    exclude-filter: "(?i)(Без\\s*VPN|DNS-OUT)"
+
+  - name: PROXY
+    type: select
+    hidden: true
+    remnawave:
+      include-proxies: false
+    proxies:
+      - "🌍 Остальные сайты"
+
+rule-providers:
+  geosite-private:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/private.mrs
+    path: ./rule-sets/geosite-private.mrs
+    interval: 86400
+    proxy: "🚫 Недоступные из РФ"
+
+  ru-inside:
+    type: http
+    behavior: classical
+    format: text
+    url: https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/inside-clashx.lst
+    path: ./rule-sets/ru-inside.lst
+    interval: 86400
+    proxy: "🚫 Недоступные из РФ"
+
+  refilter-domains:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://raw.githubusercontent.com/legiz-ru/mihomo-rule-sets/main/re-filter/domain-rule.mrs
+    path: ./rule-sets/refilter.mrs
+    interval: 86400
+    proxy: "🚫 Недоступные из РФ"
+
+  youtube:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs
+    path: ./rule-sets/youtube.mrs
+    interval: 86400
+    proxy: "🚫 Недоступные из РФ"
+
+  telegram-domains:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/telegram.mrs
+    path: ./rule-sets/telegram-domains.mrs
+    interval: 86400
+    proxy: "🚫 Недоступные из РФ"
+
+  telegram-ips:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/telegram.mrs
+    path: ./rule-sets/telegram-ips.mrs
+    interval: 86400
+    proxy: "🚫 Недоступные из РФ"
+
+  additional-telegram-domains:
+    type: inline
+    behavior: classical
+    payload:
+      - DOMAIN-SUFFIX,exteragram.app
+      - DOMAIN-SUFFIX,swiftgram.app
+      - DOMAIN-KEYWORD,nicegram
+      - DOMAIN-SUFFIX,stel.com
+      - DOMAIN-SUFFIX,legra.ph
+
+  discord-domains:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/discord.mrs
+    path: ./rule-sets/discord-domains.mrs
+    interval: 86400
+    proxy: "🚫 Недоступные из РФ"
+
+  discord-voiceips:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: https://raw.githubusercontent.com/legiz-ru/mihomo-rule-sets/main/other/discord-voice-ip-list.mrs
+    path: ./rule-sets/discord-voiceips.mrs
+    interval: 86400
+    proxy: "🚫 Недоступные из РФ"
+
+  ai:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ai-!cn.mrs
+    path: ./rule-sets/ai.mrs
+    interval: 86400
+    proxy: "🚫 Недоступные из РФ"
+
+  google-warp-inline:
+    type: inline
+    behavior: classical
+    payload:
+      # Services that work ONLY through Cloudflare IPs (WARP/WatchNet).
+      # Google AI services show "location_unsupported" from non-CF IPs.
+      # NudeVista serves RU court-order stub to non-CF visitors (US VPS exit
+      # triggers stub; CF IP doesn't — verified 2026-05-14 by user).
+      # Tested 2026-04-15: Google services return HTTP 200 via WatchNet (104.28.197.7).
+      - DOMAIN-SUFFIX,antigravity.google
+      - DOMAIN-SUFFIX,gweb-jetski.appspot.com
+      - DOMAIN-SUFFIX,notebooklm.google
+      - DOMAIN-SUFFIX,notebooklm.google.com
+      - DOMAIN-SUFFIX,gemini.google.com
+      - DOMAIN-SUFFIX,aistudio.google.com
+      - DOMAIN-SUFFIX,bard.google.com
+      - DOMAIN-SUFFIX,generativelanguage.googleapis.com
+      # Adult aggregator that self-censors on non-CF exit IPs
+      - DOMAIN-KEYWORD,nudevista
+
+  # Services that explicitly geo-block Russian IPs (not just DPI-blocked).
+  # These must bypass ru-inside/refilter to avoid landing on RU nodes.
+  # "prohibited jurisdiction" or similar responses = add here.
+  intl-blocked-inline:
+    type: inline
+    behavior: classical
+    payload:
+      - DOMAIN-SUFFIX,notion.so
+      - DOMAIN-SUFFIX,notion.com
+      - DOMAIN-SUFFIX,notion.new
+      - DOMAIN-SUFFIX,notion.site
+      - DOMAIN-SUFFIX,notion-static.com
+      # Adobe — in ru-inside (DPI) but also geo-bans RU IPs from outside
+      - DOMAIN-SUFFIX,adobe.com
+      - DOMAIN-SUFFIX,adobe.io
+      - DOMAIN-SUFFIX,adobecc.com
+      - DOMAIN-SUFFIX,adobelogin.com
+      - DOMAIN-SUFFIX,adobeid.com
+      - DOMAIN-SUFFIX,typekit.com
+      # Autodesk — in ru-inside + self geo-bans; belt-and-suspenders alongside no-russia-hosts
+      - DOMAIN-SUFFIX,autodesk.com
+      - DOMAIN-SUFFIX,autodesk.eu
+      - DOMAIN-SUFFIX,autodesk.net
+      - DOMAIN-SUFFIX,autodeskdocs.com
+
+  openai-inline:
+    type: inline
+    behavior: classical
+    payload:
+      # Claude.ai / Perplexity return HTTP 403 on Cloudflare IPs — keep on regular servers.
+      - DOMAIN-SUFFIX,openai.com
+      - DOMAIN-SUFFIX,chatgpt.com
+      - DOMAIN-SUFFIX,oaistatic.com
+      - DOMAIN-SUFFIX,oaiusercontent.com
+      - DOMAIN-SUFFIX,chat.openai.com
+      # Perplexity pinned here (also in MetaCubeX ai.mrs, but pin local for stability)
+      - DOMAIN-SUFFIX,perplexity.ai
+      - DOMAIN-SUFFIX,pplx.ai
+      - DOMAIN-SUFFIX,perplexity.com
+
+  adult:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-porn.mrs
+    path: ./rule-sets/adult.mrs
+    interval: 86400
+    proxy: "🚫 Недоступные из РФ"
+
+  adult-extra-inline:
+    type: inline
+    behavior: classical
+    payload:
+      # Sites not covered by category-porn but blocked from RU or commonly used.
+      # Goal: catch adult traffic at rule [22] BEFORE ru-inside [25] sends it to
+      # 🚫 Недоступные из РФ → 🇷🇺 Обход блокировок РФ (RU exit IP → RKN stub page).
+      - DOMAIN-SUFFIX,onlyfans.com
+      - DOMAIN-SUFFIX,fansly.com
+      - DOMAIN-SUFFIX,manyvids.com
+      - DOMAIN-SUFFIX,stripchat.com
+      - DOMAIN-SUFFIX,chaturbate.com
+      # Aggregators / catalogs (not in category-porn.mrs).
+      # NOTE: nudevista routed via google-warp-inline → 🏴‍☠️ Cloudflare WARP
+      # (sniffs non-CF exits and serves court-order stub even on US IPs).
+      - DOMAIN-SUFFIX,theporndude.com
+      # Tube / hentai / cam sites present in ru-inside but possibly missed by category-porn
+      - DOMAIN-SUFFIX,e-hentai.org
+      - DOMAIN-SUFFIX,eporner.com
+      - DOMAIN-SUFFIX,fapello.com
+      - DOMAIN-SUFFIX,hentai-foundry.com
+      - DOMAIN-SUFFIX,hitomi.la
+      - DOMAIN-SUFFIX,hqporner.com
+      - DOMAIN-SUFFIX,kemono.su
+      - DOMAIN-SUFFIX,multporn.net
+      - DOMAIN-SUFFIX,nhentai.com
+      - DOMAIN-SUFFIX,nhentai.net
+      - DOMAIN-SUFFIX,nude-moon.org
+      - DOMAIN-SUFFIX,reddxxx.com
+      - DOMAIN-SUFFIX,rule34.xxx
+      - DOMAIN-SUFFIX,xhamsterlive.com
+      - DOMAIN-SUFFIX,xnxx-cdn.com
+      - DOMAIN-SUFFIX,xnxx-ru.com
+      - DOMAIN-SUFFIX,xnxx.net
+      - DOMAIN-SUFFIX,xnxx.tv
+      - DOMAIN-SUFFIX,xnxx3.com
+      - DOMAIN-SUFFIX,xvideos-cdn.com
+      - DOMAIN-SUFFIX,adultmult.tv
+
+  # Sites that voluntarily geo-ban Russian IPs (company sanctions, not RKN/DPI).
+  # Source: https://github.com/dartraiden/no-russia-hosts (~700 domains, community-maintained)
+  # These must go via foreign servers — RU-bypass nodes still have RU exit IPs which get 403.
+  no-russia-hosts:
+    type: http
+    behavior: domain
+    format: text
+    url: "https://raw.githubusercontent.com/dartraiden/no-russia-hosts/master/hosts.txt"
+    path: ./rule-sets/no-russia-hosts.txt
+    interval: 86400
+    proxy: "🌍 Зарубежные серверы (баланс)"
+
+  torrent-trackers:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://raw.githubusercontent.com/legiz-ru/mihomo-rule-sets/main/other/torrent-trackers.mrs
+    path: ./rule-sets/torrent-trackers.mrs
+    interval: 86400
+    proxy: "🚫 Недоступные из РФ"
+
+  torrent-clients:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://raw.githubusercontent.com/legiz-ru/mihomo-rule-sets/main/other/torrent-clients.yaml
+    path: ./rule-sets/torrent-clients.yaml
+    interval: 86400
+    proxy: "🚫 Недоступные из РФ"
+
+  ru-apps:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://raw.githubusercontent.com/legiz-ru/mihomo-rule-sets/main/other/ru-app-list.yaml
+    path: ./rule-sets/ru-apps.yaml
+    interval: 86400
+    proxy: "🚫 Недоступные из РФ"
+
+  geosite-ru:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://raw.githubusercontent.com/Davoyan/mihomo-rule-sets/main/rules/category-ru.mrs
+    path: ./rule-sets/geosite-ru.mrs
+    interval: 86400
+    proxy: "🚫 Недоступные из РФ"
+
+  ru-inline:
+    type: inline
+    behavior: classical
+    payload:
+      - DOMAIN-SUFFIX,ru
+      - DOMAIN-SUFFIX,su
+      - DOMAIN-SUFFIX,by
+      - DOMAIN-KEYWORD,yandex
+      - DOMAIN-KEYWORD,vk
+      - DOMAIN-KEYWORD,ozon
+      - DOMAIN-KEYWORD,wildberries
+
+  instagram-inline:
+    type: inline
+    behavior: classical
+    payload:
+      - DOMAIN-SUFFIX,instagram.com
+      - DOMAIN-SUFFIX,cdninstagram.com
+      - DOMAIN-SUFFIX,ig.me
+      - DOMAIN-KEYWORD,instagram
+
+  # IP-checker services. Routed via 📍 IP Check selector (DIRECT by default, can switch
+  # to WatchNet/WARP). Must be matched BEFORE ru-inline (covers 2ip.ru) and
+  # no-russia-hosts (some checkers may be on that list).
+  ip-check-inline:
+    type: inline
+    behavior: classical
+    payload:
+      - DOMAIN-SUFFIX,ipinfo.io
+      - DOMAIN-SUFFIX,ipapi.co
+      - DOMAIN-SUFFIX,ifconfig.me
+      - DOMAIN-SUFFIX,ifconfig.co
+      - DOMAIN-SUFFIX,icanhazip.com
+      - DOMAIN-SUFFIX,ipify.org
+      - DOMAIN-SUFFIX,api.ipify.org
+      - DOMAIN-SUFFIX,ip-api.com
+      - DOMAIN-SUFFIX,myip.com
+      - DOMAIN-SUFFIX,whatismyipaddress.com
+      - DOMAIN-SUFFIX,ip.sb
+      - DOMAIN-SUFFIX,2ip.ru
+      - DOMAIN-SUFFIX,2ip.io
+      - DOMAIN-SUFFIX,whoer.net
+      - DOMAIN-SUFFIX,browserleaks.com
+      - DOMAIN-SUFFIX,iplocation.net
+      - DOMAIN-SUFFIX,ipchicken.com
+
+  x-inline:
+    type: inline
+    behavior: classical
+    payload:
+      - DOMAIN-SUFFIX,x.com
+      - DOMAIN-SUFFIX,twitter.com
+      - DOMAIN-SUFFIX,twimg.com
+      - DOMAIN-KEYWORD,twitter
+
+  max-inline:
+    type: inline
+    behavior: classical
+    payload:
+      # Official MAX domain perimeter (site/web/download/help/legal/dev/business/API/static links)
+      - DOMAIN-SUFFIX,max.ru
+      # Present in v2fly geosite:mailru-group рядом с max.ru (legacy/related MAX namespace)
+      - DOMAIN-SUFFIX,oneme.ru
+
+  games:
+    type: http
+    behavior: classical
+    format: yaml
+    url: https://raw.githubusercontent.com/roscomvpn/custom-category/release/mihomo/games.yaml
+    path: ./rule-sets/games.yaml
+    interval: 86400
+    proxy: "🚫 Недоступные из РФ"
+
+rules:
+  # DNS hijack
+  - DST-PORT,53,DNS-OUT
+
+  # Local and private ranges always direct
+  - RULE-SET,geosite-private,DIRECT
+
+  # VPS UDP-smoke bypass — mihomo TPROXY drops arbitrary UDP to public VPS.
+  # de-matrix-1 (dhost.su): UDP STUN/DTLS/WG tests must leave Mac unmolested.
+  - IP-CIDR,193.233.75.48/32,DIRECT,no-resolve
+
+  # Block MAX messenger/platform
+  - RULE-SET,max-inline,REJECT
+
+  # Torrent policy: clients direct, trackers via RU-BYPASS-first group
+  - RULE-SET,torrent-clients,DIRECT
+  - RULE-SET,torrent-trackers,🧲 Торрент-трекеры
+  - PROCESS-NAME-REGEX,(?i).*torrent.*,DIRECT
+
+  # Service selectors
+  - RULE-SET,youtube,📺 YouTube
+  - RULE-SET,telegram-ips,➤ Telegram,no-resolve
+  - RULE-SET,telegram-domains,➤ Telegram
+  - RULE-SET,additional-telegram-domains,➤ Telegram
+  - RULE-SET,discord-domains,💬 Discord
+  - AND,((RULE-SET,discord-voiceips),(NETWORK,udp),(DST-PORT,50000-50100)),💬 Discord
+  - PROCESS-NAME-REGEX,(?i).*discord.*,💬 Discord
+  - PROCESS-NAME-REGEX,(?i).*vesktop.*,💬 Discord
+
+  # Game-specific routing (domains + launcher processes)
+  - RULE-SET,games,🎮 Игры
+  - PROCESS-NAME-REGEX,(?i).*(steam|epic|riot|origin|battle\.net|uplay|ubisoft|gog|ea\s*app|eadesktop|tarkov|faceit).*,🎮 Игры
+
+  # IP-checkers — selector group (DIRECT default, WatchNet/WARP optional).
+  # Placed before ru-inline so 2ip.ru / other RU-TLD checkers hit selector, not RU-direct.
+  - RULE-SET,ip-check-inline,📍 IP Check
+
+  - RULE-SET,instagram-inline,📷 Instagram
+  - RULE-SET,x-inline,🚫 Недоступные из РФ
+
+  # Google services requiring Cloudflare IP (location_unsupported otherwise) -> WARP
+  - RULE-SET,google-warp-inline,🏴‍☠️ Cloudflare WARP
+
+  - RULE-SET,openai-inline,🤖 ChatGPT и AI
+  - RULE-SET,ai,🤖 ChatGPT и AI
+
+  # Services that geo-block Russian IPs -> international servers only (never RU nodes)
+  - RULE-SET,intl-blocked-inline,🌍 Зарубежные серверы (баланс)
+
+  # Adult content -> international servers directly (before ru-inside catches them)
+  - RULE-SET,adult-extra-inline,🔞 Для взрослых
+  - RULE-SET,adult,🔞 Для взрослых
+
+  # Sites that voluntarily geo-ban RU IPs (Autodesk, Adobe, GitHub, etc.) -> foreign servers
+  # Must be BEFORE ru-inside (which uses RU-bypass — still has RU exit IP, gets 403)
+  - RULE-SET,no-russia-hosts,🌍 Зарубежные серверы (баланс)
+
+  # Resources blocked from inside RU by DPI -> RU-BYPASS first
+  - RULE-SET,ru-inside,🚫 Недоступные из РФ
+  - RULE-SET,refilter-domains,🚫 Недоступные из РФ
+
+  # RU traffic -> direct
+  - RULE-SET,ru-inline,⚪🔵🔴 RU сайты
+  - RULE-SET,ru-apps,⚪🔵🔴 RU сайты
+  - RULE-SET,geosite-ru,⚪🔵🔴 RU сайты
+
+  # Fallback for everything else -> global balance
+  - MATCH,🌍 Остальные сайты
