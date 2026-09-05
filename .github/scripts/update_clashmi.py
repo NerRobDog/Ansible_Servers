@@ -107,11 +107,12 @@ def mode_local(path: Path, dry_run: bool) :
     new_content = apply_update(content, current, latest)
     changed = content.count(f"clashmi_{current}_")
     print(f"  Обновляю {changed} ссылок: {current} → {latest}")
-    if not dry_run:
-        path.write_text(new_content, encoding="utf-8")
-        print(f"  Сохранено: {path}")
-    else:
+    if dry_run:
         print("  [dry-run] Файл не изменён.")
+        return False
+
+    path.write_text(new_content, encoding="utf-8")
+    print(f"  Сохранено: {path}")
     return True
 
 
@@ -169,14 +170,14 @@ def mode_api(base_url: str, token: str, dry_run: bool) :
 
         if dry_run:
             print(f"  [{name}] [dry-run] PATCH не отправлен.")
-        else:
-            http_patch(
-                f"{base_url}/api/subscription-page-configs",
-                {"uuid": uuid, "name": name, "config": new_inner},
-                token=token,
-            )
-            print(f"  [{name}] ✓ Обновлено через API.")
+            continue
 
+        http_patch(
+            f"{base_url}/api/subscription-page-configs",
+            {"uuid": uuid, "name": name, "config": new_inner},
+            token=token,
+        )
+        print(f"  [{name}] ✓ Обновлено через API.")
         updated_any = True
 
     return updated_any
@@ -200,7 +201,9 @@ def main():
             sys.exit(1)
         changed = mode_api(base_url, token, dry_run=args.dry_run)
 
-    # Пишем в GITHUB_OUTPUT если запущены в CI
+    # Пишем в GITHUB_OUTPUT если запущены в CI.
+    # `updated=true` означает «конфиг реально изменён» — по нему workflow
+    # рестартует subscription-page. В --dry-run ничего не менялось, значит false.
     github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output:
         with open(github_output, "a") as f:
