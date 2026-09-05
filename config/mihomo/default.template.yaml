@@ -369,10 +369,21 @@ proxy-groups:
   - DIRECT
   - "🏴‍☠️ Cloudflare WARP"
 
-- name: "🏴‍☠️ Cloudflare WARP"
+- name: "🏴‍☠️ WARP-ноды"
   type: url-test
   include-all: true
   tolerance: 100
+  url: "https://www.gstatic.com/generate_204"
+  interval: 300
+  remnawave:
+    include-proxies: false
+    # Pirate-flag nodes = Cloudflare WARP endpoints. Named "WatchNet" in this subscription.
+    # Google Antigravity and NotebookLM require a Cloudflare IP; other AI services (Claude,
+    # ChatGPT, Perplexity) return HTTP 403 on Cloudflare IPs — do NOT route them here.
+  filter: "(?i)WatchNet"
+  exclude-filter: "(?i)(Без\\s*VPN|DNS-OUT)"
+- name: "🏴‍☠️ Cloudflare WARP"
+  type: fallback
   url: "https://www.gstatic.com/generate_204"
   interval: 300
     # No `hidden: true` — group must be visible so 📍 IP Check selector can target it.
@@ -381,9 +392,9 @@ proxy-groups:
     # Pirate-flag nodes = Cloudflare WARP endpoints. Named "WatchNet" in this subscription.
     # Google Antigravity and NotebookLM require a Cloudflare IP; other AI services (Claude,
     # ChatGPT, Perplexity) return HTTP 403 on Cloudflare IPs — do NOT route them here.
-  filter: "(?i)WatchNet"
-  exclude-filter: "(?i)(Без\\s*VPN|DNS-OUT)"
-
+  proxies:
+  - 🏴‍☠️ WARP-ноды
+  - 🌍 Зарубежные серверы (баланс)
 - name: "🔞 Для взрослых"
   type: select
   include-all: true
@@ -660,6 +671,7 @@ rule-providers:
   # Services that explicitly geo-block Russian IPs (not just DPI-blocked).
   # These must bypass ru-inside/refilter to avoid landing on RU nodes.
   # "prohibited jurisdiction" or similar responses = add here.
+    - DOMAIN-SUFFIX,antigravity.google.com
   intl-blocked-inline:
     type: inline
     behavior: classical

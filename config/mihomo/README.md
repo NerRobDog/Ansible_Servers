@@ -33,6 +33,24 @@ commits, reconciling the push script with this file, and adding a
 drift-detection layer that compares the repo against the panel are Phase B work,
 tracked as beads `as-3m8`.
 
+It happened again before this branch merged, which is the point. Refreshed from
+the panel on 2026-09-05: the live template had gained a `🏴‍☠️ WARP-ноды`
+url-test group and turned `🏴‍☠️ Cloudflare WARP` into a `fallback` over
+`[🏴‍☠️ WARP-ноды, 🌍 Зарубежные серверы (баланс)]`, plus a
+`DOMAIN-SUFFIX,antigravity.google.com` entry in `google-warp-inline`. The WARP
+change was pushed to the panel by commit `3d81269`, which lives on branch
+`claude/gemini-all-servers-broken-d53eb4` and is **not on `origin/master`** —
+so once more the live config was ahead of the default branch. Rationale for the
+change itself: the WARP group resolved to a single WatchNet node with no
+reserve, so when that node degraded (2026-07-23) Gemini/Antigravity/NotebookLM
+timed out with nowhere to fall back to.
+
+Capture procedure, for the next refresh: dispatch
+`push-mihomo-template.yml` with `mode=inspect` (a GET only — it never PATCHes),
+then copy the run's `live-mihomo-template-inspect` artifact over this file
+verbatim. Note that in `apply` mode the artifact is written *before* the PATCH,
+so it holds the pre-change template and must not be used as a capture.
+
 ## Why it is excluded from yamllint
 
 `.yamllint` ignores this directory. The file is a verbatim capture, and the
