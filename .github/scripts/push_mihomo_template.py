@@ -28,6 +28,7 @@ Env: RW_PANEL_API_BASE_URL, RW_PANEL_API_TOKEN
 
 import argparse
 import base64
+import copy
 import io
 import json
 import os
@@ -59,6 +60,17 @@ RU_INLINE_NAME = "ru-inline"          # inline rule-provider с payload клас
 RU_CDN_SUFFIXES = ["trex.media", "uma.media"]
 RU_CDN_RULES = [f"DOMAIN-SUFFIX,{s}" for s in RU_CDN_SUFFIXES]
 RU_CDN_FAKEIP = [f"+.{s}" for s in RU_CDN_SUFFIXES]
+
+# Gemini/NotebookLM/AI Studio SPOF (beads as-2u8). google-warp-inline прибит к
+# группе WARP, в которой один прокси — WatchNet (dh-germ-1). Нода легла
+# 2026-08-30 (fsfreeze хостера) -> 2026-09-02, Gemini не работал ни через один
+# сервер. Фикс: WARP-группа становится fallback — сначала WatchNet-ноды (как
+# было, url-test), при их смерти — 🌍 Зарубежные серверы (баланс). Основной
+# маршрут не трогаем, только добавляем запасной.
+WARP_GROUP = "🏴‍☠️ Cloudflare WARP"
+WARP_NODES_GROUP = "🏴‍☠️ WARP-ноды"          # вынесенный url-test по WatchNet
+WARP_FALLBACK = "🌍 Зарубежные серверы (баланс)"
+WARP_ORDER = [WARP_NODES_GROUP, WARP_FALLBACK]
 
 
 def _ctx():
@@ -144,6 +156,20 @@ def kp_status(text):
     return in_ru, in_fif
 
 
+def warp_status(text):
+    """(type WARP-группы, её proxies, есть_ли_группа_WARP-ноды)."""
+    from ruamel.yaml import YAML
+    groups = YAML().load(text).get("proxy-groups", []) or []
+    by = {g.get("name"): g for g in groups}
+    g = by.get(WARP_GROUP) or {}
+    return g.get("type"), [str(x) for x in (g.get("proxies") or [])], WARP_NODES_GROUP in by
+
+
+def warp_ok(text):
+    t, pl, has_nodes = warp_status(text)
+    return t == "fallback" and pl == WARP_ORDER and has_nodes
+
+
 def transform(text):
     """Идемпотентно: YT-группа заграницей дефолтом + NTP durable-фикс.
     Обе правки за один load/dump. Возвращает (new_text, changes[])."""
@@ -208,6 +234,38 @@ def transform(text):
             fif.append(d)
             changes.append(f"fake-ip-filter+={d}")
 
+    # 4) WARP-группа -> fallback [WARP-ноды (url-test WatchNet), 🌍 баланс]
+    groups = data.get("proxy-groups") or []
+    names = [g.get("name") for g in groups]
+    if WARP_GROUP not in names:
+        raise SystemExit(f"Группа {WARP_GROUP!r} не найдена.")
+    if WARP_FALLBACK not in names:
+        raise SystemExit(f"Группа {WARP_FALLBACK!r} не найдена.")
+    idx = names.index(WARP_GROUP)
+    warp = groups[idx]
+    if warp.get("type") != "fallback":
+        if WARP_NODES_GROUP not in names:
+            nodes = type(warp)()
+            for k, v in warp.items():
+                nodes[k] = copy.deepcopy(v)   # не шарить списки (иначе anchor + loop)
+            nodes["name"] = WARP_NODES_GROUP
+            groups.insert(idx, nodes)
+            changes.append(f"proxy-groups+={WARP_NODES_GROUP} (копия url-test WatchNet)")
+        for k in ("include-all", "filter", "exclude-filter", "tolerance", "use"):
+            if k in warp:
+                del warp[k]
+        warp["type"] = "fallback"
+        warp.setdefault("url", "https://www.gstatic.com/generate_204")
+        warp.setdefault("interval", 300)
+        pl = warp.get("proxies")
+        if pl is None:
+            warp["proxies"] = list(WARP_ORDER)
+        else:
+            del pl[:]
+            for it in WARP_ORDER:
+                pl.append(it)
+        changes.append(f"{WARP_GROUP}: fallback {WARP_ORDER}")
+
     buf = io.StringIO()
     y.dump(data, buf)
     return buf.getvalue(), changes
@@ -236,6 +294,7 @@ def main():
     print(f"foreign_first={foreign_first}")
     print(f"NTP: домены={len(ntp_fif)}/{len(NTP_DOMAINS)}, DST-PORT,123,DIRECT={ntp_rule}")
     print(f"KP-CDN: ru-inline={len(kp_ru)}/{len(RU_CDN_RULES)}, fake-ip-filter={len(kp_fif)}/{len(RU_CDN_FAKEIP)}")
+    print(f"WARP: {warp_status(text)} ok={warp_ok(text)}")
 
     with open("live-mihomo-template.yaml", "w", encoding="utf-8") as f:
         f.write(text)
@@ -246,7 +305,7 @@ def main():
 
     new_text, changed = transform(text)
     if not changed:
-        print("apply: уже всё на месте (YT foreign-first + NTP + KP-CDN), PATCH не нужен.")
+        print("apply: уже всё на месте (YT foreign-first + NTP + KP-CDN + WARP fallback), PATCH не нужен.")
         return
     print("changes:", changed)
     new_b64 = base64.b64encode(new_text.encode("utf-8")).decode("ascii")
@@ -269,7 +328,10 @@ def main():
         sys.exit("VERIFY FAIL: NTP-фикс не полный.")
     if len(a_kp_ru) != len(RU_CDN_RULES) or len(a_kp_fif) != len(RU_CDN_FAKEIP):
         sys.exit("VERIFY FAIL: KP-CDN-пин не полный.")
-    print("✓ Шаблон: YouTube загран + NTP durable + Kinopoisk CDN на RU.")
+    print(f"VERIFY WARP: {warp_status(after_text)}")
+    if not warp_ok(after_text):
+        sys.exit("VERIFY FAIL: WARP-группа не fallback [WARP-ноды, 🌍 баланс].")
+    print("✓ Шаблон: YouTube загран + NTP durable + Kinopoisk CDN на RU + WARP fallback.")
 
 
 if __name__ == "__main__":
