@@ -7,9 +7,12 @@ form of it from `no.watchd0g.dev/<token>` as their OpenClash profile.
 
 **This repository is the source of truth.** It did not used to be: until
 2026-08-21 every fix was applied directly through the panel API, and the repo
-files (`mihomo-remnawave-davoyan-rubypass-v2.*.yaml`) were detached drafts that
-had drifted behind the live template by two fixes. Editing the template through
-the panel web UI reintroduces that drift — change this file instead.
+files (`mihomo-remnawave-davoyan-rubypass-v2.0.yaml` and `-v2.1.yaml`, at the
+repository root) were detached drafts that had drifted behind the live template
+by two fixes. Those two files were deleted once this capture superseded them;
+they survive in history at commit `cf2a013` if anyone needs to read them.
+Editing the template through the panel web UI reintroduces that drift — change
+this file instead.
 
 **The web UI is not the only way to reintroduce it, and the worst way leaves no
 trace on GitHub at all.** While the gate was being built, `DST-PORT,123,DIRECT`,
