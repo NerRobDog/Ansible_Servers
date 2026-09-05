@@ -188,7 +188,7 @@
 - name: Read tailscale backend state on server hosts
   ansible.builtin.command: tailscale status --json
   check_mode: false  # read-only probe; must run in --check too
-  register: tailscale_backend_state_cmd
+  register: tailscale_backend_state_server_cmd
   changed_when: false
   failed_when: false
   when:
@@ -198,9 +198,32 @@
 
 - name: Read tailscale backend state on OpenWrt
   ansible.builtin.raw: "tailscale status --json 2>/dev/null || true"
-  register: tailscale_backend_state_cmd
+  register: tailscale_backend_state_openwrt_cmd
   changed_when: false
   failed_when: false
+  when:
+    - tailscale_enabled | bool
+    - tailscale_is_openwrt | bool
+  tags: [tailscale]
+
+# Same register-clobber trap as the wait tasks below: the skipped sibling
+# branch writes a skip marker without `.stdout` into a shared register, so the
+# Resolve task always saw an empty stdout, resolved BackendState=NoState and
+# every deploy re-ran `tailscale up --auth-key` on an already-joined host
+# (fails on hosts with non-default prefs, e.g. --accept-routes/--ssh).
+- name: Capture tailscale backend state result from server hosts
+  ansible.builtin.set_fact:
+    tailscale_backend_state_cmd: "{{ tailscale_backend_state_server_cmd }}"
+  changed_when: false
+  when:
+    - tailscale_enabled | bool
+    - not (tailscale_is_openwrt | bool)
+  tags: [tailscale]
+
+- name: Capture tailscale backend state result from OpenWrt
+  ansible.builtin.set_fact:
+    tailscale_backend_state_cmd: "{{ tailscale_backend_state_openwrt_cmd }}"
+  changed_when: false
   when:
     - tailscale_enabled | bool
     - tailscale_is_openwrt | bool
