@@ -73,6 +73,20 @@ check_format() {
   [[ "$extra" == 0 ]] || fail "temporary files left next to warp.prom in $dir"
 }
 
+# Runs the probe against an $out path that should make it fail before ever
+# reaching curl's results, and returns the path to its captured stderr. Uses
+# its own error handling (rather than run_case) because the probe is expected
+# to exit non-zero here, which would otherwise trip this test's `set -e`.
+run_failing_case() {
+  local label="$1" out_path="$2" err="$work/stderr-$1" rc=0
+  FAKE_CURL_MODE=ok FAKE_WG_HANDSHAKE=1000 \
+    WARP_PROBE_CURL="$work/bin/curl" WARP_PROBE_WG="$work/bin/wg" \
+    WARP_PROBE_OUT="$out_path" WARP_PROBE_NOW=1060 \
+    bash "$probe" 2>"$err" || rc=$?
+  [[ "$rc" -ne 0 ]] || fail "expected non-zero exit for $label (out=$out_path), got 0"
+  echo "$err"
+}
+
 dir="$(run_case ok 1000)"
 expect_num warp_probe_success_ratio "$dir" 1
 expect_num warp_probe_latency_avg_seconds "$dir" 0.075
@@ -102,5 +116,24 @@ expect_num warp_probe_success_ratio "$dir" 0.5
 expect_num warp_status_on "$dir" 0
 check_format "$dir"
 echo "PASS: trace without warp=on is not counted as success"
+
+dir="$work/case-outdir"
+mkdir -p "$dir"
+out_path="$dir/warp.prom"
+mkdir -p "$out_path"
+err="$(run_failing_case outdir "$out_path")"
+grep -q 'is a directory' "$err" || fail "expected a directory-refusal message in $err, got: $(cat "$err")"
+extra="$(find "$dir" -type f | wc -l | tr -d ' ')"
+[[ "$extra" == 0 ]] || fail "leftover files under $dir: $(find "$dir" -type f)"
+echo "PASS: refuses to move metrics into an existing directory at \$WARP_PROBE_OUT, no debris left"
+
+dir="$work/case-missingdir"
+mkdir -p "$dir"
+out_path="$dir/missing-subdir/warp.prom"
+err="$(run_failing_case missingdir "$out_path")"
+grep -q 'warp-probe: mktemp' "$err" || fail "expected a warp-probe mktemp failure message in $err, got: $(cat "$err")"
+extra="$(find "$dir" -type f | wc -l | tr -d ' ')"
+[[ "$extra" == 0 ]] || fail "leftover files under $dir: $(find "$dir" -type f)"
+echo "PASS: mktemp failure (missing \$WARP_PROBE_OUT directory) exits non-zero with a clear message, no debris left"
 
 echo "All warp-probe contract tests passed."

@@ -14,7 +14,8 @@ per_target="${WARP_PROBE_PER_TARGET:-5}"
 timeout_s="${WARP_PROBE_TIMEOUT:-5}"
 
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+tmp=""
+trap 'rm -rf "$work"; [[ -n "$tmp" ]] && rm -f -- "$tmp"' EXIT
 
 probe() {
   local kind="$1" url="$2" n="$3" meta
@@ -67,8 +68,10 @@ else
 fi
 
 # Write next to the target and rename: node-exporter must never read a half-written
-# file, and it only collects *.prom, so the temporary name is ignored.
-tmp="$(mktemp "${out}.XXXXXX")"
+# file, and it only collects *.prom, so the temporary name is ignored. Every failure
+# point below exits non-zero (so systemd sees the failure) and the EXIT trap above
+# always removes $tmp, so a failed write/chmod/mv never leaves debris next to $out.
+tmp="$(mktemp "${out}.XXXXXX")" || { echo "warp-probe: mktemp for ${out}.XXXXXX failed" >&2; exit 1; }
 {
   echo "# HELP warp_probe_success_ratio Share of probe requests through the WARP interface that succeeded in the last run."
   echo "# TYPE warp_probe_success_ratio gauge"
@@ -85,6 +88,14 @@ tmp="$(mktemp "${out}.XXXXXX")"
   echo "# HELP warp_probe_last_run_timestamp_seconds Unix time the probe last finished."
   echo "# TYPE warp_probe_last_run_timestamp_seconds gauge"
   echo "warp_probe_last_run_timestamp_seconds $now"
-} > "$tmp"
-chmod 0644 "$tmp"
-mv -f "$tmp" "$out"
+} > "$tmp" || { echo "warp-probe: writing metrics to $tmp failed" >&2; exit 1; }
+chmod 0644 "$tmp" || { echo "warp-probe: chmod 0644 $tmp failed" >&2; exit 1; }
+# Plain `mv` onto an existing directory silently lands the file one level down
+# (e.g. "$out/warp.prom.XXXXXX") instead of failing, which node-exporter would
+# never see while systemd reports success. Refuse that misconfiguration loudly
+# instead of pretending it worked.
+if [[ -d "$out" ]]; then
+  echo "warp-probe: $out is a directory; refusing to move metrics into it" >&2
+  exit 1
+fi
+mv -f -- "$tmp" "$out" || { echo "warp-probe: mv $tmp -> $out failed" >&2; exit 1; }
