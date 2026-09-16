@@ -110,8 +110,12 @@ jobs:
             echo "No hosts were generated from fleet config." >&2
             exit 1
           fi
+          # Best-effort, same as deploy-remnawave-node: ssh-keyscan exits non-zero
+          # for a down host, and under `bash -e` that aborted the whole monitor
+          # before smoke checks ran, so the alert named no host. With -T and
+          # `|| true` the smoke step runs and reports the unreachable host itself.
           while read -r host port; do
-            ssh-keyscan -p "${port}" -H "${host}" >> ~/.ssh/known_hosts 2>/dev/null
+            ssh-keyscan -T 8 -p "${port}" -H "${host}" >> ~/.ssh/known_hosts 2>/dev/null || true
           done < .ansible/runtime/host_ports.txt
           sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
