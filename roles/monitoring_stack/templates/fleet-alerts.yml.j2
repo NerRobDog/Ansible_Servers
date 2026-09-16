@@ -73,3 +73,44 @@ groups:
         annotations:
           summary: "Alertmanager is unreachable from Prometheus"
           description: "Alert delivery is broken: Prometheus cannot scrape Alertmanager."
+
+  - name: warp-exit
+    rules:
+      - alert: WarpTunnelDown
+        expr: warp_probe_success_ratio == 0
+        for: 3m
+        labels:
+          severity: critical
+          scope: warp
+        annotations:
+          summary: "WARP exit is down on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: >-
+            Every probe request through the WARP interface on {% raw %}{{ $labels.instance }}{% endraw %} has failed for 3 minutes.
+            Clients routed to WARP on this node have no exit.
+
+      # 20% over 15 minutes catches a wearing-out free registration long before the 60% loss seen
+      # in July 2026, while a 20-30 s burst cannot move a 15-minute average past the threshold.
+      - alert: WarpDegraded
+        expr: avg_over_time(warp_probe_success_ratio[15m]) < 0.8
+        for: 1m
+        labels:
+          severity: warning
+          scope: warp
+        annotations:
+          summary: "WARP registration is degrading on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: >-
+            More than 20% of probe requests through WARP on {% raw %}{{ $labels.instance }}{% endraw %} failed over the last 15 minutes.
+            Re-register: run deploy-remnawave-node with tags=warp_reregister and limit set to this host.
+
+      # Without this a dead probe timer looks like a healthy exit: the ratio simply stops changing.
+      - alert: WarpProbeStale
+        expr: time() - warp_probe_last_run_timestamp_seconds > 300
+        for: 1m
+        labels:
+          severity: warning
+          scope: warp
+        annotations:
+          summary: "WARP probe stopped reporting on {% raw %}{{ $labels.instance }}{% endraw %}"
+          description: >-
+            warp-probe.timer on {% raw %}{{ $labels.instance }}{% endraw %} has not written results for over 5 minutes.
+            WARP health on this node is unknown, and WarpTunnelDown and WarpDegraded cannot fire.

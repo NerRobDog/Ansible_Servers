@@ -61,6 +61,17 @@ jobs:
       - name: warp-probe contract tests
         run: bash .github/scripts/test-warp-probe.sh
 
+      - name: Install promtool 2.55.0
+        run: |
+          curl -fsSL -o /tmp/prometheus.tar.gz \
+            https://github.com/prometheus/prometheus/releases/download/v2.55.0/prometheus-2.55.0.linux-amd64.tar.gz
+          echo "7a6b6d5ea003e8d59def294392c64e28338da627bf760cf268e788d6a8832a23  /tmp/prometheus.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/prometheus.tar.gz -C /tmp prometheus-2.55.0.linux-amd64/promtool
+          sudo install -m 0755 /tmp/prometheus-2.55.0.linux-amd64/promtool /usr/local/bin/promtool
+
+      - name: warp-exit alert rule tests
+        run: bash .github/scripts/test-warp-alerts.sh
+
       - name: Syntax check playbook.yml
         run: ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
 
