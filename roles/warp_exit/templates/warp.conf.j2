@@ -1,0 +1,11 @@
+[Interface]
+PrivateKey = {{ warp_exit_profile.private_key }}
+Address = {{ warp_exit_profile.address_v4 }}
+MTU = {{ warp_exit_mtu }}
+Table = off
+
+[Peer]
+PublicKey = {{ warp_exit_profile.peer_public_key }}
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = {{ warp_exit_profile.endpoint }}
+PersistentKeepalive = {{ warp_exit_keepalive }}

@@ -55,6 +55,9 @@ jobs:
       - name: warp_exit filter contract tests
         run: python .github/scripts/test-warp-exit-filter.py
 
+      - name: warp_exit template contract test
+        run: python .github/scripts/test-warp-exit-template.py
+
       - name: Syntax check playbook.yml
         run: ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
 
