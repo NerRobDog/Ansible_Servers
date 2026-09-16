@@ -76,19 +76,22 @@ PersistentKeepalive = 25
 | `tasks/probe.yml` | скрипт пробы, systemd service + timer, каталог textfile-коллектора |
 | `filter_plugins/wgcf_profile.py` | фильтр `parse_wgcf_profile`: из текста профиля возвращает приватный ключ, ключ пира и IPv4-адрес; падает с понятной ошибкой, если чего-то нет |
 | `templates/warp.conf.j2` | форма из раздела 3 |
-| `templates/warp-probe.sh.j2`, `warp-probe.service.j2`, `warp-probe.timer.j2` | проба |
+| `files/warp-probe.sh` | скрипт пробы; параметры приходят через окружение из systemd-юнита, поэтому скрипт тестируется напрямую |
+| `templates/warp-probe.service.j2`, `warp-probe.timer.j2` | systemd-юниты пробы |
 
 Разбор профиля вынесен в filter-плагин ради тестируемости: регулярное выражение внутри Jinja в таске не покрыть юнит-тестом.
 
 ### 4.2. Место в плейбуке
 
-В `playbook.yml` роль встаёт между `tailscale` и `remnawave_node`, с тегами `[remnawave, warp]`. Если проверка WARP падает, Ansible прекращает обработку этого хоста, и `remnawave_node` для него не выполняется.
+В `playbook.yml` роль встаёт после `monitoring_stack` и перед `remnawave_node`. Если проверка WARP падает, Ansible прекращает обработку этого хоста, и `remnawave_node` для него не выполняется.
+
+**Теги стоят на тасках роли, а не на её записи в `playbook.yml`.** Тег записи роли наследуется каждой таской, а таска с `never` пропускается, только пока не запрошен любой другой её тег. С `tags: [remnawave, warp]` на записи роли обычный `--tags warp` или `--tags remnawave` запустил бы перерегистрацию и сменил выходной IP. Импорты в `tasks/main.yml` помечены `[remnawave, warp]`, проба — ещё и `monitoring`, перерегистрация — только `[never, warp_reregister]`. Это закреплено тестом выбора тегов.
 
 ### 4.3. Обычный прогон
 
 1. **Установка.** `wireguard-tools`; `wgcf` в `/usr/local/bin`.
 2. **Регистрация.** Только при отсутствии `wgcf-account.toml`.
-3. **Сборка `warp.conf`** из профиля через `parse_wgcf_profile` и шаблон. Права 0600. `wg-quick@warp` enabled; перезапуск — только через handler при изменении файла.
+3. **Сборка `warp.conf`** из профиля через `parse_wgcf_profile` и шаблон. Права 0600. `wg-quick@warp` enabled; перезапуск — только при изменении файла, отдельной таской сразу после шаблона, а не handler: handler сработал бы в конце плея, уже после того как проверка оценила старый туннель.
 4. **Проверка.** До 5 попыток с паузой 6 секунд; успех, когда одновременно у пира есть handshake (`wg show warp latest-handshakes` не ноль) и `curl --interface warp --max-time 5 https://www.cloudflare.com/cdn-cgi/trace` содержит `warp=on`. При неудаче таска падает с текстом, называющим хост и какое из условий не выполнено.
 5. **Проба** — раздел 5.
 
@@ -107,7 +110,7 @@ PersistentKeepalive = 25
 
 ### 4.5. Check-mode
 
-Регистрация не выполняется. Сборка `warp.conf` показывает дифф, если профиль уже есть на хосте. Это основной способ убедиться перед реальным прогоном, что роль не изменит уже работающий WARP.
+Регистрация не выполняется. У таски сборки `warp.conf` отключён дифф (`diff: false`): файл содержит приватный ключ, и дифф вывел бы его в лог. Поэтому критерий перед реальным прогоном — статус таски `Render WARP interface config`: `ok` означает, что роль не изменит уже работающий WARP, `changed` — стоп.
 
 ## 5. Проба и алерты
 
@@ -169,6 +172,7 @@ Molecule не используется для роли: в контейнере 
 |---|---|---|
 | Валидация `warp_mode` | `.github/scripts/test-render-fleet-runtime.py` (дополнение) | `none/all/inbound` проходят, регистр и пробелы нормализуются, отсутствие даёт `none`, мусор падает с именем хоста |
 | Разбор профиля | `.github/scripts/test-warp-exit-filter.py` | ключи и IPv4-адрес вытаскиваются из профиля в формате tw-germ-1; IPv6 и DNS игнорируются; профиль без ключа или без IPv4 даёт ошибку |
+| Выбор тегов | `.github/scripts/test-warp-exit-tags.sh` | `--list-tasks` без тегов и с `warp`, `remnawave`, `monitoring` не содержит перерегистрации; с `warp_reregister` — содержит, и без пути установки |
 | Шаблон `warp.conf` | `.github/scripts/test-warp-exit-template.py` | рендер с фейковыми ключами совпадает с эталонным файлом байт в байт (эталон повторяет форму раздела 3) |
 | Скрипт пробы | `.github/scripts/test-warp-probe.sh` | поддельный `curl` в `PATH`: 10/10 успешных → ratio 1; 5/10 → 0.5; 0/10 → 0 и latency NaN; trace без `warp=on` не засчитывается; файл заменяется атомарно и валиден для формата textfile |
 | Правила алертов | `.github/scripts/test-warp-alerts.yml` + шаг `promtool test rules` | 30-секундный провал не будит `WarpDegraded`; 20 минут при ratio 0.5 будят `WarpDegraded`; 3 минуты нуля будят `WarpTunnelDown`, 2 минуты — нет; остановка обновления timestamp будит `WarpProbeStale` |
@@ -178,7 +182,7 @@ Molecule не используется для роли: в контейнере 
 ## 8. Выкат
 
 1. PR → зелёный CI → разбор замечаний Codex/Copilot до мерджа.
-2. **tw-germ-1, check-mode** (`check_mode=true`, `limit=tw-germ-1`, `tags=warp`): дифф `warp.conf` пустой. Непустой дифф — стоп и правка шаблона, не хоста.
+2. **tw-germ-1, check-mode** (`check_mode=true`, `limit=tw-germ-1`, `tags=warp`): таска `Render WARP interface config` в статусе `ok`. Статус `changed` — стоп и правка шаблона, не хоста. Ожидаемо `changed` у установки `wgcf`: бинарник на tw-germ-1 не v2.2.32, замена файла туннель не трогает.
 3. **tw-germ-1, реальный прогон** (`tags=warp,monitoring`): возраст handshake не сбрасывается, выход остаётся `104.28.197.9`, метрики `warp_*` появляются в node-exporter.
 4. **ae-us-1** (`tags=monitoring`): группа `warp-exit` загружена, для tw-germ-1 ничего не горит.
 5. **Остальные ноды** (`tags=monitoring`): флаг textfile-коллектора. Пересоздаётся только контейнер node-exporter.
