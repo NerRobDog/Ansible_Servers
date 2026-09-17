@@ -1,0 +1,74 @@
+---
+# Providers set the OS hostname to internal IDs (dhost.su: 6019769891-arcoknq), and
+# Tailscale names the node after it. Pin the tailnet hostname to the fleet alias so the
+# admin panel and MagicDNS names match the inventory.
+- name: Validate tailscale hostname
+  ansible.builtin.assert:
+    that:
+      - tailscale_hostname is match('^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
+    fail_msg: >-
+      tailscale_hostname '{{ tailscale_hostname }}' on {{ inventory_hostname }} is not a valid
+      DNS label: lowercase letters, digits and inner hyphens, at most 63 characters.
+    quiet: true
+  when:
+    - tailscale_enabled | bool
+    - tailscale_hostname | length > 0
+
+- name: Read tailnet hostname on server hosts
+  ansible.builtin.command: tailscale status --json --peers=false
+  check_mode: false  # read-only probe; must run in --check too
+  register: tailscale_self_status_server_cmd
+  changed_when: false
+  when:
+    - tailscale_enabled | bool
+    - tailscale_hostname | length > 0
+    - not (tailscale_is_openwrt | bool)
+
+- name: Read tailnet hostname on OpenWrt
+  ansible.builtin.raw: "tailscale status --json --peers=false 2>/dev/null || true"
+  check_mode: false  # read-only probe; raw skips itself in --check otherwise
+  register: tailscale_self_status_openwrt_cmd
+  changed_when: false
+  when:
+    - tailscale_enabled | bool
+    - tailscale_hostname | length > 0
+    - tailscale_is_openwrt | bool
+
+# Separate registers per branch and a regex instead of from_json, for the reasons given
+# on the backend-state tasks in main.yml. With --peers=false the only HostName in the
+# output belongs to Self.
+- name: Resolve current tailnet hostname
+  ansible.builtin.set_fact:
+    tailscale_current_hostname: >-
+      {{
+        ((tailscale_is_openwrt | bool)
+          | ternary(tailscale_self_status_openwrt_cmd, tailscale_self_status_server_cmd)).stdout
+        | default('') | string
+        | regex_search('"HostName"\s*:\s*"([^"]*)"', '\1')
+        | default([''], true) | first
+      }}
+  when:
+    - tailscale_enabled | bool
+    - tailscale_hostname | length > 0
+
+- name: Set tailnet hostname on server hosts
+  ansible.builtin.command:
+    argv: [tailscale, set, "--hostname={{ tailscale_hostname }}"]
+  changed_when: true
+  when:
+    - tailscale_enabled | bool
+    - tailscale_hostname | length > 0
+    - not (tailscale_is_openwrt | bool)
+    - tailscale_current_hostname != tailscale_hostname
+
+# raw already skips itself in --check; the explicit guard keeps a rename out of check mode
+# even if someone later adds check_mode: false here the way the read task does.
+- name: Set tailnet hostname on OpenWrt
+  ansible.builtin.raw: "tailscale set --hostname={{ tailscale_hostname | quote }}"
+  changed_when: true
+  when:
+    - tailscale_enabled | bool
+    - tailscale_hostname | length > 0
+    - tailscale_is_openwrt | bool
+    - tailscale_current_hostname != tailscale_hostname
+    - not ansible_check_mode

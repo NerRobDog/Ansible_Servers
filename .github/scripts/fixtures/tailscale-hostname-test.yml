@@ -1,0 +1,13 @@
+---
+# Drives roles/tailscale/tasks/hostname.yml against a fake `tailscale` binary.
+- name: Tailscale hostname contract
+  hosts: all
+  gather_facts: false
+  vars:
+    tailscale_enabled: true
+    tailscale_is_openwrt: "{{ fixture_openwrt | default(false) | bool }}"
+  tasks:
+    - name: Pin the tailnet hostname
+      ansible.builtin.include_role:
+        name: tailscale
+        tasks_from: hostname
