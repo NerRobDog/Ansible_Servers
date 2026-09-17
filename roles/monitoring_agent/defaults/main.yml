@@ -8,6 +8,7 @@ monitoring_agent_enable_node_exporter: true
 monitoring_agent_enable_cadvisor: true
 monitoring_agent_node_exporter_image: prom/node-exporter:v1.8.2
 monitoring_agent_cadvisor_image: gcr.io/cadvisor/cadvisor:v0.49.1
+monitoring_agent_textfile_dir: /var/lib/node_exporter/textfile
 # Boot-time convergence: a systemd oneshot unit re-runs `docker compose up -d` until it
 # succeeds, so exporters published on a late-appearing address (tailscale) come back after
 # a reboot without waiting for the next deploy.

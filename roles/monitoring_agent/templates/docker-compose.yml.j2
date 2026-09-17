@@ -10,6 +10,8 @@ services:
     restart: unless-stopped
     command:
       - --path.rootfs=/host
+      # warp_exit writes warp.prom here; on hosts without WARP the directory stays empty.
+      - --collector.textfile.directory=/host{{ monitoring_agent_textfile_dir }}
     volumes:
       - /:/host:ro,rslave
     ports:

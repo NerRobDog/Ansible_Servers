@@ -1,0 +1,29 @@
+---
+# Tags are set here, per import, and deliberately NOT on the warp_exit entry in playbook.yml.
+# A role-level tag is inherited by every task, and a task tagged `never` still runs when ANY
+# of its other tags is requested: `--tags warp` would then re-register WARP and change the
+# exit IP. `node` is on the pre-node imports so `--tags node` never starts the node without
+# verifying the tunnel. .github/scripts/test-warp-exit-tags.sh guards both.
+- name: Install WARP tooling
+  ansible.builtin.import_tasks: install.yml
+  tags: [remnawave, warp, node]
+
+- name: Register WARP when the host has no registration
+  ansible.builtin.import_tasks: register.yml
+  tags: [remnawave, warp, node]
+
+- name: Configure the WARP interface
+  ansible.builtin.import_tasks: configure.yml
+  tags: [remnawave, warp, node]
+
+- name: Verify the WARP exit before the node is deployed
+  ansible.builtin.import_tasks: verify.yml
+  tags: [remnawave, warp, node]
+
+- name: Deploy the WARP probe
+  ansible.builtin.import_tasks: probe.yml
+  tags: [remnawave, warp, monitoring]
+
+- name: Re-register WARP on explicit request
+  ansible.builtin.import_tasks: reregister.yml
+  tags: [never, warp_reregister]

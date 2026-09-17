@@ -124,6 +124,14 @@ for alias in "${targets[@]}"; do
     run_ansible "$alias" -b -m ansible.builtin.shell -a "docker ps --filter name=^/remnanode$ | grep -q remnanode" >/dev/null
     run_ansible "$alias" -b -m ansible.builtin.shell -a "docker inspect remnanode | grep -q '\"NetworkMode\": \"host\"'" >/dev/null
     run_ansible "$alias" -b -m ansible.builtin.shell -a "docker inspect remnanode | grep -q NET_ADMIN" >/dev/null
+
+    warp_mode="$(jq -r --arg alias "$alias" '.fleet_hosts[$alias].remnawave.warp_mode // "none"' "$runtime_vars")"
+    if [[ "$feature_remnawave_node" == "true" && "$warp_mode" != "none" ]]; then
+      # A node with a WARP profile but no working tunnel passes every other check while
+      # sending client traffic into a dead interface.
+      echo "[smoke][$alias] Check WARP exit carries traffic (warp_mode=$warp_mode)"
+      run_ansible "$alias" -b -m ansible.builtin.shell -a "curl --interface warp --silent --max-time 10 https://www.cloudflare.com/cdn-cgi/trace | grep -qx warp=on" >/dev/null
+    fi
   fi
 
   if [[ "$feature_caddy_node" == "true" ]]; then

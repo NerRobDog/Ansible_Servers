@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Probe traffic through the WARP exit for node-exporter
+After=wg-quick@{{ warp_exit_interface }}.service
+
+[Service]
+Type=oneshot
+Environment=WARP_PROBE_IFACE={{ warp_exit_interface }}
+Environment=WARP_PROBE_OUT={{ warp_exit_textfile_dir }}/warp.prom
+ExecStart={{ warp_exit_probe_script }}

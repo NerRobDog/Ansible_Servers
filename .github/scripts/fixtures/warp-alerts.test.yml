@@ -1,0 +1,106 @@
+---
+rule_files:
+  - fleet-alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # Healthy exit: nothing fires.
+  - interval: 1m
+    input_series:
+      - series: 'warp_probe_success_ratio{instance="warp-host:9100",job="monitoring-node-exporter"}'
+        values: '1x30'
+      - series: 'warp_probe_last_run_timestamp_seconds{instance="warp-host:9100",job="monitoring-node-exporter"}'
+        values: '0+60x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: WarpTunnelDown
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: WarpDegraded
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: WarpProbeStale
+        exp_alerts: []
+
+  # A single bad minute (a 20-30 s burst) must not page anyone.
+  - interval: 1m
+    input_series:
+      - series: 'warp_probe_success_ratio{instance="warp-host:9100",job="monitoring-node-exporter"}'
+        values: '1x10 0 1x20'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: WarpTunnelDown
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: WarpDegraded
+        exp_alerts: []
+
+  # Sustained 50% loss: degradation fires, the tunnel is not "down".
+  - interval: 1m
+    input_series:
+      - series: 'warp_probe_success_ratio{instance="warp-host:9100",job="monitoring-node-exporter"}'
+        values: '0.5x25'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: WarpDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              scope: warp
+              instance: warp-host:9100
+              job: monitoring-node-exporter
+            exp_annotations:
+              summary: "WARP registration is degrading on warp-host:9100"
+              description: >-
+                More than 20% of probe requests through WARP on warp-host:9100 failed over the last 15 minutes.
+                Re-register: run deploy-remnawave-node with tags=warp_reregister and limit set to this host.
+      - eval_time: 20m
+        alertname: WarpTunnelDown
+        exp_alerts: []
+
+  # Total loss: two minutes is still a restart, three minutes is an outage.
+  - interval: 1m
+    input_series:
+      - series: 'warp_probe_success_ratio{instance="warp-host:9100",job="monitoring-node-exporter"}'
+        values: '1x5 0x10'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: WarpTunnelDown
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: WarpTunnelDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              scope: warp
+              instance: warp-host:9100
+              job: monitoring-node-exporter
+            exp_annotations:
+              summary: "WARP exit is down on warp-host:9100"
+              description: >-
+                Every probe request through the WARP interface on warp-host:9100 has failed for 3 minutes.
+                Clients routed to WARP on this node have no exit.
+
+  # node-exporter re-reads the last file forever, so a dead timer shows up as a frozen timestamp.
+  - interval: 1m
+    input_series:
+      - series: 'warp_probe_last_run_timestamp_seconds{instance="warp-host:9100",job="monitoring-node-exporter"}'
+        values: '0+60x10 600x10'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: WarpProbeStale
+        exp_alerts: []
+      - eval_time: 17m
+        alertname: WarpProbeStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              scope: warp
+              instance: warp-host:9100
+              job: monitoring-node-exporter
+            exp_annotations:
+              summary: "WARP probe stopped reporting on warp-host:9100"
+              description: >-
+                warp-probe.timer on warp-host:9100 has not written results for over 5 minutes.
+                WARP health on this node is unknown, and WarpTunnelDown and WarpDegraded cannot fire.

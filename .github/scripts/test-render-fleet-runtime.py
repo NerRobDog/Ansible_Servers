@@ -566,6 +566,40 @@ def test_yusic_worker_pull_no_relay_required() -> None:
     assert_true(runtime_vars["yusic_worker_runtime"]["enabled_workers"] == ["worker_a"], "worker_a missing in enabled")
 
 
+def render_warp_mode_host(remnawave: dict) -> tuple[subprocess.CompletedProcess[str], dict | None]:
+    config = {"hosts": {"warp-host": {"ansible_host": "203.0.113.50", "remnawave": remnawave}}}
+    proc, _, vars_out, _ = run_renderer(json.dumps(config), "deploy", suffix=".json")
+    if proc.returncode != 0:
+        return proc, None
+    runtime_vars = json.loads(vars_out.read_text(encoding="utf-8"))
+    return proc, runtime_vars["fleet_hosts"]["warp-host"]["remnawave"]
+
+
+def test_warp_mode_defaults_to_none() -> None:
+    proc, remnawave = render_warp_mode_host({})
+    assert_true(proc.returncode == 0, f"Renderer should accept a host without warp_mode: {proc.stderr}")
+    assert_true(remnawave["warp_mode"] == "none", f"Missing warp_mode must render as none, got {remnawave['warp_mode']!r}")
+
+    proc, remnawave = render_warp_mode_host({"warp_mode": ""})
+    assert_true(proc.returncode == 0, f"Renderer should accept empty warp_mode: {proc.stderr}")
+    assert_true(remnawave["warp_mode"] == "none", f"Empty warp_mode must render as none, got {remnawave['warp_mode']!r}")
+
+
+def test_warp_mode_normalizes_case_and_whitespace() -> None:
+    for raw, expected in ((" All ", "all"), ("INBOUND", "inbound"), ("none", "none")):
+        proc, remnawave = render_warp_mode_host({"warp_mode": raw})
+        assert_true(proc.returncode == 0, f"Renderer should accept warp_mode={raw!r}: {proc.stderr}")
+        assert_true(remnawave["warp_mode"] == expected, f"warp_mode={raw!r} must render as {expected!r}, got {remnawave['warp_mode']!r}")
+
+
+def test_invalid_warp_mode_rejected() -> None:
+    proc, _ = render_warp_mode_host({"warp_mode": "warp"})
+    output = proc.stderr + proc.stdout
+    assert_true(proc.returncode != 0, "Renderer should fail for warp_mode=warp")
+    assert_true("warp_mode" in output, f"Error should mention warp_mode, got: {output}")
+    assert_true("warp-host" in output, f"Error should name the host, got: {output}")
+
+
 def main() -> int:
     tests = [
         test_valid_yaml_modes,
@@ -588,6 +622,9 @@ def main() -> int:
         test_yusic_worker_pull_emits_inventory_group,
         test_yusic_worker_pull_inventory_isolated_from_remnawave,
         test_yusic_worker_pull_no_relay_required,
+        test_warp_mode_defaults_to_none,
+        test_warp_mode_normalizes_case_and_whitespace,
+        test_invalid_warp_mode_rejected,
     ]
 
     for test in tests:

@@ -207,7 +207,69 @@ hosts:
 Для `warp_mode: inbound` `target_inbound_tags` по умолчанию становится
 `[<inbound_tag>, <inbound_tag>_WARP]` — обе точки входа активируются на ноде.
 
-На хосте WARP-интерфейс обязан называться `warp`.
+Интерфейс `warp` на хосте разворачивает роль `warp_exit`. Ручной установки не нужно,
+в том числе после переустановки ОС: хост без регистрации зарегистрируется сам при deploy,
+и нода не поднимется, пока трафик через WARP не пройдёт проверку.
+
+**Включение WARP на работающей ноде (`none` → `all`/`inbound`) — в два прогона.**
+В `deploy-remnawave-node.yml` шаг panel sync идёт раньше Ansible: при
+`panel_sync_write=true` профиль в панели переключится на outbound/inbound `WARP` до того,
+как роль поставит и проверит туннель, и клиентский трафик уйдёт в несуществующий
+интерфейс `warp`. Порядок:
+
+1. Обновить `warp_mode` в `RW_FLEET_CONFIG_B64` (раздел 5).
+2. Первый прогон — только хост, панель не трогать:
+   ```bash
+   gh workflow run deploy-remnawave-node.yml --ref master \
+     -f target=remnawave -f mode=deploy -f limit=<alias> \
+     -f panel_sync_write=false -f panel_sync_enforce=false
+   ```
+   Warning `Panel sync drift detected but ignored` здесь ожидаем: в панели ещё профиль без WARP.
+   Роль ставит `wireguard-tools`/`wgcf`, регистрирует WARP, поднимает `wg-quick@warp` и
+   падает, если трафик через `warp` не проходит, — тогда второй прогон не запускать.
+3. Второй прогон — с записью в панель (`panel_sync_write=true`, `panel_sync_enforce=true`,
+   default): профиль переключается на WARP, туннель к этому моменту уже проверен.
+
+**Перерегистрация WARP** — когда пришёл алерт `WarpDegraded` (бесплатная регистрация
+со временем начинает терять запросы при свежем handshake):
+
+```bash
+gh workflow run deploy-remnawave-node.yml --ref master \
+  -f target=remnawave -f mode=deploy -f limit=<alias> \
+  -f tags=warp_reregister -f run_smoke=false -f panel_sync_write=false -f panel_sync_enforce=false
+```
+
+`panel_sync_enforce=false` нужен, чтобы расхождение профиля в панели, не связанное с WARP,
+не остановило перерегистрацию до Ansible: запись в панель выключена в любом случае.
+
+Роль сохранит текущую регистрацию в `/etc/wireguard/backup-<UTC-таймстемп, например 20260917T000937Z>/`,
+создаст новую и проверит трафик. Если новая не заработала — вернёт старую и упадёт с сообщением об откате.
+Выходной IP после перерегистрации может смениться в пределах диапазона Cloudflare.
+
+**Что делать по алертам:**
+
+| Алерт | Что значит | Действие |
+|---|---|---|
+| `WarpTunnelDown` | 3 минуты ни один запрос через WARP не прошёл | `systemctl status wg-quick@warp`, `wg show warp`; если туннель поднят, а трафика нет — перерегистрация |
+| `WarpDegraded` | больше 20% запросов через WARP неуспешны за 15 минут | перерегистрация (команда выше) |
+| `WarpProbeStale` | проба не отчитывалась больше 5 минут | `systemctl status warp-probe.timer warp-probe.service`, `journalctl -u warp-probe.service` |
+
+**Выключение WARP (`all`/`inbound` → `none`).** Роль `warp_exit` ничего не удаляет: при
+`warp_mode: none` она просто не запускается. Порядок обратный включению:
+
+1. Сменить `warp_mode` на `none` и прогнать deploy с записью в панель. Sync увидит удаление
+   outbound/inbound `WARP` и заблокирует запись (fail-closed, см. ниже) — на этот прогон
+   поставить хосту `remnawave.allow_destructive_profile_sync: true`, потом убрать.
+2. Когда профиль в панели уже без WARP, вручную на хосте:
+   ```bash
+   systemctl disable --now warp-probe.timer
+   rm -f /var/lib/node_exporter/textfile/warp.prom
+   systemctl disable --now wg-quick@warp
+   ```
+   Без этого таймер продолжит писать `warp.prom`, а после остановки туннеля придёт
+   `WarpTunnelDown`; оставленный без таймера `warp.prom` даст `WarpProbeStale`.
+   `/etc/wireguard/wgcf-account.toml` и `wgcf-profile.conf` можно оставить: при повторном
+   включении роль возьмёт существующую регистрацию, а не создаст новую.
 
 ### Защита от затирания профиля (fail-closed)
 
@@ -308,6 +370,7 @@ base64 -i fleet.yaml | tr -d '\n' | gh secret set RW_FLEET_CONFIG_B64 --env prod
 - контейнер `remnanode` в host network + `NET_ADMIN` (если `feature_remnawave_node=true`);
 - `caddy validate` + `https://<domain>:<monitor_port>/healthz` (если `feature_caddy_node=true`);
 - sysctl BBR/IPv6 (если `feature_node_tuning=true`).
+- `warp=on` в ответе `https://www.cloudflare.com/cdn-cgi/trace` через интерфейс `warp` (если `feature_remnawave_node=true` и `remnawave.warp_mode` не `none`).
 
 Ручной запуск того же набора:
 

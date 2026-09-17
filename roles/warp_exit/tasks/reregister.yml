@@ -1,0 +1,79 @@
+---
+- name: Refuse WARP re-registration in check mode
+  ansible.builtin.assert:
+    that:
+      - not ansible_check_mode
+    fail_msg: "warp_reregister replaces the WARP account and cannot run in check mode."
+
+- name: Re-register WARP, restoring the previous registration on failure
+  block:
+    - name: Set the WARP backup directory
+      ansible.builtin.set_fact:
+        warp_exit_backup_dir: "{{ warp_exit_dir }}/backup-{{ ansible_date_time.iso8601 | regex_replace('[-:]', '') }}"
+
+    - name: Create the WARP backup directory
+      ansible.builtin.file:
+        path: "{{ warp_exit_backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Back up the current WARP registration
+      ansible.builtin.copy:
+        src: "{{ warp_exit_dir }}/{{ item }}"
+        dest: "{{ warp_exit_backup_dir }}/{{ item }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      loop:
+        - wgcf-account.toml
+        - wgcf-profile.conf
+        - "{{ warp_exit_interface }}.conf"
+      no_log: true
+      diff: false
+
+    - name: Remove the old WARP registration
+      ansible.builtin.file:
+        path: "{{ warp_exit_dir }}/{{ item }}"
+        state: absent
+      loop:
+        - wgcf-account.toml
+        - wgcf-profile.conf
+
+    - name: Register the replacement WARP account
+      ansible.builtin.import_tasks: register.yml
+
+    - name: Rebuild the WARP interface on the new registration
+      ansible.builtin.import_tasks: configure.yml
+
+    - name: Verify the new WARP registration
+      ansible.builtin.import_tasks: verify.yml
+
+  rescue:
+    - name: Restore the previous WARP registration
+      ansible.builtin.copy:
+        src: "{{ warp_exit_backup_dir }}/{{ item }}"
+        dest: "{{ warp_exit_dir }}/{{ item }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0600"
+      loop:
+        - wgcf-account.toml
+        - wgcf-profile.conf
+        - "{{ warp_exit_interface }}.conf"
+      no_log: true
+      diff: false
+
+    - name: Restart the WARP interface on the previous registration
+      ansible.builtin.systemd:
+        name: "wg-quick@{{ warp_exit_interface }}"
+        state: restarted
+
+    - name: Report the failed re-registration
+      ansible.builtin.fail:
+        msg: >-
+          WARP re-registration failed on {{ inventory_hostname }}; the previous registration was restored
+          from {{ warp_exit_backup_dir }} and the tunnel restarted on it.

@@ -19,4 +19,3 @@ remnawave_api_enabled: true
 
 remnawave_bbr_enabled: true
 remnawave_ipv6_state: enabled
-remnawave_warp_enabled: false

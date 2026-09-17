@@ -93,6 +93,41 @@
   changed_when: false
   tags: [monitoring, metrics, prometheus]
 
+# prometheus.yml, the rule files and alertmanager.yml are single-file bind mounts. template
+# replaces a file by rename, so a running container keeps reading the old inode, and
+# `compose up` does not recreate it while docker-compose.yml is unchanged. A container
+# restart re-resolves the bind mount; the dedicated handlers below do that.
+- name: Render Prometheus config and rule files
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - src: prometheus.yml.j2
+      dest: "{{ monitoring_stack_install_path }}/prometheus/prometheus.yml"
+    - src: openwrt-alerts.yml.j2
+      dest: "{{ monitoring_stack_install_path }}/prometheus/openwrt-alerts.yml"
+    - src: fleet-alerts.yml.j2
+      dest: "{{ monitoring_stack_install_path }}/prometheus/fleet-alerts.yml"
+  notify:
+    - Restart monitoring stack
+    - Restart Prometheus container
+  tags: [monitoring, metrics, grafana, prometheus, loki]
+
+- name: Render Alertmanager config
+  ansible.builtin.template:
+    src: alertmanager.yml.j2
+    dest: "{{ monitoring_stack_install_path }}/alertmanager/alertmanager.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Restart monitoring stack
+    - Restart Alertmanager container
+  tags: [monitoring, metrics, grafana, prometheus, loki]
+
 - name: Render monitoring stack config files
   ansible.builtin.template:
     src: "{{ item.src }}"
@@ -101,18 +136,6 @@
     group: root
     mode: "{{ item.mode }}"
   loop:
-    - src: prometheus.yml.j2
-      dest: "{{ monitoring_stack_install_path }}/prometheus/prometheus.yml"
-      mode: "0644"
-    - src: openwrt-alerts.yml.j2
-      dest: "{{ monitoring_stack_install_path }}/prometheus/openwrt-alerts.yml"
-      mode: "0644"
-    - src: fleet-alerts.yml.j2
-      dest: "{{ monitoring_stack_install_path }}/prometheus/fleet-alerts.yml"
-      mode: "0644"
-    - src: alertmanager.yml.j2
-      dest: "{{ monitoring_stack_install_path }}/alertmanager/alertmanager.yml"
-      mode: "0644"
     - src: grafana-datasources.yml.j2
       dest: "{{ monitoring_stack_install_path }}/grafana/provisioning/datasources/datasources.yml"
       mode: "0644"

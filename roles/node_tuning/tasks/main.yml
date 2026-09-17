@@ -17,8 +17,7 @@
   ansible.builtin.assert:
     that:
       - remnawave_ipv6_state_effective in ["enabled", "disabled"]
-      - not (remnawave_warp_enabled | bool)
-    fail_msg: "remnawave_ipv6_state must be enabled|disabled and WARP is intentionally unsupported in v1."
+    fail_msg: "remnawave_ipv6_state must be enabled|disabled."
   tags: [remnawave, bbr, ipv6]
 
 - name: Enable BBR default qdisc

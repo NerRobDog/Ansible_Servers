@@ -43,7 +43,10 @@ REMNAWAVE_DEFAULTS = {
     "panel_node_uuid": "",
     "target_profile_name": "",
     "target_inbound_tags": [],
+    "warp_mode": "none",
 }
+
+WARP_MODES = ("none", "all", "inbound")
 
 YUSIC_WORKER_DEFAULTS = {
     "relay_host_alias": "",
@@ -156,6 +159,16 @@ def parse_string_list(value, context: str) -> list[str]:
     return result
 
 
+def normalize_warp_mode(value, alias: str) -> str:
+    # Mirrors normalize_warp_mode in remnawave-api-sync.py: the panel profile and the
+    # warp_exit role must agree on whether a host has a WARP exit, or a typo would give
+    # a node whose profile routes into a `warp` interface that nobody installed.
+    mode = str(value or "").strip().lower() or "none"
+    if mode not in WARP_MODES:
+        fail(f"Host '{alias}' remnawave.warp_mode must be one of {', '.join(WARP_MODES)} (got {value!r}).")
+    return mode
+
+
 def deep_merge(base: dict, override: dict) -> dict:
     result = copy.deepcopy(base)
     for key, value in (override or {}).items():
@@ -252,6 +265,7 @@ def normalize_host(alias: str, host_cfg: dict, defaults: dict):
     remnawave_cfg["caddy_acme_ca"] = str(remnawave_cfg.get("caddy_acme_ca", "") or "")
     remnawave_cfg["panel_node_uuid"] = str(remnawave_cfg.get("panel_node_uuid", "") or "").strip()
     remnawave_cfg["target_profile_name"] = str(remnawave_cfg.get("target_profile_name", "") or "").strip()
+    remnawave_cfg["warp_mode"] = normalize_warp_mode(remnawave_cfg.get("warp_mode"), alias)
 
     remnawave_cfg["target_inbound_tags"] = parse_string_list(remnawave_cfg.get("target_inbound_tags", []), f"Host '{alias}' remnawave.target_inbound_tags")
     if remnawave_cfg["caddy_tls_mode"] == "files":
