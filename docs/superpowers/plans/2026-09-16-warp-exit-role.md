@@ -1889,7 +1889,18 @@ gh pr merge <N> --squash --delete-branch
 ```bash
 gh workflow run deploy-remnawave-node.yml --ref master -f target=remnawave -f mode=deploy -f limit=tw-germ-1 -f tags=warp -f check_mode=true -f run_smoke=false -f panel_sync_write=false
 ```
-Expected в логе прогона: `Render WARP interface config` — `ok` (НЕ `changed`); `Register a new WARP account` — `ok`/`skipped`; `Install pinned wgcf binary` — `changed` (ожидаемая замена бинарника, см. отступление 5). Любой `changed` у `Render WARP interface config` — стоп: шаблон не совпал с живым файлом.
+Критерии остановки (только они):
+- `Render WARP interface config` — `changed`: шаблон не совпал с живым файлом, реальный прогон перезапустил бы туннель;
+- `Enable the WARP interface at boot` или `Ensure the WARP interface is up` — `changed`: `wg-quick@warp` на хосте не включён/не запущен через systemd, реальный прогон поменял бы способ запуска туннеля.
+
+Ожидаемые `changed`, которые НЕ стоп (живой хост настроен вручную до роли):
+- `Install pinned wgcf binary` — замена бинарника (см. отступление 5);
+- `Install WireGuard tools` — если на хосте нет `curl`;
+- `Ensure WireGuard config directory` — если у `/etc/wireguard` не `0700`/`root:root`;
+- `Restrict WARP registration files to root` — `wgcf` создаёт файлы с `0644`, роль ставит `0600`;
+- задачи пробы: `Ensure WARP probe directories`, `Install the WARP probe script`, `Install WARP probe systemd units`, `Reload systemd after WARP probe unit changes` (проба на хосте ещё не стоит; `Enable the WARP probe timer` в check mode пропускается).
+
+`Register a new WARP account` / `Generate the WireGuard profile for the WARP account` — `ok` (файлы есть, `creates`); `Restart the WARP interface after a config change` — `skipped`.
 
 - [ ] **Step 6: tw-germ-1, реальный прогон**
 

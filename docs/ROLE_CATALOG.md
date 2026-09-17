@@ -79,10 +79,11 @@
 
 ### `warp_exit`
 - Назначение: выход Cloudflare WARP на ноде Remnawave — интерфейс `warp`, в который профиль панели отправляет outbound `WARP`.
-- Включается: `feature_remnawave_node=true` и `remnawave.warp_mode` = `all` или `inbound`. При `none` роль не запускается.
+- Включается: `feature_remnawave_node=true` и `remnawave.warp_mode` = `all` или `inbound`. При `none` (и при пустом значении) роль не запускается; другое значение — playbook падает в `Validate WARP mode`. Роль ничего не удаляет при возврате к `none` — порядок выключения в `docs/OPERATIONS_GUIDE.md`.
 - Что делает при обычном деплое:
-  - ставит `wireguard-tools` и `wgcf` фиксированной версии со сверкой SHA256;
-  - если нет `/etc/wireguard/wgcf-account.toml` — регистрирует хост (`wgcf register` + `generate`); существующую регистрацию не трогает;
+  - ставит `wireguard-tools`, `curl` и `wgcf` фиксированной версии со сверкой SHA256;
+  - если нет `/etc/wireguard/wgcf-account.toml` — регистрирует хост (`wgcf register` + `generate`, с повторами при ошибке API Cloudflare, например 429); существующую регистрацию не трогает;
+  - в `wgcf-profile.conf` не хватает полей — падает с именами полей (без значений: в файле приватный ключ);
   - собирает `/etc/wireguard/warp.conf` из `wgcf-profile.conf` (`Table = off`, MTU 1280, только IPv4, без DNS) и перезапускает туннель только при изменении файла;
   - **fail-closed**: до 5 попыток проверяет handshake и `warp=on` через интерфейс; не прошло — деплой хоста падает до `remnawave_node`;
   - ставит `warp-probe.timer`, который раз в минуту пишет метрики в `/var/lib/node_exporter/textfile/warp.prom`.
@@ -90,7 +91,7 @@
   - `warp_exit_wgcf_version` / `warp_exit_wgcf_sha256` — версия и хэш `wgcf`. Неверный хэш → таска `Install pinned wgcf binary` падает.
   - `warp_exit_interface` (default `warp`) — менять нельзя без правки профилей панели: они ссылаются на это имя.
   - `warp_exit_verify_attempts` (default `5`) — общее число попыток проверки трафика (не повторов: ansible-core запускает таску `1 + retries` раз, отсюда `retries: attempts - 1`), `warp_exit_verify_delay` (default `6`) — пауза между попытками, сек.
-- Теги: `warp` (обычный путь), `warp_reregister` (только перерегистрация). Теги стоят на тасках роли, а не на её записи в `playbook.yml` — иначе `--tags warp` запустил бы перерегистрацию. Это проверяет `.github/scripts/test-warp-exit-tags.sh`.
+- Теги: `warp` (обычный путь), `node` (установка, настройка и проверка туннеля — чтобы `--tags node` не поднял ноду без проверенного WARP; проба под `node` не ставится), `warp_reregister` (только перерегистрация). Теги стоят на тасках роли, а не на её записи в `playbook.yml` — иначе `--tags warp` запустил бы перерегистрацию. Это проверяет `.github/scripts/test-warp-exit-tags.sh`.
 - Метрики и алерты: `warp_probe_success_ratio`, `warp_probe_latency_avg_seconds`, `warp_status_on`, `warp_handshake_age_seconds`, `warp_probe_last_run_timestamp_seconds`; алерты `WarpTunnelDown`, `WarpDegraded`, `WarpProbeStale` в группе `warp-exit` (`roles/monitoring_stack/templates/fleet-alerts.yml.j2`).
 
 Пример:
@@ -129,6 +130,11 @@ hosts:
 - Загрузка после reboot: аналогичный `monitoring-stack.service` (та же причина —
   `monitoring_stack_bind_address` по умолчанию равен tailnet-IP хоста).
   Отключается через `monitoring_stack_manage_boot_unit: false`.
+- Смена `prometheus.yml`, файлов правил или `alertmanager.yml` перезапускает контейнер
+  `prometheus` / `alertmanager`: это single-file bind mount, `template` заменяет файл
+  переименованием, и работающий контейнер без перезапуска читает старый inode
+  (`compose up` при неизменном `docker-compose.yml` его не пересоздаёт).
+- Alertmanager подавляет `WarpDegraded`, пока для того же `instance` горит `WarpTunnelDown`.
 
 ### `user_shell`
 - Назначение: пользователь, authorized_keys, sudo, shell-окружение.
