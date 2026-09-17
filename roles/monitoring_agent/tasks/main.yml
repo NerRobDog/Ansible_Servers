@@ -21,6 +21,16 @@
     mode: "0755"
   tags: [monitoring, metrics, agent]
 
+- name: Ensure node-exporter textfile collector directory exists
+  ansible.builtin.file:
+    path: "{{ monitoring_agent_textfile_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: monitoring_agent_enable_node_exporter | bool
+  tags: [monitoring, metrics, agent]
+
 - name: Render monitoring agent docker-compose file
   ansible.builtin.template:
     src: docker-compose.yml.j2

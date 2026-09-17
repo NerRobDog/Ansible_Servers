@@ -1,0 +1,56 @@
+---
+- name: Check for the wgcf WireGuard profile
+  ansible.builtin.stat:
+    path: "{{ warp_exit_dir }}/wgcf-profile.conf"
+  register: warp_exit_profile_file
+
+- name: Require the wgcf profile outside check mode
+  ansible.builtin.assert:
+    that:
+      - warp_exit_profile_file.stat.exists
+    fail_msg: "{{ warp_exit_dir }}/wgcf-profile.conf is missing after registration; cannot build {{ warp_exit_interface }}.conf."
+  when: not ansible_check_mode
+
+- name: Build and activate the WARP interface
+  when: warp_exit_profile_file.stat.exists
+  block:
+    - name: Read the wgcf WireGuard profile
+      ansible.builtin.slurp:
+        src: "{{ warp_exit_dir }}/wgcf-profile.conf"
+      register: warp_exit_profile_raw
+      no_log: true
+
+    - name: Parse the wgcf WireGuard profile
+      ansible.builtin.set_fact:
+        warp_exit_profile: "{{ warp_exit_profile_raw.content | b64decode | parse_wgcf_profile }}"
+      no_log: true
+
+    # diff is off because the file holds the private key; a check run shows `ok` or `changed` instead.
+    - name: Render WARP interface config
+      ansible.builtin.template:
+        src: warp.conf.j2
+        dest: "{{ warp_exit_dir }}/{{ warp_exit_interface }}.conf"
+        owner: root
+        group: root
+        mode: "0600"
+      register: warp_exit_conf
+      no_log: true
+      diff: false
+
+    - name: Enable the WARP interface at boot
+      ansible.builtin.systemd:
+        name: "wg-quick@{{ warp_exit_interface }}"
+        enabled: true
+
+    # A handler would restart only at the end of the play, after verify.yml has already
+    # judged the old tunnel; restart inline so verification sees the new config.
+    - name: Restart the WARP interface after a config change
+      ansible.builtin.systemd:
+        name: "wg-quick@{{ warp_exit_interface }}"
+        state: restarted
+      when: warp_exit_conf is changed  # noqa: no-handler
+
+    - name: Ensure the WARP interface is up
+      ansible.builtin.systemd:
+        name: "wg-quick@{{ warp_exit_interface }}"
+        state: started

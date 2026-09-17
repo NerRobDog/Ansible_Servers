@@ -1,0 +1,29 @@
+---
+- name: Verify traffic leaves through WARP
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      trace="$(curl --interface {{ warp_exit_interface }} --silent --max-time 5 {{ warp_exit_trace_url }})" || trace=""
+      warp_on=no
+      if printf '%s\n' "$trace" | grep -qx 'warp=on'; then warp_on=yes; fi
+      handshake="$(wg show {{ warp_exit_interface }} latest-handshakes | awk 'NR == 1 { print $2 }')"
+      echo "handshake=${handshake:-none} warp_on=${warp_on}"
+      [ -n "$handshake" ] && [ "$handshake" != "0" ] && [ "$warp_on" = yes ]
+    executable: /bin/bash
+  register: warp_exit_verify
+  retries: "{{ warp_exit_verify_retries }}"
+  delay: "{{ warp_exit_verify_delay }}"
+  until: warp_exit_verify.rc == 0
+  failed_when: false
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Fail closed when WARP does not carry traffic
+  ansible.builtin.fail:
+    msg: >-
+      WARP exit on {{ inventory_hostname }} does not carry traffic after {{ warp_exit_verify_retries }} attempts
+      ({{ warp_exit_verify.stdout | default('no output') }}). The node is not deployed on this host:
+      its profile routes client traffic into the {{ warp_exit_interface }} interface.
+  when:
+    - not ansible_check_mode
+    - warp_exit_verify.rc != 0

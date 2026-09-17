@@ -1,0 +1,40 @@
+---
+- name: Ensure WireGuard config directory
+  ansible.builtin.file:
+    path: "{{ warp_exit_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Check for an existing WARP registration
+  ansible.builtin.stat:
+    path: "{{ warp_exit_dir }}/wgcf-account.toml"
+  register: warp_exit_account
+
+# `creates` makes both commands no-ops when the files exist and skips them in check mode,
+# so a check run never calls the Cloudflare API.
+- name: Register a new WARP account
+  ansible.builtin.command:
+    cmd: "{{ warp_exit_wgcf_path }} register --accept-tos"
+    chdir: "{{ warp_exit_dir }}"
+    creates: "{{ warp_exit_dir }}/wgcf-account.toml"
+  no_log: true
+
+- name: Generate the WireGuard profile for the WARP account
+  ansible.builtin.command:
+    cmd: "{{ warp_exit_wgcf_path }} generate"
+    chdir: "{{ warp_exit_dir }}"
+    creates: "{{ warp_exit_dir }}/wgcf-profile.conf"
+  no_log: true
+
+- name: Restrict WARP registration files to root
+  ansible.builtin.file:
+    path: "{{ warp_exit_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop:
+    - wgcf-account.toml
+    - wgcf-profile.conf
+  when: warp_exit_account.stat.exists or not ansible_check_mode

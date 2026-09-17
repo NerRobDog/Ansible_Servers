@@ -27,6 +27,7 @@
         effective_feature_remnawave_node: "{{ fleet_host_cfg.get('features', {}).get('feature_remnawave_node', feature_remnawave_node) | bool }}"
         effective_feature_caddy_node: "{{ fleet_host_cfg.get('features', {}).get('feature_caddy_node', feature_caddy_node) | bool }}"
         effective_feature_node_tuning: "{{ fleet_host_cfg.get('features', {}).get('feature_node_tuning', feature_node_tuning) | bool }}"
+        effective_warp_mode: "{{ fleet_host_cfg.get('remnawave', {}).get('warp_mode', 'none') | string | trim | lower }}"
         effective_feature_monitoring_agent: >-
           {{ fleet_host_cfg.get('features', {}).get('feature_monitoring_agent', feature_monitoring_agent) | bool }}
         effective_feature_monitoring_stack: >-
@@ -129,6 +130,14 @@
     - role: monitoring_stack
       when: effective_feature_monitoring_stack | bool
       tags: [monitoring, metrics, grafana, prometheus, loki]
+
+    # No role-level tags on purpose: they would be inherited by the `never`-tagged
+    # re-registration tasks. Tags live in roles/warp_exit/tasks/main.yml.
+    - role: warp_exit
+      when: >-
+        effective_run_main_stack | bool
+        and (effective_feature_remnawave_node | bool)
+        and effective_warp_mode != 'none'
 
     - role: remnawave_node
       when: effective_run_main_stack | bool and (effective_feature_remnawave_node | bool)

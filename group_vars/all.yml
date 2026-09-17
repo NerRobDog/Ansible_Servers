@@ -95,7 +95,6 @@ remnawave_caddy_acme_ca: ""
 
 remnawave_bbr_enabled: true
 remnawave_ipv6_state: enabled
-remnawave_warp_enabled: false
 
 # Fleet-driven feature flags
 feature_base: true

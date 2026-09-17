@@ -1,0 +1,25 @@
+---
+- name: Validate WARP exit prerequisites
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+      - ansible_architecture == "x86_64"
+    fail_msg: "Role warp_exit supports Debian/Ubuntu on x86_64 only: wgcf is pinned to the linux_amd64 build."
+
+- name: Install WireGuard tools
+  ansible.builtin.apt:
+    name: wireguard-tools
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# get_url compares the checksum of an existing file and replaces it only on mismatch,
+# so a hand-installed wgcf of another version is swapped once and then left alone.
+- name: Install pinned wgcf binary
+  ansible.builtin.get_url:
+    url: "{{ warp_exit_wgcf_url }}"
+    dest: "{{ warp_exit_wgcf_path }}"
+    checksum: "sha256:{{ warp_exit_wgcf_sha256 }}"
+    owner: root
+    group: root
+    mode: "0755"

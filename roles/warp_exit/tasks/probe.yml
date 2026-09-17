@@ -1,0 +1,46 @@
+---
+- name: Ensure WARP probe directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ warp_exit_probe_dir }}"
+    - "{{ warp_exit_textfile_dir }}"
+
+- name: Install the WARP probe script
+  ansible.builtin.copy:
+    src: warp-probe.sh
+    dest: "{{ warp_exit_probe_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install WARP probe systemd units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - warp-probe.service
+    - warp-probe.timer
+  register: warp_exit_probe_units
+
+# Inline rather than a handler: the timer is started by the next task and must see the new units.
+- name: Reload systemd after WARP probe unit changes
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: warp_exit_probe_units is changed  # noqa: no-handler
+
+# The systemd module fails on a unit it cannot find even in check mode, and in check mode the
+# unit files above are not written: skip the timer there when they would be installed or changed.
+- name: Enable the WARP probe timer
+  ansible.builtin.systemd:
+    name: warp-probe.timer
+    enabled: true
+    state: started
+  when: not (ansible_check_mode and warp_exit_probe_units is changed)

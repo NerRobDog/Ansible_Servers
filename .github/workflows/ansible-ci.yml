@@ -75,6 +75,9 @@ jobs:
       - name: Syntax check playbook.yml
         run: ansible-playbook -i hosts.example.ini playbook.yml --syntax-check
 
+      - name: warp_exit tag selection test
+        run: bash .github/scripts/test-warp-exit-tags.sh
+
       - name: Syntax check playbook-yusic-worker.yml
         run: ansible-playbook -i hosts.example.ini playbook-yusic-worker.yml --syntax-check
 
