@@ -207,7 +207,30 @@ hosts:
 Для `warp_mode: inbound` `target_inbound_tags` по умолчанию становится
 `[<inbound_tag>, <inbound_tag>_WARP]` — обе точки входа активируются на ноде.
 
-На хосте WARP-интерфейс обязан называться `warp`.
+Интерфейс `warp` на хосте разворачивает роль `warp_exit`. Ручной установки не нужно,
+в том числе после переустановки ОС: хост без регистрации зарегистрируется сам при deploy,
+и нода не поднимется, пока трафик через WARP не пройдёт проверку.
+
+**Перерегистрация WARP** — когда пришёл алерт `WarpDegraded` (бесплатная регистрация
+со временем начинает терять запросы при свежем handshake):
+
+```bash
+gh workflow run deploy-remnawave-node.yml --ref master \
+  -f target=remnawave -f mode=deploy -f limit=<alias> \
+  -f tags=warp_reregister -f run_smoke=false -f panel_sync_write=false
+```
+
+Роль сохранит текущую регистрацию в `/etc/wireguard/backup-<UTC-таймстемп, например 20260917T000937Z>/`,
+создаст новую и проверит трафик. Если новая не заработала — вернёт старую и упадёт с сообщением об откате.
+Выходной IP после перерегистрации может смениться в пределах диапазона Cloudflare.
+
+**Что делать по алертам:**
+
+| Алерт | Что значит | Действие |
+|---|---|---|
+| `WarpTunnelDown` | 3 минуты ни один запрос через WARP не прошёл | `systemctl status wg-quick@warp`, `wg show warp`; если туннель поднят, а трафика нет — перерегистрация |
+| `WarpDegraded` | больше 20% запросов через WARP неуспешны за 15 минут | перерегистрация (команда выше) |
+| `WarpProbeStale` | проба не отчитывалась больше 5 минут | `systemctl status warp-probe.timer warp-probe.service`, `journalctl -u warp-probe.service` |
 
 ### Защита от затирания профиля (fail-closed)
 

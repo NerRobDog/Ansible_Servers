@@ -77,6 +77,31 @@
 - Основной параметр:
   - `remnawave.ipv6_state` = `enabled|disabled`.
 
+### `warp_exit`
+- Назначение: выход Cloudflare WARP на ноде Remnawave — интерфейс `warp`, в который профиль панели отправляет outbound `WARP`.
+- Включается: `feature_remnawave_node=true` и `remnawave.warp_mode` = `all` или `inbound`. При `none` роль не запускается.
+- Что делает при обычном деплое:
+  - ставит `wireguard-tools` и `wgcf` фиксированной версии со сверкой SHA256;
+  - если нет `/etc/wireguard/wgcf-account.toml` — регистрирует хост (`wgcf register` + `generate`); существующую регистрацию не трогает;
+  - собирает `/etc/wireguard/warp.conf` из `wgcf-profile.conf` (`Table = off`, MTU 1280, только IPv4, без DNS) и перезапускает туннель только при изменении файла;
+  - **fail-closed**: до 5 попыток проверяет handshake и `warp=on` через интерфейс; не прошло — деплой хоста падает до `remnawave_node`;
+  - ставит `warp-probe.timer`, который раз в минуту пишет метрики в `/var/lib/node_exporter/textfile/warp.prom`.
+- Параметры (`roles/warp_exit/defaults/main.yml`):
+  - `warp_exit_wgcf_version` / `warp_exit_wgcf_sha256` — версия и хэш `wgcf`. Неверный хэш → таска `Install pinned wgcf binary` падает.
+  - `warp_exit_interface` (default `warp`) — менять нельзя без правки профилей панели: они ссылаются на это имя.
+  - `warp_exit_verify_attempts` (default `5`) — общее число попыток проверки трафика (не повторов: ansible-core запускает таску `1 + retries` раз, отсюда `retries: attempts - 1`), `warp_exit_verify_delay` (default `6`) — пауза между попытками, сек.
+- Теги: `warp` (обычный путь), `warp_reregister` (только перерегистрация). Теги стоят на тасках роли, а не на её записи в `playbook.yml` — иначе `--tags warp` запустил бы перерегистрацию. Это проверяет `.github/scripts/test-warp-exit-tags.sh`.
+- Метрики и алерты: `warp_probe_success_ratio`, `warp_probe_latency_avg_seconds`, `warp_status_on`, `warp_handshake_age_seconds`, `warp_probe_last_run_timestamp_seconds`; алерты `WarpTunnelDown`, `WarpDegraded`, `WarpProbeStale` в группе `warp-exit` (`roles/monitoring_stack/templates/fleet-alerts.yml.j2`).
+
+Пример:
+
+```yaml
+hosts:
+  dh-germ-1:
+    remnawave:
+      warp_mode: all
+```
+
 ### `monitoring_agent`
 - Назначение: запуск `node_exporter` и `cadvisor` на ноде для удалённого scrape.
 - Требует: `feature_monitoring_agent=true`.
@@ -385,8 +410,9 @@ hosts:
       warp_inbound_port: 2053
 ```
 
-Требование к хосту: WARP-интерфейс должен называться `warp` (`streamSettings.sockopt.interface: warp`),
-иначе xray не поднимет outbound.
+Интерфейс `warp` на хосте ставит роль `warp_exit` — она включается тем же `warp_mode`.
+Профиль ссылается на него через `streamSettings.sockopt.interface: warp`.
+При неправильном значении `warp_mode` падает и рендер fleet (`render-fleet-runtime.py`), и sync.
 
 ### `warp_inbound_port`
 

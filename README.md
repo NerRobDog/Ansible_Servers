@@ -29,6 +29,7 @@
 - `remnawave_node` — deploy RemaWave node.
 - `caddy_node` — TLS decoy для self-steal Reality + локальный health endpoint.
 - `node_tuning` — BBR + IPv6.
+- `warp_exit` — выход Cloudflare WARP на ноде (`wgcf` + `wg-quick@warp`): регистрация, проверка трафика до деплоя ноды, перерегистрация по тегу `warp_reregister`, проба для алертов. Включается `remnawave.warp_mode` не равным `none`.
 - `monitoring_agent` — node_exporter + cadvisor на нодах.
 - `monitoring_stack` — Prometheus + Alertmanager + Grafana + Loki + Promtail.
 - `user_shell` — пользователь/sudo/SSH shell.
