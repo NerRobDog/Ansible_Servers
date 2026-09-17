@@ -308,6 +308,7 @@ base64 -i fleet.yaml | tr -d '\n' | gh secret set RW_FLEET_CONFIG_B64 --env prod
 - контейнер `remnanode` в host network + `NET_ADMIN` (если `feature_remnawave_node=true`);
 - `caddy validate` + `https://<domain>:<monitor_port>/healthz` (если `feature_caddy_node=true`);
 - sysctl BBR/IPv6 (если `feature_node_tuning=true`).
+- `warp=on` в ответе `https://www.cloudflare.com/cdn-cgi/trace` через интерфейс `warp` (если `feature_remnawave_node=true` и `remnawave.warp_mode` не `none`).
 
 Ручной запуск того же набора:
 
