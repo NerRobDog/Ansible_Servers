@@ -21,6 +21,12 @@ inhibit_rules:
     target_matchers:
       - 'alertname =~ "FleetCadvisorDown|FleetHighMemoryUsage|FleetHighLoad|FleetDiskAlmostFull"'
     equal: ["instance"]
+  # A tunnel that is down also fails the degradation check; report only the outage.
+  - source_matchers:
+      - 'alertname = "WarpTunnelDown"'
+    target_matchers:
+      - 'alertname = "WarpDegraded"'
+    equal: ["instance"]
 
 receivers:
   - name: telegram

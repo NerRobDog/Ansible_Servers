@@ -7,6 +7,25 @@
     remove_orphans: true
   when: monitoring_stack_manage_runtime | bool
 
+# Handlers run in the order listed here, so these restarts follow `compose up` above: a
+# container it has just recreated is restarted once more, which is harmless, and one it left
+# alone picks up the re-rendered single-file bind mount.
+- name: Restart Prometheus container
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_stack_install_path }}"
+    services: [prometheus]
+    dependencies: false
+    state: restarted
+  when: monitoring_stack_manage_runtime | bool
+
+- name: Restart Alertmanager container
+  community.docker.docker_compose_v2:
+    project_src: "{{ monitoring_stack_install_path }}"
+    services: [alertmanager]
+    dependencies: false
+    state: restarted
+  when: monitoring_stack_manage_runtime | bool
+
 - name: Restart monitoring stack boot unit
   ansible.builtin.systemd:
     name: "{{ monitoring_stack_boot_unit_name }}"
