@@ -26,6 +26,7 @@
 
 - name: Read tailnet hostname on OpenWrt
   ansible.builtin.raw: "tailscale status --json --peers=false 2>/dev/null || true"
+  check_mode: false  # read-only probe; raw skips itself in --check otherwise
   register: tailscale_self_status_openwrt_cmd
   changed_when: false
   when:
@@ -60,7 +61,8 @@
     - not (tailscale_is_openwrt | bool)
     - tailscale_current_hostname != tailscale_hostname
 
-# raw ignores check mode, so guard it explicitly.
+# raw already skips itself in --check; the explicit guard keeps a rename out of check mode
+# even if someone later adds check_mode: false here the way the read task does.
 - name: Set tailnet hostname on OpenWrt
   ansible.builtin.raw: "tailscale set --hostname={{ tailscale_hostname | quote }}"
   changed_when: true

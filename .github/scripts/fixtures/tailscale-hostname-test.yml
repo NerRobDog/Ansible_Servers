@@ -5,7 +5,7 @@
   gather_facts: false
   vars:
     tailscale_enabled: true
-    tailscale_is_openwrt: false
+    tailscale_is_openwrt: "{{ fixture_openwrt | default(false) | bool }}"
   tasks:
     - name: Pin the tailnet hostname
       ansible.builtin.include_role:
