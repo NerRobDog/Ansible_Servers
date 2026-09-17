@@ -14,11 +14,19 @@ except ImportError:  # the contract test imports this file without Ansible on sy
 _ASSIGNMENT = re.compile(r"^([A-Za-z]+)\s*=\s*(.+?)$")
 
 
-def parse_wgcf_profile(text):
-    # Error messages name missing fields only: the profile holds the WARP private key,
-    # and a filter error ends up in the deploy log and the Telegram alert tail.
+_LABELS = {
+    "private_key": "Interface.PrivateKey",
+    "peer_public_key": "Peer.PublicKey",
+    "address_v4": "Interface.Address (IPv4)",
+    "endpoint": "Peer.Endpoint",
+}
+_EMPTY = "whole profile (empty)"
+
+
+def _extract(text):
+    """Return (fields, missing labels). Labels never include values from the profile."""
     if not isinstance(text, str) or not text.strip():
-        raise AnsibleFilterError("wgcf profile is empty")
+        return {}, [_EMPTY]
 
     section = None
     fields = {}
@@ -42,13 +50,21 @@ def parse_wgcf_profile(text):
         "address_v4": ipv4_addresses[0] if ipv4_addresses else "",
         "endpoint": fields.get(("peer", "endpoint"), ""),
     }
-    labels = {
-        "private_key": "Interface.PrivateKey",
-        "peer_public_key": "Peer.PublicKey",
-        "address_v4": "Interface.Address (IPv4)",
-        "endpoint": "Peer.Endpoint",
-    }
-    missing = [labels[key] for key, value in result.items() if not value]
+    return result, [_LABELS[key] for key, value in result.items() if not value]
+
+
+def wgcf_profile_missing_fields(text):
+    # configure.yml asserts on this list with no_log off, so a broken profile is reported
+    # by field name while the parse task that holds the key material stays no_log.
+    return _extract(text)[1]
+
+
+def parse_wgcf_profile(text):
+    # Error messages name missing fields only: the profile holds the WARP private key,
+    # and a filter error ends up in the deploy log and the Telegram alert tail.
+    result, missing = _extract(text)
+    if missing == [_EMPTY]:
+        raise AnsibleFilterError("wgcf profile is empty")
     if missing:
         raise AnsibleFilterError("wgcf profile is missing: " + ", ".join(missing))
     return result
@@ -56,4 +72,7 @@ def parse_wgcf_profile(text):
 
 class FilterModule:
     def filters(self):
-        return {"parse_wgcf_profile": parse_wgcf_profile}
+        return {
+            "parse_wgcf_profile": parse_wgcf_profile,
+            "wgcf_profile_missing_fields": wgcf_profile_missing_fields,
+        }

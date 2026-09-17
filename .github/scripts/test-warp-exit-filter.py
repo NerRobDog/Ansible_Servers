@@ -78,9 +78,23 @@ def test_empty_profile_rejected() -> None:
     expect_error(load_plugin().parse_wgcf_profile, "   \n", "empty")
 
 
+def test_missing_fields_lists_labels_only() -> None:
+    # configure.yml asserts on this list without no_log, so it must never carry values.
+    missing_fields = load_plugin().wgcf_profile_missing_fields
+    assert_true(missing_fields(PROFILE_TW_GERM_1_SHAPE) == [], "A complete profile must have no missing fields")
+    text = PROFILE_TW_GERM_1_SHAPE.replace("PrivateKey = FAKEprivateKEYaaaaaaaaaaaaaaaaaaaaaaaaaaaa=\n", "")
+    text = text.replace("Endpoint = engage.cloudflareclient.com:2408\n", "")
+    missing = missing_fields(text)
+    assert_true(missing == ["Interface.PrivateKey", "Peer.Endpoint"], f"Unexpected missing fields: {missing}")
+    assert_true(missing_fields("   \n") == ["whole profile (empty)"], "An empty profile must be reported as empty")
+    assert_true(missing_fields(None) == ["whole profile (empty)"], "A non-string profile must be reported as empty")
+    assert_true("FAKE" not in repr(missing_fields(text)), "Missing fields must not leak key material")
+
+
 def test_registered_as_ansible_filter() -> None:
     filters = load_plugin().FilterModule().filters()
-    assert_true("parse_wgcf_profile" in filters, f"Filter not registered: {sorted(filters)}")
+    for name in ("parse_wgcf_profile", "wgcf_profile_missing_fields"):
+        assert_true(name in filters, f"Filter {name} not registered: {sorted(filters)}")
 
 
 def main() -> int:
@@ -90,6 +104,7 @@ def main() -> int:
         test_missing_ipv4_address_rejected,
         test_missing_private_key_rejected,
         test_empty_profile_rejected,
+        test_missing_fields_lists_labels_only,
         test_registered_as_ansible_filter,
     ]
     for test in tests:

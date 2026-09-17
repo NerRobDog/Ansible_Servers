@@ -27,7 +27,8 @@
         effective_feature_remnawave_node: "{{ fleet_host_cfg.get('features', {}).get('feature_remnawave_node', feature_remnawave_node) | bool }}"
         effective_feature_caddy_node: "{{ fleet_host_cfg.get('features', {}).get('feature_caddy_node', feature_caddy_node) | bool }}"
         effective_feature_node_tuning: "{{ fleet_host_cfg.get('features', {}).get('feature_node_tuning', feature_node_tuning) | bool }}"
-        effective_warp_mode: "{{ fleet_host_cfg.get('remnawave', {}).get('warp_mode', 'none') | string | trim | lower }}"
+        # Empty or blank maps to none, as normalize_warp_mode in render-fleet-runtime.py does.
+        effective_warp_mode: "{{ (fleet_host_cfg.get('remnawave', {}).get('warp_mode') | default('', true) | string | trim | lower) or 'none' }}"
         effective_feature_monitoring_agent: >-
           {{ fleet_host_cfg.get('features', {}).get('feature_monitoring_agent', feature_monitoring_agent) | bool }}
         effective_feature_monitoring_stack: >-
@@ -58,6 +59,14 @@
           - effective_custom_roles is iterable
           - effective_custom_roles is not string
         fail_msg: "custom_roles must be a list of local role names."
+      tags: [always]
+
+    - name: Validate WARP mode
+      ansible.builtin.assert:
+        that:
+          - effective_warp_mode in ['none', 'all', 'inbound']
+        fail_msg: "remnawave.warp_mode must be one of none, all, inbound (got {{ effective_warp_mode }})."
+        quiet: true
       tags: [always]
 
     - name: Resolve host-level remnawave variables from fleet config

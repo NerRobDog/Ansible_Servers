@@ -20,6 +20,22 @@
       register: warp_exit_profile_raw
       no_log: true
 
+    # The parse task below is no_log, which would also hide the filter's field-name-only
+    # error. Collect the missing field names first (labels only, never values) and fail
+    # on them in a task whose message is shown.
+    - name: List fields missing from the wgcf profile
+      ansible.builtin.set_fact:
+        warp_exit_profile_missing: "{{ warp_exit_profile_raw.content | b64decode | wgcf_profile_missing_fields }}"
+      no_log: true
+
+    - name: Require a complete wgcf profile
+      ansible.builtin.assert:
+        that:
+          - warp_exit_profile_missing | length == 0
+        fail_msg: >-
+          {{ warp_exit_dir }}/wgcf-profile.conf is missing: {{ warp_exit_profile_missing | join(', ') }}.
+        quiet: true
+
     - name: Parse the wgcf WireGuard profile
       ansible.builtin.set_fact:
         warp_exit_profile: "{{ warp_exit_profile_raw.content | b64decode | parse_wgcf_profile }}"

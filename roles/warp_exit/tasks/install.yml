@@ -6,9 +6,10 @@
       - ansible_architecture == "x86_64"
     fail_msg: "Role warp_exit supports Debian/Ubuntu on x86_64 only: wgcf is pinned to the linux_amd64 build."
 
+# curl is used by verify.yml and the probe; do not rely on another role installing it.
 - name: Install WireGuard tools
   ansible.builtin.apt:
-    name: wireguard-tools
+    name: [wireguard-tools, curl]
     state: present
     update_cache: true
     cache_valid_time: 3600
