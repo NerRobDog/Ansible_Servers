@@ -3,6 +3,9 @@ tailscale_enabled: true
 tailscale_state: present
 tailscale_auth_key_env: TAILSCALE_AUTH_KEY
 tailscale_extra_args: []
+# Tailnet hostname. Defaults to the inventory alias with underscores turned into hyphens
+# (wrt_nab -> wrt-nab). Set to an empty string to leave the provider hostname alone.
+tailscale_hostname: "{{ inventory_hostname | lower | replace('_', '-') }}"
 
 tailscale_package: tailscale
 tailscale_service_name: tailscaled

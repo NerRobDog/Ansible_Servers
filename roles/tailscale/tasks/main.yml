@@ -461,3 +461,7 @@
   changed_when: false
   when: tailscale_enabled | bool
   tags: [tailscale]
+
+- name: Pin tailnet hostname to the fleet alias
+  ansible.builtin.import_tasks: hostname.yml
+  tags: [tailscale]
