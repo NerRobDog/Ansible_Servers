@@ -20,7 +20,7 @@ list_tasks() {
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-for tags in "" warp remnawave monitoring "warp,monitoring" "remnawave,node"; do
+for tags in "" warp remnawave node monitoring "warp,monitoring" "remnawave,node"; do
   listing="$(list_tasks "$tags")"
   if grep -qF "$reregister_marker" <<< "$listing"; then
     fail "--tags '${tags:-<none>}' would run WARP re-registration"
@@ -31,6 +31,12 @@ done
 listing="$(list_tasks warp)"
 grep -qF "$verify_marker" <<< "$listing" || fail "--tags warp does not include the tunnel verification"
 echo "PASS: --tags warp includes the tunnel verification"
+
+# remnawave_node is tagged [remnawave, node]; a `--tags node` redeploy must not start the node
+# on a WARP host without first proving the tunnel carries traffic.
+listing="$(list_tasks node)"
+grep -qF "$verify_marker" <<< "$listing" || fail "--tags node does not include the tunnel verification"
+echo "PASS: --tags node includes the tunnel verification"
 
 listing="$(list_tasks warp_reregister)"
 grep -qF "$reregister_marker" <<< "$listing" || fail "--tags warp_reregister does not include re-registration"
