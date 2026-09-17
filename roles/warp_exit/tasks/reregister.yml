@@ -9,7 +9,7 @@
   block:
     - name: Set the WARP backup directory
       ansible.builtin.set_fact:
-        warp_exit_backup_dir: "{{ warp_exit_dir }}/backup-{{ ansible_date_time.iso8601_basic_short }}"
+        warp_exit_backup_dir: "{{ warp_exit_dir }}/backup-{{ ansible_date_time.iso8601 | regex_replace('[-:]', '') }}"
 
     - name: Create the WARP backup directory
       ansible.builtin.file:

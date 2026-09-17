@@ -10,7 +10,8 @@ warp_exit_interface: warp
 warp_exit_mtu: 1280
 warp_exit_keepalive: 25
 
-warp_exit_verify_retries: 5
+# Total number of verification attempts, not retries: ansible-core runs a task 1 + `retries` times.
+warp_exit_verify_attempts: 5
 warp_exit_verify_delay: 6
 warp_exit_trace_url: https://www.cloudflare.com/cdn-cgi/trace
 

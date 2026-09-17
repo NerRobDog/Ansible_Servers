@@ -11,7 +11,8 @@
       [ -n "$handshake" ] && [ "$handshake" != "0" ] && [ "$warp_on" = yes ]
     executable: /bin/bash
   register: warp_exit_verify
-  retries: "{{ warp_exit_verify_retries }}"
+  # `retries` counts runs after the first one, so attempts - 1 gives exactly warp_exit_verify_attempts runs.
+  retries: "{{ warp_exit_verify_attempts | int - 1 }}"
   delay: "{{ warp_exit_verify_delay }}"
   until: warp_exit_verify.rc == 0
   failed_when: false
@@ -21,7 +22,7 @@
 - name: Fail closed when WARP does not carry traffic
   ansible.builtin.fail:
     msg: >-
-      WARP exit on {{ inventory_hostname }} does not carry traffic after {{ warp_exit_verify_retries }} attempts
+      WARP exit on {{ inventory_hostname }} does not carry traffic after {{ warp_exit_verify_attempts }} attempts
       ({{ warp_exit_verify.stdout | default('no output') }}). The node is not deployed on this host:
       its profile routes client traffic into the {{ warp_exit_interface }} interface.
   when:
