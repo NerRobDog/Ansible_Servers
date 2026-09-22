@@ -1,6 +1,6 @@
 ---
-warp_exit_wgcf_version: "2.2.32"
-warp_exit_wgcf_sha256: "2ff97f2201972ce582a424455d50a3719a380eef0cd1f3144f7779348e122a2c"
+warp_exit_wgcf_version: "2.3.0"
+warp_exit_wgcf_sha256: "01614e38c0eb5f3405232e71cfaf02d64d4809e4988ad8f5a8071af16d193405"
 warp_exit_wgcf_url: "https://github.com/ViRb3/wgcf/releases/download/v{{ warp_exit_wgcf_version }}/wgcf_{{ warp_exit_wgcf_version }}_linux_amd64"
 warp_exit_wgcf_path: /usr/local/bin/wgcf
 
