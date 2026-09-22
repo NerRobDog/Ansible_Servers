@@ -52,6 +52,9 @@ jobs:
       - name: mihomo routing contract tests
         run: python .github/scripts/test-mihomo-routing.py
 
+      - name: bootstrap fresh-host contract tests
+        run: python .github/scripts/test-bootstrap-fresh-host.py
+
       - name: warp_exit filter contract tests
         run: python .github/scripts/test-warp-exit-filter.py
 
