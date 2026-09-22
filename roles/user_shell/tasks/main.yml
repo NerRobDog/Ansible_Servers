@@ -21,6 +21,22 @@
   when: ansible_os_family == "RedHat"
   tags: [pipx]
 
+# Bootstrap skips the docker role, so on a fresh OS the `docker` group does not exist yet
+# and the user module refuses to add the deploy user to it. The docker package reuses an
+# existing group, so creating it here is harmless.
+- name: Ensure supplementary groups for deployment user exist
+  ansible.builtin.group:
+    name: "{{ item }}"
+    state: present
+  loop: >-
+    {{
+      new_user_groups
+      | map('regex_replace', '^wheel$', (ansible_os_family == 'Debian') | ternary('sudo', 'wheel'))
+      | list
+    }}
+  when: create_user | bool
+  tags: [user]
+
 - name: Create deployment user
   ansible.builtin.user:
     name: "{{ new_user }}"

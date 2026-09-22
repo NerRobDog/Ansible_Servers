@@ -133,11 +133,11 @@
       tags: [tailscale]
 
     - role: monitoring_agent
-      when: effective_feature_monitoring_agent | bool
+      when: effective_run_main_stack | bool and (effective_feature_monitoring_agent | bool)
       tags: [monitoring, metrics, agent]
 
     - role: monitoring_stack
-      when: effective_feature_monitoring_stack | bool
+      when: effective_run_main_stack | bool and (effective_feature_monitoring_stack | bool)
       tags: [monitoring, metrics, grafana, prometheus, loki]
 
     # No role-level tags on purpose: they would be inherited by the `never`-tagged
