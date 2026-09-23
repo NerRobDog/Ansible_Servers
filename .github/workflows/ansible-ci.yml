@@ -84,6 +84,9 @@ jobs:
       - name: tailscale hostname contract test
         run: bash .github/scripts/test-tailscale-hostname.sh
 
+      - name: ssh_lockdown effective sshd config test
+        run: bash .github/scripts/test-ssh-lockdown.sh
+
       - name: Syntax check playbook-yusic-worker.yml
         run: ansible-playbook -i hosts.example.ini playbook-yusic-worker.yml --syntax-check
 

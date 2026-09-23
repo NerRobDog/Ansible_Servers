@@ -20,12 +20,47 @@
     mode: "0755"
   tags: [ssh, lockdown]
 
+# sshd keeps the first value it reads for a keyword and expands sshd_config.d/*.conf in
+# lexical order, so the drop-in has to sort before 50-cloud-init.conf, which Ubuntu cloud
+# images ship with "PasswordAuthentication yes". Under the old 99- name it lost to it.
 - name: Deploy SSH hardening drop-in config
   ansible.builtin.template:
-    src: 99-ansible-hardening.conf.j2
-    dest: /etc/ssh/sshd_config.d/99-ansible-hardening.conf
+    src: ansible-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/00-ansible-hardening.conf
     owner: root
     group: root
     mode: "0644"
   notify: Apply SSH lockdown configuration
+  tags: [ssh, lockdown]
+
+- name: Remove legacy drop-in that sorted after cloud-init
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d/99-ansible-hardening.conf
+    state: absent
+  notify: Apply SSH lockdown configuration
+  tags: [ssh, lockdown]
+
+- name: Apply SSH lockdown before checking it
+  ansible.builtin.meta: flush_handlers
+  tags: [ssh, lockdown]
+
+# In check mode nothing was written, so there is nothing to verify yet.
+- name: Read effective sshd configuration
+  ansible.builtin.command: "{{ sshd_binary_path.stdout }} -T"
+  register: ssh_lockdown_effective
+  changed_when: false
+  when: not ansible_check_mode
+  tags: [ssh, lockdown]
+
+- name: Assert sshd enforces the lockdown settings
+  ansible.builtin.assert:
+    that:
+      - ("passwordauthentication " ~ ssh_lockdown_password_authentication) in ssh_lockdown_effective.stdout_lines
+      - ("permitrootlogin " ~ ssh_lockdown_permit_root_login) in ssh_lockdown_effective.stdout_lines
+    fail_msg: >-
+      sshd -T reports
+      {{ ssh_lockdown_effective.stdout_lines | select('match', '^(passwordauthentication|permitrootlogin) ') | list }};
+      another file under /etc/ssh overrides 00-ansible-hardening.conf.
+    quiet: true
+  when: not ansible_check_mode
   tags: [ssh, lockdown]

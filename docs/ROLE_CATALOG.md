@@ -154,6 +154,8 @@ hosts:
 ### `ssh_lockdown`
 - Назначение: отключение SSH password auth и root login.
 - Запуск: в режиме `lockdown`.
+- Drop-in называется `/etc/ssh/sshd_config.d/00-ansible-hardening.conf`: sshd берёт первое прочитанное значение, а файлы `sshd_config.d` читает по алфавиту, поэтому файл должен идти раньше `50-cloud-init.conf` с `PasswordAuthentication yes`. Старый `99-ansible-hardening.conf` роль удаляет.
+- После рестарта роль читает `sshd -T` и падает, если пароль или root login всё ещё разрешены. Проверяет `.github/scripts/test-ssh-lockdown.sh` (контейнер с настоящим sshd).
 
 ## Yusic worker roles
 
