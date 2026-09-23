@@ -1,0 +1,6 @@
+# Drives roles/ssh_lockdown against a throwaway container with a real sshd.
+- name: SSH lockdown contract
+  hosts: all
+  gather_facts: true
+  roles:
+    - role: ssh_lockdown
