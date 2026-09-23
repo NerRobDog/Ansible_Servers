@@ -68,7 +68,7 @@ pipx_packages: []
 
 # RemaWave node defaults (safe global defaults)
 remnawave_node_enabled: false
-remnawave_node_image: remnawave/node:latest
+remnawave_node_image: remnawave/node:3.4.1
 remnawave_node_port: 3001
 remnawave_node_secret_key: ""
 remnawave_node_install_path: /opt/remnanode
