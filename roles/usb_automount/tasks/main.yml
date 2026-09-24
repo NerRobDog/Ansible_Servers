@@ -1,0 +1,103 @@
+---
+- name: Validate usb_automount settings
+  ansible.builtin.assert:
+    that:
+      - usb_automount_root is string
+      - usb_automount_root | length > 0
+      - usb_automount_root.startswith('/')
+      - usb_automount_owner | length > 0
+      - usb_automount_group | length > 0
+      - usb_automount_options is mapping
+      - usb_automount_skip_fs is iterable
+      - usb_automount_skip_fs is not string
+    fail_msg: "Invalid usb_automount role settings."
+  when: usb_automount_enabled | bool
+  tags: [usb_automount]
+
+- name: Validate supported OS for usb_automount role
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+    fail_msg: "usb_automount role currently supports Debian/Ubuntu hosts only."
+  when: usb_automount_enabled | bool
+  tags: [usb_automount]
+
+- name: Install usb_automount packages
+  ansible.builtin.apt:
+    name: "{{ usb_automount_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: usb_automount_enabled | bool
+  tags: [usb_automount]
+
+- name: Ensure mount root exists
+  ansible.builtin.file:
+    path: "{{ usb_automount_root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: usb_automount_enabled | bool
+  tags: [usb_automount]
+
+- name: Verify owner user exists
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ usb_automount_owner }}"
+  when: usb_automount_enabled | bool
+  tags: [usb_automount]
+
+- name: Verify owner group exists
+  ansible.builtin.getent:
+    database: group
+    key: "{{ usb_automount_group }}"
+  when: usb_automount_enabled | bool
+  tags: [usb_automount]
+
+- name: Install usb-automount script
+  ansible.builtin.template:
+    src: usb-automount.sh.j2
+    dest: "{{ usb_automount_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when: usb_automount_enabled | bool
+  tags: [usb_automount]
+
+- name: Install usb-automount@.service unit
+  ansible.builtin.template:
+    src: usb-automount@.service.j2
+    dest: "{{ usb_automount_systemd_unit_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: usb_automount_systemd_reload
+  when: usb_automount_enabled | bool
+  tags: [usb_automount]
+
+# udisks2 is pulled in by KDE / Plasma and provides its own desktop-side
+# auto-mount via polkit. We don't want it competing with our udev rule for
+# the same /dev/sd* events — when both fire, udisks2 mounts under
+# /media/<user>/<label> with the *active session's* uid, ignoring our
+# usb_automount_owner setting. Mask it so it stays off across reboots.
+- name: Mask udisks2 (conflicts with udev-driven automount)
+  ansible.builtin.systemd:
+    name: udisks2.service
+    enabled: false
+    masked: true
+    state: stopped
+  failed_when: false
+  when: usb_automount_enabled | bool
+  tags: [usb_automount]
+
+- name: Install usb-automount udev rule
+  ansible.builtin.template:
+    src: 99-usb-automount.rules.j2
+    dest: "{{ usb_automount_udev_rule_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: usb_automount_udev_reload
+  when: usb_automount_enabled | bool
+  tags: [usb_automount]

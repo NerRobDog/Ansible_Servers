@@ -1,0 +1,78 @@
+---
+rclone_serve_enabled: true
+
+# Pin a specific rclone version. We install from the upstream zip — distro
+# package lags badly. Keep this in sync with rclone_serve_sha256_amd64 below;
+# verify with: curl -sSL <release_url> | shasum -a 256
+rclone_serve_version: "1.71.0"
+rclone_serve_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+rclone_serve_release_base_url: "https://downloads.rclone.org"
+rclone_serve_release_url_template: >-
+  {{ rclone_serve_release_base_url }}/v{{ rclone_serve_version }}/rclone-v{{ rclone_serve_version }}-linux-{{ rclone_serve_arch }}.zip
+# sha256 of the release zip. Empty = skip verification (NOT recommended).
+rclone_serve_sha256_amd64: "3ddbcfd535ef2e6eb00cd006831766537f1fef1c8baeed1ee4632e7bcc699e93"
+rclone_serve_sha256_arm64: "b710ac2ded37261d2cc6ab046dcd644828944524cf1ee7c2b17dd746f0fd8684"
+
+rclone_serve_install_path: /usr/local/bin/rclone
+rclone_serve_user: deploy
+rclone_serve_group: deploy
+rclone_serve_config_dir: /etc/rclone
+rclone_serve_config_path: "{{ rclone_serve_config_dir }}/rclone.conf"
+
+# Per-user rclone log directory.
+rclone_serve_log_dir: /var/log/rclone
+
+# Inline rclone.conf body. Provide via vault or fleet runtime vars.
+# Example:
+#   rclone_serve_config: |
+#     [gdrive]
+#     type = drive
+#     scope = drive
+#     token = {"access_token":"..."}
+#
+#     [b2-cold]
+#     type = b2
+#     account = ...
+#     key = ...
+rclone_serve_config: ""
+
+# Default bind for instances that don't override `bind_address`. 0.0.0.0
+# makes the share visible on every interface — LAN, ZeroTier, anything else
+# attached. The host firewall (role: firewall) is what gates real exposure.
+# Override per-instance with `bind_address` to tighten (e.g. ZeroTier IP only).
+rclone_serve_bind_address: "0.0.0.0"
+
+# Each entry produces an rclone-serve@<name>.service systemd instance.
+#   name:     unit instance name (-> rclone-serve@<name>.service)
+#   protocol: rcd | webdav | sftp | http | restic | s3 | nfs | docker | dlna | ftp
+#   remote:   rclone remote path, e.g. "gdrive:" or "/media".
+#             Ignored when protocol == "rcd" (rcd controls all remotes from rclone.conf).
+#   port:     listen port (rcd default = 5572)
+#   user:     basic-auth user (optional). For rcd this becomes --rc-user.
+#   pass:     basic-auth password (optional, but always set for rcd unless you
+#             really know what you're doing — rcd exposes the full rclone API).
+#   extra_args: list of extra CLI flags
+#                 (rcd: typically --rc-web-gui --rc-allow-origin '*'
+#                       --rc-web-gui-no-open-browser)
+rclone_serve_instances: []
+# Example:
+#   rclone_serve_instances:
+#     - name: media-webdav
+#       protocol: webdav
+#       remote: /media
+#       port: 8089
+#       user: deploy
+#       pass: "{{ vault_rclone_webdav_password }}"
+#       extra_args:
+#         - "--read-only"
+#     - name: gdrive-sftp
+#       protocol: sftp
+#       remote: "gdrive:"
+#       port: 2022
+#       user: deploy
+#       pass: "{{ vault_rclone_sftp_password }}"
+
+rclone_serve_systemd_template_path: /etc/systemd/system/rclone-serve@.service
+rclone_serve_env_dir: /etc/rclone/instances

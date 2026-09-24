@@ -1,0 +1,11 @@
+---
+- name: Restart vncserver
+  ansible.builtin.command:
+    cmd: "systemctl --user restart vncserver@:{{ vnc_desktop_display }}.service"
+  become: true
+  become_user: "{{ vnc_desktop_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ vnc_desktop_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ vnc_desktop_uid }}/bus"
+  changed_when: true
+  listen: vnc_desktop_restart

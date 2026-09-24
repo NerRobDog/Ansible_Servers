@@ -1,0 +1,32 @@
+# Managed by Ansible role jellyfin. Do not edit.
+services:
+  jellyfin:
+    image: {{ jellyfin_image }}
+    container_name: {{ jellyfin_container_name }}
+    restart: unless-stopped
+    network_mode: host
+    user: "{{ jellyfin_uid }}:{{ jellyfin_gid }}"
+    environment:
+      TZ: "{{ ansible_date_time.tz | default('UTC') }}"
+{% if jellyfin_published_url | length > 0 %}
+      JELLYFIN_PublishedServerUrl: "{{ jellyfin_published_url }}"
+{% endif %}
+{% for k, v in jellyfin_extra_env.items() %}
+      {{ k }}: "{{ v }}"
+{% endfor %}
+    volumes:
+      - {{ jellyfin_data_dir }}:/config
+      - {{ jellyfin_cache_dir }}:/cache
+{% for lib in jellyfin_libraries %}
+      - {{ lib.host }}:{{ lib.container }}{% if lib.ro | default(false) %}:ro{% endif %}
+
+{% endfor %}
+{% if jellyfin_enable_qsv %}
+    devices:
+{% for dev in jellyfin_dri_devices %}
+      - {{ dev }}:{{ dev }}
+{% endfor %}
+    group_add:
+      - "{{ render_gid }}"
+      - "{{ video_gid }}"
+{% endif %}

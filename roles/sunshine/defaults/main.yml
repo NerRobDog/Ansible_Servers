@@ -1,0 +1,29 @@
+---
+sunshine_enabled: true
+
+# Pin the upstream .deb release. Verify with:
+#   curl -sSL <release_url> | shasum -a 256
+sunshine_version: "2025.628.4510"
+sunshine_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+sunshine_release_base_url: "https://github.com/LizardByte/Sunshine/releases/download"
+# LizardByte ships per-distro debs — for Ubuntu 24.04 Noble.
+sunshine_deb_filename: "sunshine-ubuntu-24.04-{{ sunshine_arch }}.deb"
+sunshine_deb_url: "{{ sunshine_release_base_url }}/v{{ sunshine_version }}/{{ sunshine_deb_filename }}"
+sunshine_deb_sha256: ""  # populate after pinning the release
+
+sunshine_user: deploy
+sunshine_group: deploy
+
+# Sunshine is run as the user that owns the active session — same as
+# tv_kiosk_user (Kodi). User unit; we install but don't start automatically:
+# the unit comes up with the graphical session.
+sunshine_systemd_user_unit_path: "/home/{{ sunshine_user }}/.config/systemd/user/sunshine.service"
+
+# Network: Moonlight clients pair on UDP/TCP 47984/47989/48010 + RTP range.
+# We open these in the host firewall via the firewall role; here we just
+# document for traceability.
+sunshine_ports:
+  tcp: [47984, 47989, 48010]
+  udp: [47998, 47999, 48000, 48002, 48010]

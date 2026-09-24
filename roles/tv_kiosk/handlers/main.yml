@@ -1,0 +1,6 @@
+---
+- name: Restart greetd
+  ansible.builtin.systemd:
+    name: greetd
+    state: restarted
+  listen: tv_kiosk_restart_greetd

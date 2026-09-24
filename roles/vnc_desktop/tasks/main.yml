@@ -1,0 +1,202 @@
+---
+- name: Validate vnc_desktop settings
+  ansible.builtin.assert:
+    that:
+      - vnc_desktop_user | length > 0
+      - vnc_desktop_display | int > 0
+      - vnc_desktop_environment in ["kde", "gnome", "xfce"]
+    fail_msg: "Invalid vnc_desktop role settings."
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+- name: Validate supported OS for vnc_desktop role
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+      - ansible_distribution == "Ubuntu"
+      - ansible_distribution_major_version | int >= 24
+    fail_msg: "vnc_desktop role currently supports Ubuntu 24.04+."
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+- name: Read VNC password from environment
+  ansible.builtin.set_fact:
+    vnc_desktop_password_value: "{{ lookup('env', vnc_desktop_password_env) | default('', true) | trim }}"
+  no_log: true
+  changed_when: false
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+- name: Require VNC password
+  ansible.builtin.assert:
+    that:
+      - vnc_desktop_password_value | length > 0
+    fail_msg: >-
+      VNC password must be set. Provide {{ vnc_desktop_password_env }} via
+      environment.
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+# VncAuth uses a DES-derived 56-bit key from the password; vncpasswd silently
+# uses only the first 8 chars. Anything beyond that is dead bytes — works,
+# but you're not getting more entropy than 8 chars.
+- name: Warn if VNC password exceeds 8 chars
+  ansible.builtin.debug:
+    msg: >-
+      WARN: VNC password is {{ vnc_desktop_password_value | length }} chars;
+      VncAuth only uses the first 8 — extra chars contribute no entropy.
+  when:
+    - vnc_desktop_enabled | bool
+    - vnc_desktop_password_value | length > 8
+  tags: [vnc_desktop]
+
+- name: Resolve desktop environment package list
+  ansible.builtin.set_fact:
+    vnc_desktop_de_packages: >-
+      {{
+        vnc_desktop_packages_kde if vnc_desktop_environment == 'kde'
+        else (
+          vnc_desktop_packages_gnome if vnc_desktop_environment == 'gnome'
+          else vnc_desktop_packages_xfce
+        )
+      }}
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+- name: Install TigerVNC server packages
+  ansible.builtin.apt:
+    name: "{{ vnc_desktop_server_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+- name: Install desktop environment packages
+  ansible.builtin.apt:
+    name: "{{ vnc_desktop_de_packages }}"
+    state: present
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+# SDDM ships with KDE Plasma but would compete with greetd if enabled. Make
+# sure it never starts.
+- name: Disable SDDM (conflicts with greetd kiosk)
+  ansible.builtin.systemd:
+    name: sddm
+    enabled: false
+    state: stopped
+  failed_when: false
+  when:
+    - vnc_desktop_enabled | bool
+    - vnc_desktop_environment == "kde"
+  tags: [vnc_desktop]
+
+- name: Resolve VNC user uid
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ vnc_desktop_user }}"
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+- name: Resolve VNC user uid fact
+  ansible.builtin.set_fact:
+    vnc_desktop_uid: "{{ getent_passwd[vnc_desktop_user][1] }}"
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+- name: Ensure ~/.vnc + user systemd dir exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ vnc_desktop_user }}"
+    group: "{{ vnc_desktop_group }}"
+    mode: "0700"
+  loop:
+    - "{{ vnc_desktop_dir }}"
+    - "/home/{{ vnc_desktop_user }}/.config/systemd/user"
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+# vncpasswd reads from stdin, writes encrypted password file. Idempotent
+# wrt to file presence — we always rewrite to keep the env value canonical.
+- name: Write VNC password file
+  ansible.builtin.shell:
+    cmd: "echo '{{ vnc_desktop_password_value }}' | vncpasswd -f > {{ vnc_desktop_passwd_file }}.tmp && mv {{ vnc_desktop_passwd_file }}.tmp {{ vnc_desktop_passwd_file }}"
+  no_log: true
+  changed_when: true
+  notify: vnc_desktop_restart
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+- name: Set VNC password file ownership + perms
+  ansible.builtin.file:
+    path: "{{ vnc_desktop_passwd_file }}"
+    owner: "{{ vnc_desktop_user }}"
+    group: "{{ vnc_desktop_group }}"
+    mode: "0600"
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+- name: Render xstartup script
+  ansible.builtin.template:
+    src: xstartup.j2
+    dest: "{{ vnc_desktop_xstartup_file }}"
+    owner: "{{ vnc_desktop_user }}"
+    group: "{{ vnc_desktop_group }}"
+    mode: "0755"
+  notify: vnc_desktop_restart
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+- name: Render TigerVNC config
+  ansible.builtin.template:
+    src: vnc-config.j2
+    dest: "{{ vnc_desktop_config_file }}"
+    owner: "{{ vnc_desktop_user }}"
+    group: "{{ vnc_desktop_group }}"
+    mode: "0644"
+  notify: vnc_desktop_restart
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+- name: Render vncserver@.service user systemd unit
+  ansible.builtin.template:
+    src: vncserver@.service.j2
+    dest: "{{ vnc_desktop_systemd_user_unit_path }}"
+    owner: "{{ vnc_desktop_user }}"
+    group: "{{ vnc_desktop_group }}"
+    mode: "0644"
+  notify: vnc_desktop_restart
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+- name: Ensure linger is enabled for VNC user (autostart sans login)
+  ansible.builtin.command: "loginctl enable-linger {{ vnc_desktop_user }}"
+  changed_when: false
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+- name: Reload user systemd daemon
+  ansible.builtin.command:
+    cmd: "systemctl --user daemon-reload"
+  become: true
+  become_user: "{{ vnc_desktop_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ vnc_desktop_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ vnc_desktop_uid }}/bus"
+  changed_when: true
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]
+
+- name: Enable + start vncserver@:N user service
+  ansible.builtin.command:
+    cmd: "systemctl --user enable --now vncserver@:{{ vnc_desktop_display }}.service"
+  become: true
+  become_user: "{{ vnc_desktop_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ vnc_desktop_uid }}"
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ vnc_desktop_uid }}/bus"
+  changed_when: true
+  when: vnc_desktop_enabled | bool
+  tags: [vnc_desktop]

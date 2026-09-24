@@ -1,0 +1,53 @@
+---
+vnc_desktop_enabled: true
+
+# User that the VNC session runs under. Same user as Kodi-kiosk on tty1 —
+# different display number (:1) and different graphical server (Xvnc), so
+# the two sessions coexist without conflict.
+vnc_desktop_user: deploy
+vnc_desktop_group: deploy
+
+# Display number → port. Xvnc :1 = 5901, :2 = 5902, ... Apple Screen Sharing
+# wants port 5900 by default but accepts vnc://host:5901 explicitly.
+vnc_desktop_display: 1
+vnc_desktop_geometry: "1920x1080"
+vnc_desktop_color_depth: 24
+
+# Desktop environment to start inside the VNC session.
+# Supported: "kde", "gnome", "xfce".
+vnc_desktop_environment: "kde"
+
+# Apt packages per DE. KDE Plasma is the heavy default; switch
+# vnc_desktop_environment to "xfce" for a 5x lighter, smoother-via-VNC
+# alternative, or "gnome" for stock Ubuntu look.
+vnc_desktop_packages_kde:
+  - kde-plasma-desktop
+  - kwin-x11
+  - sddm  # Plasma pulls it transitively; we won't enable it (would fight greetd)
+  - dbus-x11
+vnc_desktop_packages_gnome:
+  - ubuntu-desktop-minimal
+  - gnome-session
+  - dbus-x11
+vnc_desktop_packages_xfce:
+  - xfce4
+  - xfce4-goodies
+  - dbus-x11
+
+vnc_desktop_server_packages:
+  - tigervnc-standalone-server
+  - tigervnc-tools
+  - tigervnc-common
+
+# Read VNC password from environment. RFB protocol caps it at 8 chars —
+# Apple Screen Sharing silently truncates anything longer. Keep it short.
+vnc_desktop_password_env: "VNC_PASSWORD"
+
+# Paths under the user's home.
+vnc_desktop_dir: "/home/{{ vnc_desktop_user }}/.vnc"
+vnc_desktop_passwd_file: "{{ vnc_desktop_dir }}/passwd"
+vnc_desktop_xstartup_file: "{{ vnc_desktop_dir }}/xstartup"
+vnc_desktop_config_file: "{{ vnc_desktop_dir }}/config"
+
+vnc_desktop_systemd_user_unit_path: >-
+  /home/{{ vnc_desktop_user }}/.config/systemd/user/vncserver@.service
