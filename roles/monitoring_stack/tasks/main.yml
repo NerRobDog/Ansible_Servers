@@ -61,6 +61,7 @@
         | selectattr('value.features.feature_monitoring_agent', 'defined')
         | selectattr('value.features.feature_monitoring_agent')
         | list
+        + (monitoring_stack_extra_scrape_hosts | default([]))
       }}
   when: monitoring_stack_scrape_fleet_agents | bool
   changed_when: false

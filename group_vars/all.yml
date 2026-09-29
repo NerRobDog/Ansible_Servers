@@ -320,3 +320,12 @@ monitoring_stack_alert_telegram_enabled: >-
 monitoring_stack_enable_logs: true
 monitoring_stack_scrape_fleet_agents: true
 monitoring_stack_scrape_openwrt_agents: true
+# The Remnawave panel is not deployed from this repo; its agent is a hand-made compose in
+# /opt/monitoring-agent (cAdvisor on 8088, 8080 is taken there).
+monitoring_stack_extra_scrape_hosts:
+  - key: rw-panel
+    value:
+      ansible_host: 100.106.144.14
+      monitoring:
+        agent_bind_address: 100.106.144.14
+        agent_cadvisor_port: 8088
