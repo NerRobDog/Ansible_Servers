@@ -1,0 +1,22 @@
+#!/bin/sh
+# Managed by Ansible role vnc_desktop. Do not edit.
+# Run inside Xvnc :{{ vnc_desktop_display }} when a client connects.
+
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+
+# Force LANG so dbus-launch picks up a sane default; Xvnc inherits a
+# minimal env.
+export LANG="${LANG:-en_US.UTF-8}"
+export XDG_CURRENT_DESKTOP="{{ {'kde':'KDE','gnome':'GNOME','xfce':'XFCE'}[vnc_desktop_environment] }}"
+
+# Suppress GLX/animation issues that plague some DEs over Xvnc.
+export LIBGL_ALWAYS_SOFTWARE=1
+
+{% if vnc_desktop_environment == "kde" %}
+exec dbus-run-session -- /usr/bin/startplasma-x11
+{% elif vnc_desktop_environment == "gnome" %}
+exec dbus-run-session -- /usr/bin/gnome-session
+{% else %}
+exec dbus-run-session -- /usr/bin/startxfce4
+{% endif %}

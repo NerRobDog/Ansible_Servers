@@ -1,0 +1,7 @@
+---
+- name: Restart jellyfin compose stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ jellyfin_compose_dir }}"
+    state: present
+    recreate: always
+  listen: jellyfin_recreate

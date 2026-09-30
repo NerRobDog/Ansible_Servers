@@ -1,0 +1,37 @@
+---
+obico_enabled: true
+
+# Self-host Obico server. Public ML detector by default — running ml_api on
+# the N100 doubles CPU pressure during prints. Flip to true if you want full
+# self-host (compose stack will add the ml_api service with CPU-only torch).
+obico_self_host_ml: false
+
+# Repo to clone (server only — printer plugin lives on the printer host).
+obico_repo_url: "https://github.com/TheSpaghettiDetective/obico-server.git"
+obico_repo_ref: "release"
+obico_install_dir: /opt/obico-server
+
+obico_user: deploy
+obico_group: deploy
+
+# Hostname Obico advertises (used in webcam + email links). Default = local
+# hostname; override to ZeroTier IP / domain when you reverse-proxy.
+obico_site_using_https: false
+obico_site_url: "http://{{ ansible_hostname }}.local"
+
+# Internal docker-compose ports. Web UI on 3334, sandboxed websocket on 3335.
+obico_web_port: 3334
+obico_ws_port: 3335
+
+# Email config (Obico needs SMTP for password reset + alerts).
+# Empty => Obico runs but email alerts won't deliver — not critical for a
+# single-user home setup, you can still print and watch failures inline.
+obico_email_host: ""
+obico_email_port: 587
+obico_email_use_tls: true
+obico_email_host_user: ""
+obico_email_host_password_env: "OBICO_EMAIL_PASSWORD"
+obico_email_default_from: ""
+
+# Telegram bot integration (optional — Obico can DM failure alerts).
+obico_telegram_bot_token_env: "OBICO_TELEGRAM_BOT_TOKEN"

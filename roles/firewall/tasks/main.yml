@@ -84,6 +84,26 @@
     proto: tcp
   when: firewall_open_caddy_monitor_port | bool
 
+- name: Allow scoped TCP ports per source CIDR
+  community.general.ufw:
+    rule: allow
+    src: "{{ item.0.from }}"
+    port: "{{ item.1 | string }}"
+    proto: tcp
+  loop: "{{ firewall_scoped_rules | subelements('tcp', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.0.from }}:tcp/{{ item.1 }}"
+
+- name: Allow scoped UDP ports per source CIDR
+  community.general.ufw:
+    rule: allow
+    src: "{{ item.0.from }}"
+    port: "{{ item.1 | string }}"
+    proto: udp
+  loop: "{{ firewall_scoped_rules | subelements('udp', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.0.from }}:udp/{{ item.1 }}"
+
 - name: Enable UFW
   community.general.ufw:
     state: enabled

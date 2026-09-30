@@ -1,0 +1,37 @@
+---
+jellyfin_enabled: true
+
+jellyfin_image: "jellyfin/jellyfin:10.10.7"
+jellyfin_container_name: jellyfin
+jellyfin_data_dir: /opt/jellyfin/config
+jellyfin_cache_dir: /opt/jellyfin/cache
+jellyfin_compose_dir: /opt/jellyfin
+jellyfin_user: deploy
+jellyfin_group: deploy
+
+# QuickSync acceleration. For transcode-only Jellyfin needs just the render
+# node — `card0/card1` are the display node, irrelevant in a headless server
+# container. Set jellyfin_enable_qsv: false to skip mounting /dev/dri entirely.
+jellyfin_enable_qsv: true
+jellyfin_dri_devices:
+  - /dev/dri/renderD128
+
+# Bind to all interfaces by default — gated by the host firewall + LAN/ZT.
+jellyfin_http_port: 8096
+jellyfin_https_port: 8920
+jellyfin_bind_address: "0.0.0.0"
+jellyfin_published_url: ""  # optional, e.g. http://n100.local:8096
+
+# Library mountpoints exposed to the container as read-only by default.
+# Each entry: {host: "/path/on/host", container: "/path/inside/container",
+#              ro: true|false}
+jellyfin_libraries:
+  - host: /media
+    container: /media
+    ro: false
+  - host: /mnt
+    container: /mnt
+    ro: false
+
+jellyfin_compose_file: "{{ jellyfin_compose_dir }}/docker-compose.yml"
+jellyfin_extra_env: {}

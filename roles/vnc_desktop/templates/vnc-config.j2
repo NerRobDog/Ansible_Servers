@@ -1,0 +1,11 @@
+# Managed by Ansible role vnc_desktop. Do not edit.
+# Per-user TigerVNC server config.
+
+geometry={{ vnc_desktop_geometry }}
+depth={{ vnc_desktop_color_depth }}
+# Apple Screen Sharing expects VncAuth (RFB 3.3 password). Disable the more
+# modern types — Apple's client falls back to "unknown auth method" otherwise.
+SecurityTypes=VncAuth
+# Bind to all interfaces; firewall scopes the actual exposure.
+localhost=no
+alwaysshared=yes

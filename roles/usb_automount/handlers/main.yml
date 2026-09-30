@@ -1,0 +1,15 @@
+---
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen: usb_automount_systemd_reload
+
+- name: Reload udev rules
+  ansible.builtin.command: udevadm control --reload-rules
+  listen: usb_automount_udev_reload
+  changed_when: true
+
+- name: Trigger udev for already-attached devices
+  ansible.builtin.command: udevadm trigger --subsystem-match=block --action=add
+  listen: usb_automount_udev_reload
+  changed_when: true

@@ -10,6 +10,8 @@ hosts.plain.ini
 
 # Local/operator-only files
 fleet.yml
+fleet.home.yml
+hosts.home.ini
 fleet.openwrt.yml
 openwrt-fleet.yml
 openwrt-fleet.yaml

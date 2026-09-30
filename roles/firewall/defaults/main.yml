@@ -5,6 +5,14 @@ firewall_public_tcp_ports:
   - 443
 firewall_allowed_tcp_ports: []
 firewall_allowed_udp_ports: []
+
+# Source-scoped rules. Each entry opens TCP/UDP ports only for traffic from
+# the listed CIDR. Empty list = no scoped rules. Use this for LAN-only or
+# ZeroTier-only services that you don't want exposed publicly.
+#
+# Each entry: {from: "<cidr>", tcp: [...], udp: [...]}.
+# Port ranges supported via UFW syntax: "47998:48010".
+firewall_scoped_rules: []
 firewall_auto_allow_remnawave_node_port: true
 firewall_open_caddy_monitor_port: false
 firewall_caddy_monitor_port: "{{ remnawave_caddy_monitor_port | default(8443) }}"
