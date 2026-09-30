@@ -136,6 +136,9 @@ hosts:
 - Подключение нод:
   - автоматически берёт хосты с `feature_monitoring_agent=true` из `fleet_hosts`.
   - скрапит `node_exporter`/`cadvisor` по `ansible_host` и monitoring-портам.
+  - хосты вне флота (панель Remnawave) добавляются через `monitoring_stack_extra_scrape_hosts`
+    в `group_vars/all.yml`: те же задания и те же алерты `Fleet*`, агент на таком хосте
+    ставится вручную.
 - Загрузка после reboot: аналогичный `monitoring-stack.service` (та же причина —
   `monitoring_stack_bind_address` по умолчанию равен tailnet-IP хоста).
   Отключается через `monitoring_stack_manage_boot_unit: false`.
